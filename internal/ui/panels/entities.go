@@ -332,7 +332,7 @@ func BuildSceneTree(state *hue.BridgeState) []*TreeNode {
 		groupNode := &TreeNode{
 			Label:    label,
 			Item:     nil, // Group header, not selectable as entity
-			Expanded: true,
+			Expanded: false, // Start collapsed
 		}
 
 		for _, scene := range groupScenes[entry.id] {
@@ -583,14 +583,20 @@ func BuildHierarchyTree(state *hue.BridgeState) []*TreeNode {
 		}
 
 		label := groupName
+		entityType := EntityRoom
 		if isZone {
 			label = groupName + " (zone)"
+			entityType = EntityZone
 		}
 
 		groupNode := &TreeNode{
-			Label:    label,
-			Item:     nil, // Group header
-			Expanded: true,
+			Label: label,
+			Item: &EntityItem{
+				ID:   groupID,
+				Name: groupName,
+				Type: entityType,
+			},
+			Expanded: false, // Start collapsed
 		}
 
 		// Collect lights in this group (through device children)
@@ -655,9 +661,12 @@ func BuildHierarchyTree(state *hue.BridgeState) []*TreeNode {
 		// Lights category
 		if len(groupLights) > 0 {
 			lightsNode := &TreeNode{
-				Label:    fmt.Sprintf("Lights (%d)", len(groupLights)),
-				Item:     nil,
-				Expanded: true,
+				Label: fmt.Sprintf("Lights (%d)", len(groupLights)),
+				Item: &EntityItem{
+					ID:   groupID + ":lights",
+					Name: "Lights",
+				},
+				Expanded: false, // Start collapsed
 			}
 			for _, light := range groupLights {
 				lightsNode.Children = append(lightsNode.Children, buildLightNode(light, state))
@@ -668,8 +677,11 @@ func BuildHierarchyTree(state *hue.BridgeState) []*TreeNode {
 		// Devices category (non-light devices)
 		if len(groupDevices) > 0 {
 			devicesNode := &TreeNode{
-				Label:    fmt.Sprintf("Devices (%d)", len(groupDevices)),
-				Item:     nil,
+				Label: fmt.Sprintf("Devices (%d)", len(groupDevices)),
+				Item: &EntityItem{
+					ID:   groupID + ":devices",
+					Name: "Devices",
+				},
 				Expanded: false, // Start collapsed
 			}
 			for _, device := range groupDevices {
@@ -694,8 +706,11 @@ func BuildHierarchyTree(state *hue.BridgeState) []*TreeNode {
 			})
 
 			scenesNode := &TreeNode{
-				Label:    fmt.Sprintf("Scenes (%d)", len(scenes)),
-				Item:     nil,
+				Label: fmt.Sprintf("Scenes (%d)", len(scenes)),
+				Item: &EntityItem{
+					ID:   groupID + ":scenes",
+					Name: "Scenes",
+				},
 				Expanded: false, // Start collapsed
 			}
 			for _, scene := range scenes {
@@ -771,9 +786,12 @@ func BuildHierarchyTree(state *hue.BridgeState) []*TreeNode {
 	// Add ungrouped section if there are any ungrouped items
 	if len(ungroupedLights) > 0 || len(ungroupedDevices) > 0 {
 		ungroupedNode := &TreeNode{
-			Label:    "─── Ungrouped ───",
-			Item:     nil,
-			Expanded: true,
+			Label: "─── Ungrouped ───",
+			Item: &EntityItem{
+				ID:   "_ungrouped",
+				Name: "Ungrouped",
+			},
+			Expanded: false, // Start collapsed
 		}
 
 		if len(ungroupedLights) > 0 {
@@ -790,9 +808,12 @@ func BuildHierarchyTree(state *hue.BridgeState) []*TreeNode {
 			})
 
 			lightsNode := &TreeNode{
-				Label:    fmt.Sprintf("Lights (%d)", len(ungroupedLights)),
-				Item:     nil,
-				Expanded: true,
+				Label: fmt.Sprintf("Lights (%d)", len(ungroupedLights)),
+				Item: &EntityItem{
+					ID:   "_ungrouped:lights",
+					Name: "Lights",
+				},
+				Expanded: false, // Start collapsed
 			}
 			for _, light := range ungroupedLights {
 				lightsNode.Children = append(lightsNode.Children, buildLightNode(light, state))
@@ -814,8 +835,11 @@ func BuildHierarchyTree(state *hue.BridgeState) []*TreeNode {
 			})
 
 			devicesNode := &TreeNode{
-				Label:    fmt.Sprintf("Devices (%d)", len(ungroupedDevices)),
-				Item:     nil,
+				Label: fmt.Sprintf("Devices (%d)", len(ungroupedDevices)),
+				Item: &EntityItem{
+					ID:   "_ungrouped:devices",
+					Name: "Devices",
+				},
 				Expanded: false,
 			}
 			for _, device := range ungroupedDevices {

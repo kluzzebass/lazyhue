@@ -26,6 +26,7 @@ type Model struct {
 	// Configuration
 	config      *config.Config
 	credentials *config.CredentialStore
+	uiState     *config.UIStateStore
 
 	// Bridge management
 	manager *hue.Manager
@@ -66,7 +67,7 @@ type Model struct {
 }
 
 // New creates a new application model.
-func New(cfg *config.Config, creds *config.CredentialStore) Model {
+func New(cfg *config.Config, creds *config.CredentialStore, uiState *config.UIStateStore) Model {
 	styles := ui.DefaultStyles()
 
 	// Create panels indexed by ID
@@ -102,6 +103,7 @@ func New(cfg *config.Config, creds *config.CredentialStore) Model {
 	m := Model{
 		config:       cfg,
 		credentials:  creds,
+		uiState:      uiState,
 		manager:      hue.NewManager(creds),
 		styles:       styles,
 		panelMap:     panelMap,
@@ -116,6 +118,11 @@ func New(cfg *config.Config, creds *config.CredentialStore) Model {
 
 	// Initialize keybindings - handlers are defined here, right next to keys
 	m.initBindings()
+
+	// Restore last selected bridge from saved state
+	if uiState.LastSelectedBridgeID != "" {
+		m.bridgePanel().SetInitialSelection(uiState.LastSelectedBridgeID)
+	}
 
 	return m
 }
@@ -214,9 +221,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		bridge := m.manager.GetBridge(msg.BridgeID)
 		if bridge != nil {
 			bridge.Status = hue.StatusConnected
-			m.manager.SetActiveBridge(msg.BridgeID)
 			m.setStatus("Connected to "+bridge.Info.Name, false)
-			m.updateBridgePanel()
+			m.updateBridgePanel() // This will set active bridge if none is set
 			cmds = append(cmds, syncBridgeState(bridge))
 		}
 
@@ -231,6 +237,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case StateSyncedMsg:
 		m.refreshAllPanels()
 		m.updateBridgePanel()
+		// Only restore expanded state if this is the active bridge
+		// (otherwise we'd apply wrong paths to wrong tree)
+		if msg.BridgeID == m.manager.GetActiveBridgeID() {
+			m.restoreExpandedState(msg.BridgeID)
+		}
 		m.clearStatus()
 
 	case StateSyncErrorMsg:
@@ -357,9 +368,7 @@ func (m *Model) updateFocusedPanel(msg tea.Msg) tea.Cmd {
 	}
 
 	if panel := m.focusedPanel(); panel != nil {
-		cmd := panel.Update(msg)
-		m.syncSelectionFromFocusedPanel()
-		return cmd
+		return panel.Update(msg)
 	}
 
 	return nil

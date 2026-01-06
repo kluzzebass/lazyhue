@@ -25,8 +25,15 @@ func main() {
 		os.Exit(1)
 	}
 
+	// Load UI state
+	uiState, err := config.LoadUIState()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error loading UI state: %v\n", err)
+		os.Exit(1)
+	}
+
 	// Create the application model
-	model := app.New(cfg, creds)
+	model := app.New(cfg, creds, uiState)
 
 	// Create the program with options
 	p := tea.NewProgram(

@@ -79,6 +79,12 @@ func (m *Model) dispatch(action ui.Action) tea.Cmd {
 		m.toggleHelp()
 	case ui.ActionQuit:
 		m.quitting = true
+		// Save state before quitting
+		if bridgeID := m.manager.GetActiveBridgeID(); bridgeID != "" {
+			m.saveExpandedState(bridgeID)
+			m.uiState.LastSelectedBridgeID = bridgeID
+			_ = m.uiState.Save()
+		}
 		return tea.Quit
 	}
 

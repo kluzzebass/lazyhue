@@ -42,6 +42,11 @@ func NewBridgePanel(styles ui.Styles, panelKey string) *BridgePanel {
 	}
 }
 
+// SetInitialSelection sets the initial selected bridge ID (used to restore selection on startup).
+func (p *BridgePanel) SetInitialSelection(bridgeID string) {
+	p.selectedID = bridgeID
+}
+
 // SetBridges updates the bridge list.
 func (p *BridgePanel) SetBridges(bridges []*hue.Bridge, activeBridgeID string) {
 	p.bridges = bridges

@@ -79,7 +79,14 @@ func (m *Model) refreshHierarchyPanel() {
 		return
 	}
 
-	m.hierarchyPanel().SetRoots(panels.BuildHierarchyTree(state))
+	// Don't set empty tree - this would clear the expanded state
+	// Wait until we actually have data
+	tree := panels.BuildHierarchyTree(state)
+	if len(tree) == 0 {
+		return
+	}
+
+	m.hierarchyPanel().SetRoots(tree)
 }
 
 func (m *Model) updateBridgePanel() {
@@ -88,6 +95,22 @@ func (m *Model) updateBridgePanel() {
 		return bridges[i].Info.Name < bridges[j].Info.Name
 	})
 	m.bridgePanel().SetBridges(bridges, m.manager.GetActiveBridgeID())
+
+	// If no active bridge is set yet, sync it to the panel's selection
+	// This ensures the hierarchy shows the correct bridge when data syncs
+	if m.manager.GetActiveBridgeID() == "" {
+		if selected := m.bridgePanel().SelectedBridge(); selected != nil && selected.IsConnected() {
+			m.manager.SetActiveBridge(selected.Info.ID)
+		}
+	}
+
+	// If no item is selected, sync selection from bridge panel
+	// This ensures the details panel shows bridge info on startup
+	if m.selectedItem == nil {
+		if item, ok := m.bridgePanel().SelectedEntity(); ok {
+			m.selectedItem = item
+		}
+	}
 }
 
 func (m *Model) updateDetailPanel() {
@@ -116,11 +139,48 @@ func (m *Model) syncSelectionFromFocusedPanel() {
 		}
 	}
 
-	// Clear hierarchy when a disconnected bridge is selected
+	// When a bridge is selected, update the hierarchy automatically
 	if m.focusedPanelID() == PanelIDBridges {
-		if bridge := m.bridgePanel().SelectedBridge(); bridge != nil && !bridge.IsConnected() {
-			m.hierarchyPanel().SetRoots(nil)
+		if bridge := m.bridgePanel().SelectedBridge(); bridge != nil {
+			if bridge.IsConnected() {
+				currentID := m.manager.GetActiveBridgeID()
+
+				// If clicking the same bridge, do nothing
+				if currentID == bridge.Info.ID {
+					return
+				}
+
+				// Save current bridge's expanded state before switching
+				if currentID != "" {
+					m.saveExpandedState(currentID)
+				}
+
+				// Set as active and show its hierarchy
+				m.manager.SetActiveBridge(bridge.Info.ID)
+				m.refreshHierarchyPanel()
+
+				// Restore new bridge's expanded state
+				m.restoreExpandedState(bridge.Info.ID)
+			} else {
+				// Clear hierarchy for disconnected bridges
+				m.hierarchyPanel().SetRoots(nil)
+			}
 		}
+	}
+}
+
+// saveExpandedState saves the current hierarchy's expanded state for a bridge.
+func (m *Model) saveExpandedState(bridgeID string) {
+	states := m.hierarchyPanel().GetNodeStates()
+	m.uiState.SetNodeStates(bridgeID, states)
+	_ = m.uiState.Save() // Best effort save
+}
+
+// restoreExpandedState restores the expanded state for a bridge.
+func (m *Model) restoreExpandedState(bridgeID string) {
+	states := m.uiState.GetNodeStates(bridgeID)
+	if len(states) > 0 {
+		m.hierarchyPanel().SetNodeStates(states)
 	}
 }
 

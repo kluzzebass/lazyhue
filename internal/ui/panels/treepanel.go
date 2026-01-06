@@ -64,13 +64,21 @@ func (p *TreePanel) SetRoots(roots []*TreeNode) {
 	}
 }
 
+// nodeKey returns a stable key for a node (entity ID if available, otherwise label).
+func nodeKey(node *TreeNode) string {
+	if node.Item != nil && node.Item.ID != "" {
+		return node.Item.ID
+	}
+	return node.Label
+}
+
 // getExpandedState captures the expanded state of all nodes, keyed by path.
 func (p *TreePanel) getExpandedState() map[string]bool {
 	state := make(map[string]bool)
 	var walk func(nodes []*TreeNode, path string)
 	walk = func(nodes []*TreeNode, path string) {
 		for _, node := range nodes {
-			nodePath := path + "/" + node.Label
+			nodePath := path + "/" + nodeKey(node)
 			state[nodePath] = node.Expanded
 			if len(node.Children) > 0 {
 				walk(node.Children, nodePath)
@@ -89,7 +97,7 @@ func (p *TreePanel) restoreExpandedState(state map[string]bool) {
 	var walk func(nodes []*TreeNode, path string)
 	walk = func(nodes []*TreeNode, path string) {
 		for _, node := range nodes {
-			nodePath := path + "/" + node.Label
+			nodePath := path + "/" + nodeKey(node)
 			if expanded, ok := state[nodePath]; ok {
 				node.Expanded = expanded
 			}
@@ -99,6 +107,46 @@ func (p *TreePanel) restoreExpandedState(state map[string]bool) {
 		}
 	}
 	walk(p.roots, "")
+}
+
+// GetNodeStates returns a map of all node paths to their expanded state.
+func (p *TreePanel) GetNodeStates() map[string]bool {
+	states := make(map[string]bool)
+	var walk func(nodes []*TreeNode, path string)
+	walk = func(nodes []*TreeNode, path string) {
+		for _, node := range nodes {
+			nodePath := path + "/" + nodeKey(node)
+			// Only save state for nodes that have children (can be expanded)
+			if len(node.Children) > 0 {
+				states[nodePath] = node.Expanded
+				walk(node.Children, nodePath)
+			}
+		}
+	}
+	walk(p.roots, "")
+	return states
+}
+
+// SetNodeStates applies saved expanded/collapsed states to the tree.
+func (p *TreePanel) SetNodeStates(states map[string]bool) {
+	if len(states) == 0 {
+		return
+	}
+	var walk func(nodes []*TreeNode, path string)
+	walk = func(nodes []*TreeNode, path string) {
+		for _, node := range nodes {
+			nodePath := path + "/" + nodeKey(node)
+			// Apply saved state if it exists, otherwise keep default
+			if expanded, ok := states[nodePath]; ok {
+				node.Expanded = expanded
+			}
+			if len(node.Children) > 0 {
+				walk(node.Children, nodePath)
+			}
+		}
+	}
+	walk(p.roots, "")
+	p.rebuildFlatList()
 }
 
 // rebuildFlatList creates a flat list of visible nodes for navigation.
@@ -354,10 +402,18 @@ func (p *TreePanel) renderNode(node *TreeNode, selected, active bool) string {
 			line = line + strings.Repeat(" ", lineWidth-visibleWidth)
 		}
 
+		// Determine if this is a leaf node (light, device, scene, etc.) or a folder
+		isLeaf := node.Item != nil && (node.Item.Type == EntityLight ||
+			node.Item.Type == EntityDevice ||
+			node.Item.Type == EntityScene ||
+			node.Item.Type == EntityBridge ||
+			node.Item.Type == EntityEntertainment)
+
 		var style lipgloss.Style
 		if selected && active {
 			style = p.styles.SelectedItem
-		} else if node.Item == nil {
+		} else if !isLeaf {
+			// Folders/groups are muted
 			style = p.styles.Muted.Bold(true)
 		} else {
 			style = p.styles.ListItem
