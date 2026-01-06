@@ -6,7 +6,6 @@ import (
 
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
 	"github.com/kluzzebass/lazyhue/internal/hue"
 	"github.com/kluzzebass/lazyhue/internal/ui"
 	"github.com/openhue/openhue-go"
@@ -42,8 +41,10 @@ func (p *DetailsPanel) SetItem(item *EntityItem, state *hue.BridgeState) {
 func (p *DetailsPanel) SetSize(width, height int) {
 	p.width = width
 	p.height = height
-	p.viewport.Width = width - 4
-	p.viewport.Height = height - 4
+
+	// Content area: width minus borders (2), height minus borders (2)
+	p.viewport.Width = max(1, width-2)
+	p.viewport.Height = max(1, height-2)
 	p.updateContent()
 }
 
@@ -187,12 +188,18 @@ func (p *DetailsPanel) Update(msg tea.Msg) (*DetailsPanel, tea.Cmd) {
 
 // View renders the details panel.
 func (p *DetailsPanel) View(active bool) string {
-	var panelStyle lipgloss.Style
-	if active {
-		panelStyle = p.styles.ActivePanel
-	} else {
-		panelStyle = p.styles.RightPanel
+	content := p.viewport.View()
+
+	// Count content lines for scroll indicator
+	contentLines := strings.Count(p.viewport.View(), "\n") + 1
+	totalLines := p.viewport.TotalLineCount()
+
+	cfg := ui.BorderConfig{
+		Title:       "[0] Details",
+		ScrollPos:   p.viewport.YOffset,
+		TotalHeight: totalLines,
+		ViewHeight:  contentLines,
 	}
 
-	return panelStyle.Width(p.width).Height(p.height).Render(p.viewport.View())
+	return ui.RenderBorderedPanel(content, p.width, p.height, active, p.styles, cfg)
 }

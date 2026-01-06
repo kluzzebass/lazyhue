@@ -15,6 +15,14 @@ type KeyMap struct {
 	NextPane key.Binding
 	PrevPane key.Binding
 
+	// Panel focus (number keys)
+	FocusDetail  key.Binding
+	FocusBridges key.Binding
+	FocusGroups  key.Binding
+	FocusLights  key.Binding
+	FocusDevices key.Binding
+	FocusScenes  key.Binding
+
 	// Selection
 	Select key.Binding
 	Back   key.Binding
@@ -60,11 +68,11 @@ func DefaultKeyMap() KeyMap {
 		),
 		Left: key.NewBinding(
 			key.WithKeys("left", "h"),
-			key.WithHelp("←/h", "left"),
+			key.WithHelp("←/h", "left/prev tab"),
 		),
 		Right: key.NewBinding(
 			key.WithKeys("right", "l"),
-			key.WithHelp("→/l", "right"),
+			key.WithHelp("→/l", "right/next tab"),
 		),
 		Top: key.NewBinding(
 			key.WithKeys("g"),
@@ -81,6 +89,30 @@ func DefaultKeyMap() KeyMap {
 		PrevPane: key.NewBinding(
 			key.WithKeys("shift+tab"),
 			key.WithHelp("shift+tab", "prev pane"),
+		),
+		FocusDetail: key.NewBinding(
+			key.WithKeys("0"),
+			key.WithHelp("0", "detail"),
+		),
+		FocusBridges: key.NewBinding(
+			key.WithKeys("1"),
+			key.WithHelp("1", "bridges"),
+		),
+		FocusGroups: key.NewBinding(
+			key.WithKeys("2"),
+			key.WithHelp("2", "groups"),
+		),
+		FocusLights: key.NewBinding(
+			key.WithKeys("3"),
+			key.WithHelp("3", "lights"),
+		),
+		FocusDevices: key.NewBinding(
+			key.WithKeys("4"),
+			key.WithHelp("4", "devices"),
+		),
+		FocusScenes: key.NewBinding(
+			key.WithKeys("5"),
+			key.WithHelp("5", "scenes"),
 		),
 		Select: key.NewBinding(
 			key.WithKeys("enter"),
@@ -171,11 +203,11 @@ func (k KeyMap) FullHelp() [][]key.Binding {
 	return [][]key.Binding{
 		{k.Up, k.Down, k.Left, k.Right, k.Top, k.Bottom},
 		{k.NextPane, k.PrevPane, k.Select, k.Back},
+		{k.FocusDetail, k.FocusBridges, k.FocusGroups, k.FocusLights, k.FocusDevices, k.FocusScenes},
 		{k.Toggle, k.TurnOn, k.TurnOff, k.BrightnessUp, k.BrightnessDown},
 		{k.ColorPicker, k.TempPicker, k.ScenePicker},
 		{k.VisualMode, k.SelectAll},
-		{k.BridgePicker, k.NextBridge, k.PrevBridge, k.Refresh, k.PairBridge},
+		{k.NextBridge, k.PrevBridge, k.Refresh, k.PairBridge},
 		{k.Help, k.Quit},
 	}
 }
-

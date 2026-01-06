@@ -7,7 +7,6 @@ import (
 
 	"github.com/charmbracelet/bubbles/list"
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
 	"github.com/kluzzebass/lazyhue/internal/hue"
 	"github.com/kluzzebass/lazyhue/internal/ui"
 	"github.com/openhue/openhue-go"
@@ -21,6 +20,8 @@ const (
 	EntityZone
 	EntityLight
 	EntityScene
+	EntityDevice
+	EntityEntertainment
 )
 
 // EntityItem wraps an entity for the list component.
@@ -81,6 +82,8 @@ func NewEntityPanel(styles ui.Styles) *EntityPanel {
 	l.SetShowStatusBar(false)
 	l.SetFilteringEnabled(true)
 	l.SetShowHelp(false)
+	l.SetShowPagination(false)
+	l.InfiniteScrolling = false
 
 	return &EntityPanel{
 		list:   l,
@@ -98,7 +101,12 @@ func (p *EntityPanel) SetItems(items []list.Item) {
 func (p *EntityPanel) SetSize(width, height int) {
 	p.width = width
 	p.height = height
-	p.list.SetSize(width-4, height-4)
+
+	// Content area: width minus borders (2), height minus borders (2)
+	contentWidth := max(1, width-2)
+	contentHeight := max(1, height-2)
+
+	p.list.SetSize(contentWidth, contentHeight)
 }
 
 // SetTitle sets the panel title.
@@ -125,22 +133,18 @@ func (p *EntityPanel) Update(msg tea.Msg) (*EntityPanel, tea.Cmd) {
 
 // View renders the entity panel.
 func (p *EntityPanel) View(active bool) string {
-	titleStyle := p.styles.PanelTitle
-	title := titleStyle.Render(p.title)
+	content := p.list.View()
 
-	var panelStyle lipgloss.Style
-	if active {
-		panelStyle = p.styles.ActivePanel
-	} else {
-		panelStyle = p.styles.LeftPanel
+	cfg := ui.BorderConfig{
+		Title:       p.title,
+		ItemIndex:   p.list.Index(),
+		ItemCount:   len(p.list.Items()),
+		ScrollPos:   p.list.Index(),
+		TotalHeight: len(p.list.Items()),
+		ViewHeight:  p.height - 2,
 	}
 
-	content := lipgloss.JoinVertical(lipgloss.Left,
-		title,
-		p.list.View(),
-	)
-
-	return panelStyle.Width(p.width).Height(p.height).Render(content)
+	return ui.RenderBorderedPanel(content, p.width, p.height, active, p.styles, cfg)
 }
 
 // BuildRoomItems converts rooms to list items.
@@ -191,15 +195,32 @@ func BuildLightItems(state *hue.BridgeState) []list.Item {
 	return items
 }
 
-// BuildSceneItems converts scenes to list items for a specific group.
-func BuildSceneItems(state *hue.BridgeState, groupID string) []list.Item {
-	scenes := state.RoomScenes(groupID)
+// BuildSceneItems converts all scenes to list items, including room/zone context.
+func BuildSceneItems(state *hue.BridgeState) []list.Item {
+	scenes := state.AllScenes()
 	items := make([]list.Item, 0, len(scenes))
+
+	// Build room ID -> name lookup
+	roomNames := make(map[string]string)
+	for _, room := range state.AllRooms() {
+		if room.Id != nil && room.Metadata != nil && room.Metadata.Name != nil {
+			roomNames[*room.Id] = *room.Metadata.Name
+		}
+	}
+
 	for _, scene := range scenes {
 		name := ""
 		if scene.Metadata != nil && scene.Metadata.Name != nil {
 			name = *scene.Metadata.Name
 		}
+
+		// Add room/zone context
+		if scene.Group != nil && scene.Group.Rid != nil {
+			if roomName, ok := roomNames[*scene.Group.Rid]; ok {
+				name = name + " (" + roomName + ")"
+			}
+		}
+
 		id := ""
 		if scene.Id != nil {
 			id = *scene.Id
@@ -215,13 +236,78 @@ func BuildSceneItems(state *hue.BridgeState, groupID string) []list.Item {
 	return items
 }
 
+// BuildZoneItems returns an empty list (zones not yet supported by openhue-go Home).
+func BuildZoneItems(state *hue.BridgeState) []list.Item {
+	// Zones are not yet exposed via openhue-go Home interface
+	return nil
+}
+
+// BuildDeviceItems converts devices to list items, filtering out lights and bridges.
+func BuildDeviceItems(state *hue.BridgeState) []list.Item {
+	devices := state.AllDevices()
+	items := make([]list.Item, 0, len(devices))
+
+	// Build a set of device IDs that own lights (to exclude them)
+	lightOwnerIDs := make(map[string]bool)
+	for _, light := range state.AllLights() {
+		if light.Owner != nil && light.Owner.Rid != nil {
+			lightOwnerIDs[*light.Owner.Rid] = true
+		}
+	}
+
+	for _, device := range devices {
+		id := ""
+		if device.Id != nil {
+			id = *device.Id
+		}
+
+		// Skip devices that own lights (these are light fixtures)
+		if lightOwnerIDs[id] {
+			continue
+		}
+
+		// Skip bridge devices (check product archetype)
+		if device.ProductData != nil && device.ProductData.ProductArchetype != nil {
+			archetype := string(*device.ProductData.ProductArchetype)
+			if archetype == "bridge_v2" {
+				continue
+			}
+		}
+
+		name := ""
+		if device.Metadata != nil && device.Metadata.Name != nil {
+			name = *device.Metadata.Name
+		}
+
+		items = append(items, EntityItem{
+			ID:     id,
+			Name:   name,
+			Type:   EntityDevice,
+			IsOn:   false, // Devices don't have a direct on/off
+			RawPtr: device,
+		})
+	}
+	return items
+}
+
+// BuildEntertainmentItems returns an empty list (entertainment areas not yet supported by openhue-go Home).
+func BuildEntertainmentItems(state *hue.BridgeState) []list.Item {
+	// Entertainment areas are not yet exposed via openhue-go Home interface
+	return nil
+}
+
 // GetRoomFromItem extracts the openhue.RoomGet from an EntityItem.
 func GetRoomFromItem(item EntityItem) (openhue.RoomGet, bool) {
-	if item.Type != EntityRoom {
+	if item.Type == EntityRoom {
+		room, ok := item.RawPtr.(openhue.RoomGet)
+		return room, ok
+	}
+	// Also support zones since they have similar structure
+	if item.Type == EntityZone {
+		// Zones can be treated similarly for grouped light purposes
 		return openhue.RoomGet{}, false
 	}
-	room, ok := item.RawPtr.(openhue.RoomGet)
-	return room, ok
+	return openhue.RoomGet{}, false
 }
 
 // GetLightFromItem extracts the openhue.LightGet from an EntityItem.
@@ -231,4 +317,23 @@ func GetLightFromItem(item EntityItem) (openhue.LightGet, bool) {
 	}
 	light, ok := item.RawPtr.(openhue.LightGet)
 	return light, ok
+}
+
+
+// GetDeviceFromItem extracts the openhue.DeviceGet from an EntityItem.
+func GetDeviceFromItem(item EntityItem) (openhue.DeviceGet, bool) {
+	if item.Type != EntityDevice {
+		return openhue.DeviceGet{}, false
+	}
+	device, ok := item.RawPtr.(openhue.DeviceGet)
+	return device, ok
+}
+
+// GetSceneFromItem extracts the openhue.SceneGet from an EntityItem.
+func GetSceneFromItem(item EntityItem) (openhue.SceneGet, bool) {
+	if item.Type != EntityScene {
+		return openhue.SceneGet{}, false
+	}
+	scene, ok := item.RawPtr.(openhue.SceneGet)
+	return scene, ok
 }

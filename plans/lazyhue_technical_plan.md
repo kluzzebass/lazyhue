@@ -93,6 +93,7 @@ lazyhue/
 │   │   ├── theme.go             # Colors, styles (lipgloss)
 │   │   ├── keys.go              # Keybinding definitions
 │   │   └── panels/
+│   │       ├── bridges.go       # Bridge list panel (top-left)
 │   │       ├── entities.go      # Entity list panel (lights/rooms/zones)
 │   │       ├── details.go       # Entity details panel
 │   │       ├── header.go        # Header bar component
@@ -277,40 +278,54 @@ bridge.SyncGroupedLights(ctx) // Just grouped lights (if needed)
 ### Primary Layout
 
 ```
-┌─────────────────────────────────────────────────────────────────────┐
-│ lazyhue │ Bridge: Living Room Hub (192.168.1.50) │ ● Connected     │  <- Header
-├────────────────────┬────────────────────────────────────────────────┤
-│ [1] Rooms          │                                                │
-│ ────────────────── │  Living Room                                   │
-│ > Living Room   ● │  ──────────────────────────────                │
-│   Bedroom       ○ │  Status: 3/4 lights on                         │
-│   Kitchen       ● │  Brightness: 80%                               │
-│   Office        ○ │                                                │
-│                    │  Lights:                                       │
-│ [2] Zones          │    Ceiling Lamp      ● 100%                   │
-│ ────────────────── │    Floor Lamp        ● 60%                    │
-│   Downstairs       │    Table Light       ○ Off                    │
-│   Upstairs         │    Strip Light       ● 80%                    │
-│                    │                                                │
-│ [3] Scenes         │  Scenes:                                       │
-│ ────────────────── │    Energize  Relax  Concentrate  Dimmed       │
+┌────────────────────┬────────────────────────────────────────────────┐
+│ [1] Bridges        │ [0] Details                                    │
+│ ────────────────── │                                                │
+│ > Living Room Hub● │  Living Room                                   │
+│   Upstairs Hub   ○ │  ──────────────────────────────                │
+├────────────────────┤  Status: 3/4 lights on                         │
+│ [2] Groups         │  Brightness: 80%                               │
+│ Rooms│Zones│Ent    │                                                │
+│ ────────────────── │  Lights:                                       │
+│ > Living Room   ● │    Ceiling Lamp      ● 100%                   │
+│   Bedroom       ○ │    Floor Lamp        ● 60%                    │
+├────────────────────┤    Table Light       ○ Off                    │
+│ [3] Lights         │    Strip Light       ● 80%                    │
+│ ────────────────── │                                                │
+│   Ceiling Lamp  ● │  Scenes:                                       │
+│   Floor Lamp    ● │    Energize  Relax  Concentrate  Dimmed       │
+├────────────────────┤                                                │
+│ [4] Devices        │                                                │
+│ ────────────────── │                                                │
+│   Hue Bridge       │                                                │
+│   Motion Sensor    │                                                │
+├────────────────────┤                                                │
+│ [5] Scenes         │                                                │
+│ ────────────────── │                                                │
 │   Energize         │                                                │
 │   Relax            │                                                │
-│   Concentrate      │                                                │
 ├────────────────────┴────────────────────────────────────────────────┤
-│ ↑↓ navigate  ⏎ toggle  b brightness  c color  s scene  ? help     │  <- Status bar
+│ 0-5 panels  ↑↓ nav  ←→ tabs  ⏎ select  space toggle  P pair  q quit│
 └─────────────────────────────────────────────────────────────────────┘
 ```
 
 ### Panel Architecture
 
-| Panel | Purpose | Component |
-|-------|---------|-----------|
-| Entity List (left) | Browse rooms/zones/all lights | `bubbles/list` with custom delegate |
-| Detail View (right) | Show selected entity details, child lights, scenes | `bubbles/viewport` with dynamic content |
-| Header | Bridge selector, connection status | Static render |
-| Status Bar | Context-sensitive keybindings, messages | Static render |
-| Help Overlay | Full keybinding reference | Modal with `bubbles/viewport` |
+| Key | Panel | Purpose | Component |
+|-----|-------|---------|-----------|
+| `0` | Details | Show selected entity details, child lights, scenes | `bubbles/viewport` |
+| `1` | Bridges | List all bridges with connection status | `BridgePanel` with custom delegate |
+| `2` | Groups | Tabbed view: Rooms, Zones, Entertainment | `TabbedPanel` with tabs |
+| `3` | Lights | List all lights | `ListPanel` |
+| `4` | Devices | List all devices (bridges, sensors, etc.) | `ListPanel` |
+| `5` | Scenes | List all scenes | `ListPanel` |
+| - | Status Bar | Context-sensitive keybindings, messages | Static render |
+
+**Features:**
+- **Number key shortcuts (0-5)**: Jump directly to any panel
+- **Tab/Shift+Tab**: Cycle through panels sequentially
+- **Arrow keys in Groups panel**: Switch between Rooms/Zones/Entertainment tabs
+- **No auto-pairing**: User must explicitly press `P` to pair a bridge
 
 ### Focus Model
 
@@ -318,11 +333,12 @@ bridge.SyncGroupedLights(ctx) // Just grouped lights (if needed)
 type FocusRegion int
 
 const (
-    FocusEntityList FocusRegion = iota
-    FocusDetailView
-    FocusScenePicker
-    FocusBridgeSelector
-    FocusHelpOverlay
+    FocusDetail  FocusRegion = iota  // 0
+    FocusBridges                     // 1
+    FocusGroups                      // 2
+    FocusLights                      // 3
+    FocusDevices                     // 4
+    FocusScenes                      // 5
 )
 ```
 

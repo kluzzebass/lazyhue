@@ -38,7 +38,7 @@ func (d *DiscoveryService) Discover() ([]BridgeInfo, error) {
 	// openhue-go currently returns a single bridge
 	// We wrap it to support multiple bridges in the future
 	info := BridgeInfo{
-		ID:        extractBridgeID(bridge.IpAddress),
+		ID:        extractBridgeID(bridge.Instance),
 		Name:      bridge.Instance,
 		IPAddress: bridge.IpAddress,
 		Host:      bridge.IpAddress,
@@ -56,16 +56,25 @@ func (d *DiscoveryService) DiscoverAll() []BridgeInfo {
 	return bridges
 }
 
-// extractBridgeID derives a bridge ID from the hostname.
-// Typically the hostname is like "ecb5fa1a3e4f.local."
-func extractBridgeID(host string) string {
-	if len(host) > 0 {
-		// Strip .local. suffix if present
-		id := host
-		if len(id) > 7 && id[len(id)-7:] == ".local." {
-			id = id[:len(id)-7]
+// extractBridgeID derives a stable bridge ID from the instance name.
+// Instance is typically "Hue Bridge - AABBCC" where AABBCC is part of the MAC.
+func extractBridgeID(instance string) string {
+	// Try to extract the hex ID from "Hue Bridge - AABBCC" format
+	if len(instance) > 13 {
+		// Look for the last space-separated part
+		for i := len(instance) - 1; i >= 0; i-- {
+			if instance[i] == ' ' {
+				candidate := instance[i+1:]
+				if len(candidate) >= 6 {
+					return candidate
+				}
+				break
+			}
 		}
-		return id
+	}
+	// Fallback: use the whole instance name as ID
+	if len(instance) > 0 {
+		return instance
 	}
 	return "unknown"
 }

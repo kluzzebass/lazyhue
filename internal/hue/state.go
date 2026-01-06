@@ -262,6 +262,31 @@ func (s *BridgeState) UpdateDevices(devices map[string]openhue.DeviceGet) {
 	s.Devices = devices
 }
 
+// AllDevices returns all devices sorted by name.
+func (s *BridgeState) AllDevices() []openhue.DeviceGet {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	devices := make([]openhue.DeviceGet, 0, len(s.Devices))
+	for _, d := range s.Devices {
+		devices = append(devices, d)
+	}
+
+	sort.Slice(devices, func(i, j int) bool {
+		nameI := ""
+		nameJ := ""
+		if devices[i].Metadata != nil && devices[i].Metadata.Name != nil {
+			nameI = *devices[i].Metadata.Name
+		}
+		if devices[j].Metadata != nil && devices[j].Metadata.Name != nil {
+			nameJ = *devices[j].Metadata.Name
+		}
+		return nameI < nameJ
+	})
+
+	return devices
+}
+
 // IsRoomOn returns true if any light in the room is on.
 func (s *BridgeState) IsRoomOn(room openhue.RoomGet) bool {
 	if gl, ok := s.RoomGroupedLight(room); ok {

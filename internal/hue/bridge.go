@@ -224,3 +224,4 @@ func (b *Bridge) SyncDevices(ctx context.Context) error {
 	b.state.UpdateDevices(devices)
 	return nil
 }
+
