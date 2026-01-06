@@ -72,7 +72,7 @@ func New(cfg *config.Config, creds *config.CredentialStore) Model {
 	// Create panels indexed by ID
 	panelMap := map[string]panels.Panel{
 		PanelIDBridges:   panels.NewBridgePanel(styles, "1"),
-		PanelIDHierarchy: panels.NewTreePanel(styles, "Hierarchy", "2"),
+		PanelIDHierarchy: panels.NewTreePanel(styles, "Home", "2"),
 	}
 
 	// Panel order for keyboard focus cycling
