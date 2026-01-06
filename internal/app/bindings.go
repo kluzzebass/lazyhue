@@ -10,8 +10,7 @@ func (m *Model) initBindings() {
 	// Panel-specific bindings
 	m.panelBindings = map[string][]ui.Binding{
 		PanelIDBridges: {
-			{Keys: []string{"enter"}, Display: "<enter>", Desc: "Select", Action: ui.ActionSelect, Priority: 100},
-			{Keys: []string{"P"}, Display: "P", Desc: "Pair bridge", Action: ui.ActionPairBridge, Priority: 90},
+			{Keys: []string{"enter"}, Display: "<enter>", Desc: "Connect", Action: ui.ActionSelect, Priority: 100},
 		},
 		PanelIDHierarchy: {
 			{Keys: []string{"enter"}, Display: "<enter>", Desc: "Select/Activate", Action: ui.ActionSelect, Priority: 100},
@@ -32,8 +31,8 @@ func (m *Model) initBindings() {
 	m.globalBindings = []ui.Binding{
 		{Keys: []string{"up", "k"}, Display: "↑/k", Desc: "Up", Action: ui.ActionUp},
 		{Keys: []string{"down", "j"}, Display: "↓/j", Desc: "Down", Action: ui.ActionDown},
-		{Keys: []string{"g"}, Display: "g", Desc: "Top", Action: ui.ActionTop},
-		{Keys: []string{"G"}, Display: "G", Desc: "Bottom", Action: ui.ActionBottom},
+		{Keys: []string{"g", "home"}, Display: "g/Home", Desc: "Top", Action: ui.ActionTop},
+		{Keys: []string{"G", "end"}, Display: "G/End", Desc: "Bottom", Action: ui.ActionBottom},
 		{Keys: []string{"pgup"}, Display: "PgUp", Desc: "Page up", Action: ui.ActionPageUp},
 		{Keys: []string{"pgdown"}, Display: "PgDn", Desc: "Page down", Action: ui.ActionPageDown},
 		{Keys: []string{"tab"}, Display: "Tab", Desc: "Next panel", Action: ui.ActionNextPanel},

@@ -35,6 +35,9 @@ type PairingProgressMsg struct {
 	Message  string
 }
 
+// PairingTickMsg is sent every second to update the pairing countdown.
+type PairingTickMsg struct{}
+
 // PairingSuccessMsg is sent when pairing completes successfully.
 type PairingSuccessMsg struct {
 	BridgeID string

@@ -3,13 +3,10 @@ package panels
 import (
 	"sort"
 	"strings"
-	"time"
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/kluzzebass/lazyhue/internal/ui"
 )
-
-const minIndicatorDuration = 250 * time.Millisecond
 
 // StatusBar renders the bottom status bar with keybinding hints.
 type StatusBar struct {
@@ -23,10 +20,6 @@ type StatusBar struct {
 
 	// Popup mode overrides normal hints
 	popupHints string
-
-	// Activity tracking with minimum visibility
-	pollingUntil     time.Time
-	discoveringUntil time.Time
 }
 
 // NewStatusBar creates a new status bar.
@@ -66,30 +59,6 @@ func (s *StatusBar) ClearPopupHints() {
 // SetBindings sets the current panel's bindings for display.
 func (s *StatusBar) SetBindings(bindings []ui.Binding) {
 	s.panelBindings = bindings
-}
-
-// SetPolling sets the polling activity indicator.
-func (s *StatusBar) SetPolling(active bool) {
-	if active {
-		s.pollingUntil = time.Now().Add(minIndicatorDuration)
-	}
-}
-
-// SetDiscovering sets the discovery activity indicator.
-func (s *StatusBar) SetDiscovering(active bool) {
-	if active {
-		s.discoveringUntil = time.Now().Add(minIndicatorDuration)
-	}
-}
-
-// isPollingVisible returns true if polling indicator should be shown.
-func (s *StatusBar) isPollingVisible() bool {
-	return time.Now().Before(s.pollingUntil)
-}
-
-// isDiscoveringVisible returns true if discovery indicator should be shown.
-func (s *StatusBar) isDiscoveringVisible() bool {
-	return time.Now().Before(s.discoveringUntil)
 }
 
 // View renders the status bar.
@@ -159,23 +128,8 @@ func truncateToWidth(s string, maxWidth int) string {
 }
 
 func (s *StatusBar) buildIndicators() string {
-	var indicators []string
-
-	// Polling indicator (green when active)
-	if s.isPollingVisible() {
-		indicators = append(indicators, s.styles.Success.Render("●"))
-	} else {
-		indicators = append(indicators, s.styles.Muted.Render("○"))
-	}
-
-	// Discovery indicator (blue when active)
-	if s.isDiscoveringVisible() {
-		indicators = append(indicators, s.styles.Subtitle.Render("●"))
-	} else {
-		indicators = append(indicators, s.styles.Muted.Render("○"))
-	}
-
-	return strings.Join(indicators, " ")
+	// Indicators moved to bridge panel
+	return ""
 }
 
 func (s *StatusBar) buildHints(maxWidth int) string {

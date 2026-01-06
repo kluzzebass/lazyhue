@@ -110,14 +110,14 @@ func (m *Model) moveFocusedPanel(delta int) {
 
 func (m *Model) moveFocusedPanelToTop() {
 	if panel := m.focusedPanel(); panel != nil {
-		panel.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'g'}})
+		panel.Update(tea.KeyMsg{Type: tea.KeyHome})
 		m.syncSelectionFromFocusedPanel()
 	}
 }
 
 func (m *Model) moveFocusedPanelToBottom() {
 	if panel := m.focusedPanel(); panel != nil {
-		panel.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'G'}})
+		panel.Update(tea.KeyMsg{Type: tea.KeyEnd})
 		m.syncSelectionFromFocusedPanel()
 	}
 }

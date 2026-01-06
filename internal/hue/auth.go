@@ -1,11 +1,16 @@
 package hue
 
 import (
+	"context"
 	"errors"
+	"strings"
 	"time"
 
 	"github.com/openhue/openhue-go"
 )
+
+// ErrPairingCancelled indicates that pairing was cancelled by the user.
+var ErrPairingCancelled = errors.New("pairing cancelled")
 
 var (
 	// ErrLinkButtonNotPressed indicates the user hasn't pressed the bridge button.
@@ -44,34 +49,61 @@ func NewAuthenticator(bridgeIP string) (*Authenticator, error) {
 func (a *Authenticator) TryAuthenticate() AuthResult {
 	apiKey, retry, err := a.auth.Authenticate()
 	
-	if err != nil && retry {
-		return AuthResult{Retry: true, Err: ErrLinkButtonNotPressed}
-	}
-	if err != nil {
-		return AuthResult{Retry: false, Err: err}
+	if err == nil {
+		return AuthResult{ApiKey: apiKey, Retry: false, Err: nil}
 	}
 	
-	return AuthResult{ApiKey: apiKey, Retry: false, Err: nil}
+	// If openhue says to retry, or if it's a transient error, keep trying
+	// Most errors during pairing are transient (network, TLS, etc.)
+	if retry {
+		return AuthResult{Retry: true, Err: ErrLinkButtonNotPressed}
+	}
+	
+	// Check if error message indicates link button not pressed
+	errStr := err.Error()
+	if strings.Contains(errStr, "link button") || strings.Contains(errStr, "not pressed") {
+		return AuthResult{Retry: true, Err: ErrLinkButtonNotPressed}
+	}
+	
+	// For other errors, still retry but pass the actual error
+	// Only stop on explicit auth failures
+	return AuthResult{Retry: true, Err: err}
 }
 
 // AuthenticateWithPolling polls for authentication until success or timeout.
 func (a *Authenticator) AuthenticateWithPolling(timeout time.Duration, pollInterval time.Duration) (string, error) {
-	deadline := time.Now().Add(timeout)
-	
-	for time.Now().Before(deadline) {
-		result := a.TryAuthenticate()
-		
-		if result.Err == nil {
-			return result.ApiKey, nil
-		}
-		
-		if !result.Retry {
-			return "", result.Err
-		}
-		
-		time.Sleep(pollInterval)
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	return a.AuthenticateWithContext(ctx, pollInterval)
+}
+
+// AuthenticateWithContext polls for authentication until success, context cancellation, or timeout.
+func (a *Authenticator) AuthenticateWithContext(ctx context.Context, pollInterval time.Duration) (string, error) {
+	ticker := time.NewTicker(pollInterval)
+	defer ticker.Stop()
+
+	// Try immediately first
+	result := a.TryAuthenticate()
+	if result.Err == nil {
+		return result.ApiKey, nil
 	}
-	
-	return "", errors.New("authentication timed out waiting for link button")
+
+	for {
+		select {
+		case <-ctx.Done():
+			if ctx.Err() == context.Canceled {
+				return "", ErrPairingCancelled
+			}
+			return "", errors.New("authentication timed out waiting for link button")
+		case <-ticker.C:
+			result := a.TryAuthenticate()
+			if result.Err == nil {
+				return result.ApiKey, nil
+			}
+			if !result.Retry {
+				return "", result.Err
+			}
+		}
+	}
 }
 

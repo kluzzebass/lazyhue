@@ -57,6 +57,9 @@ func (m *Model) updateLayout() {
 
 	// Size help panel (uses full screen dimensions)
 	m.helpPanel.SetSize(m.width, m.height)
+
+	// Size pairing panel
+	m.pairingPanel.SetSize(m.width, m.height)
 }
 
 func (m *Model) refreshAllPanels() {

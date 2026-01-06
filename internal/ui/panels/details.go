@@ -62,7 +62,7 @@ func (p *DetailsPanel) updateContent() {
 	title := p.styles.Title.Render(p.item.Name)
 	content.WriteString(title)
 	content.WriteString("\n")
-	content.WriteString(strings.Repeat("─", min(30, p.width-6)))
+	content.WriteString(strings.Repeat("─", max(0, min(30, p.width-6))))
 	content.WriteString("\n\n")
 
 	switch p.item.Type {
@@ -475,6 +475,13 @@ func (p *DetailsPanel) renderScene(w *strings.Builder, scene openhue.SceneGet) {
 		w.WriteString("\n")
 	}
 
+	// V1 ID
+	if scene.IdV1 != nil {
+		w.WriteString(p.styles.Muted.Render("V1 ID: "))
+		w.WriteString(*scene.IdV1)
+		w.WriteString("\n")
+	}
+
 	// Type
 	if scene.Type != nil {
 		w.WriteString(p.styles.Muted.Render("Type: "))
@@ -486,6 +493,24 @@ func (p *DetailsPanel) renderScene(w *strings.Builder, scene openhue.SceneGet) {
 	if scene.Status != nil && scene.Status.Active != nil {
 		w.WriteString(p.styles.Muted.Render("Active: "))
 		w.WriteString(string(*scene.Status.Active))
+		w.WriteString("\n")
+	}
+
+	// Owner
+	if scene.Owner != nil && scene.Owner.Rid != nil {
+		w.WriteString(p.styles.Muted.Render("Owner: "))
+		ownerName := *scene.Owner.Rid
+		if scene.Owner.Rtype != nil {
+			ownerName = fmt.Sprintf("%s (%s)", ownerName, string(*scene.Owner.Rtype))
+		}
+		w.WriteString(ownerName)
+		w.WriteString("\n")
+	}
+
+	// App data
+	if scene.Metadata != nil && scene.Metadata.Appdata != nil && *scene.Metadata.Appdata != "" {
+		w.WriteString(p.styles.Muted.Render("App data: "))
+		w.WriteString(*scene.Metadata.Appdata)
 		w.WriteString("\n")
 	}
 
@@ -527,18 +552,48 @@ func (p *DetailsPanel) renderScene(w *strings.Builder, scene openhue.SceneGet) {
 
 	// Palette
 	if scene.Palette != nil {
-		w.WriteString("\n")
-		w.WriteString(p.styles.Subtitle.Render("Palette:"))
-		w.WriteString("\n")
+		hasPalette := (scene.Palette.Color != nil && len(*scene.Palette.Color) > 0) ||
+			(scene.Palette.Dimming != nil && len(*scene.Palette.Dimming) > 0) ||
+			(scene.Palette.ColorTemperature != nil && len(*scene.Palette.ColorTemperature) > 0) ||
+			(scene.Palette.Effects != nil && len(*scene.Palette.Effects) > 0)
 
-		if scene.Palette.Color != nil && len(*scene.Palette.Color) > 0 {
-			w.WriteString(fmt.Sprintf("  Colors: %d\n", len(*scene.Palette.Color)))
-		}
-		if scene.Palette.Dimming != nil && len(*scene.Palette.Dimming) > 0 {
-			w.WriteString(fmt.Sprintf("  Dimming levels: %d\n", len(*scene.Palette.Dimming)))
-		}
-		if scene.Palette.ColorTemperature != nil && len(*scene.Palette.ColorTemperature) > 0 {
-			w.WriteString(fmt.Sprintf("  Color temps: %d\n", len(*scene.Palette.ColorTemperature)))
+		if hasPalette {
+			w.WriteString("\n")
+			w.WriteString(p.styles.Subtitle.Render("Palette:"))
+			w.WriteString("\n")
+
+			if scene.Palette.Color != nil && len(*scene.Palette.Color) > 0 {
+				w.WriteString(fmt.Sprintf("  Colors: %d\n", len(*scene.Palette.Color)))
+				for i, c := range *scene.Palette.Color {
+					if c.Color != nil && c.Color.Xy != nil {
+						w.WriteString(fmt.Sprintf("    %d: XY(%.4f, %.4f)\n", i+1, *c.Color.Xy.X, *c.Color.Xy.Y))
+					}
+				}
+			}
+			if scene.Palette.Dimming != nil && len(*scene.Palette.Dimming) > 0 {
+				w.WriteString(fmt.Sprintf("  Dimming levels: %d\n", len(*scene.Palette.Dimming)))
+				for i, d := range *scene.Palette.Dimming {
+					if d.Brightness != nil {
+						w.WriteString(fmt.Sprintf("    %d: %.0f%%\n", i+1, *d.Brightness))
+					}
+				}
+			}
+			if scene.Palette.ColorTemperature != nil && len(*scene.Palette.ColorTemperature) > 0 {
+				w.WriteString(fmt.Sprintf("  Color temps: %d\n", len(*scene.Palette.ColorTemperature)))
+				for i, ct := range *scene.Palette.ColorTemperature {
+					if ct.ColorTemperature != nil && ct.ColorTemperature.Mirek != nil {
+						w.WriteString(fmt.Sprintf("    %d: %d mirek\n", i+1, *ct.ColorTemperature.Mirek))
+					}
+				}
+			}
+			if scene.Palette.Effects != nil && len(*scene.Palette.Effects) > 0 {
+				w.WriteString(fmt.Sprintf("  Effects: %d\n", len(*scene.Palette.Effects)))
+				for i, e := range *scene.Palette.Effects {
+					if e.Effect != nil {
+						w.WriteString(fmt.Sprintf("    %d: %s\n", i+1, string(*e.Effect)))
+					}
+				}
+			}
 		}
 	}
 
@@ -547,24 +602,55 @@ func (p *DetailsPanel) renderScene(w *strings.Builder, scene openhue.SceneGet) {
 		w.WriteString("\n")
 		w.WriteString(p.styles.Subtitle.Render(fmt.Sprintf("Actions (%d):", len(*scene.Actions))))
 		w.WriteString("\n")
-		for i, action := range *scene.Actions {
-			if i >= 10 { // Limit display to first 10
-				w.WriteString(fmt.Sprintf("  ... and %d more\n", len(*scene.Actions)-10))
-				break
-			}
+		for _, action := range *scene.Actions {
 			targetName := "unknown"
 			if action.Target != nil && action.Target.Rid != nil {
 				targetName = *action.Target.Rid
-				// Try to get friendly name
+				// Try to get friendly name from owning device
 				if p.state != nil {
 					if light, ok := p.state.GetLight(*action.Target.Rid); ok {
-						if light.Metadata != nil && light.Metadata.Name != nil {
+						// Get name from owning device (preferred)
+						if light.Owner != nil && light.Owner.Rid != nil {
+							if device, ok := p.state.GetDevice(*light.Owner.Rid); ok {
+								if device.Metadata != nil && device.Metadata.Name != nil {
+									targetName = *device.Metadata.Name
+								}
+							}
+						}
+						// Fallback to light's own metadata
+						if targetName == *action.Target.Rid && light.Metadata != nil && light.Metadata.Name != nil {
 							targetName = *light.Metadata.Name
 						}
 					}
 				}
 			}
 			w.WriteString(fmt.Sprintf("  • %s\n", targetName))
+
+			// Show action details
+			if action.Action != nil {
+				if action.Action.On != nil && action.Action.On.On != nil {
+					state := "off"
+					if *action.Action.On.On {
+						state = "on"
+					}
+					w.WriteString(fmt.Sprintf("      State: %s\n", state))
+				}
+				if action.Action.Dimming != nil && action.Action.Dimming.Brightness != nil {
+					w.WriteString(fmt.Sprintf("      Brightness: %.0f%%\n", *action.Action.Dimming.Brightness))
+				}
+				if action.Action.ColorTemperature != nil && action.Action.ColorTemperature.Mirek != nil {
+					w.WriteString(fmt.Sprintf("      Color temp: %d mirek\n", *action.Action.ColorTemperature.Mirek))
+				}
+				if action.Action.Color != nil && action.Action.Color.Xy != nil {
+					w.WriteString(fmt.Sprintf("      Color XY: (%.4f, %.4f)\n", *action.Action.Color.Xy.X, *action.Action.Color.Xy.Y))
+				}
+				if action.Action.Effects != nil && action.Action.Effects.Effect != nil {
+					w.WriteString(fmt.Sprintf("      Effect: %s\n", string(*action.Action.Effects.Effect)))
+				}
+				if action.Action.Gradient != nil && action.Action.Gradient.Points != nil {
+					w.WriteString(fmt.Sprintf("      Gradient: %d points\n", len(*action.Action.Gradient.Points)))
+				}
+			}
 		}
 	}
 
@@ -924,6 +1010,18 @@ func (p *DetailsPanel) renderBridge(w *strings.Builder, data BridgeData) {
 
 // Update handles input for the details panel.
 func (p *DetailsPanel) Update(msg tea.Msg) (*DetailsPanel, tea.Cmd) {
+	// Handle g/G for top/bottom (viewport uses home/end)
+	if keyMsg, ok := msg.(tea.KeyMsg); ok {
+		switch keyMsg.String() {
+		case "g":
+			p.viewport.GotoTop()
+			return p, nil
+		case "G":
+			p.viewport.GotoBottom()
+			return p, nil
+		}
+	}
+
 	var cmd tea.Cmd
 	p.viewport, cmd = p.viewport.Update(msg)
 	return p, cmd

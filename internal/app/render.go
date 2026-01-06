@@ -47,7 +47,80 @@ func (m Model) View() string {
 		result = m.overlayHelp(result)
 	}
 
+	// Overlay pairing panel if visible
+	if m.pairingPanel.IsVisible() {
+		result = m.overlayPairing(result)
+	}
+
 	return result
+}
+
+// overlayPairing composites pairing panel on top of base UI.
+func (m *Model) overlayPairing(base string) string {
+	pairingView := m.pairingPanel.View()
+	pairingWidth := m.pairingPanel.Width()
+	pairingHeight := m.pairingPanel.Height()
+
+	// Calculate centered position
+	startX := (m.width - pairingWidth) / 2
+	startY := (m.height - pairingHeight) / 2
+	if startX < 0 {
+		startX = 0
+	}
+	if startY < 0 {
+		startY = 0
+	}
+
+	baseLines := strings.Split(base, "\n")
+	pairingLines := strings.Split(pairingView, "\n")
+
+	// Ensure we have enough base lines
+	for len(baseLines) < m.height {
+		baseLines = append(baseLines, "")
+	}
+
+	// Overlay each pairing line onto the corresponding base line
+	for i, pairingLine := range pairingLines {
+		baseY := startY + i
+		if baseY >= len(baseLines) {
+			break
+		}
+
+		baseLine := baseLines[baseY]
+		baseVisualWidth := lipgloss.Width(baseLine)
+
+		var result strings.Builder
+
+		// Left portion
+		if startX > 0 {
+			if baseVisualWidth > 0 {
+				left := ansiTruncate(baseLine, startX)
+				result.WriteString(left)
+				leftWidth := lipgloss.Width(left)
+				for j := leftWidth; j < startX; j++ {
+					result.WriteByte(' ')
+				}
+			} else {
+				for j := 0; j < startX; j++ {
+					result.WriteByte(' ')
+				}
+			}
+		}
+
+		// Pairing line
+		result.WriteString(pairingLine)
+
+		// Right portion
+		pairingEnd := startX + lipgloss.Width(pairingLine)
+		if pairingEnd < baseVisualWidth {
+			right := ansiSubstring(baseLine, pairingEnd)
+			result.WriteString(right)
+		}
+
+		baseLines[baseY] = result.String()
+	}
+
+	return strings.Join(baseLines, "\n")
 }
 
 // overlayHelp composites help panel on top of base UI.

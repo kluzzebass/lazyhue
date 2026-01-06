@@ -81,15 +81,19 @@ func startDiscoveryTicker() tea.Cmd {
 
 // Pairing command
 
-func startPairing(info hue.BridgeInfo) tea.Cmd {
+func startPairing(ctx context.Context, info hue.BridgeInfo) tea.Cmd {
 	return func() tea.Msg {
 		auth, err := hue.NewAuthenticator(info.IPAddress)
 		if err != nil {
 			return PairingFailedMsg{BridgeID: info.ID, Err: err}
 		}
 
-		apiKey, err := auth.AuthenticateWithPolling(60*time.Second, 500*time.Millisecond)
+		apiKey, err := auth.AuthenticateWithContext(ctx, 500*time.Millisecond)
 		if err != nil {
+			// Don't report cancellation as an error
+			if err == hue.ErrPairingCancelled {
+				return nil // Silently ignore - user already knows they cancelled
+			}
 			return PairingFailedMsg{BridgeID: info.ID, Err: err}
 		}
 

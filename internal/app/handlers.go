@@ -1,6 +1,9 @@
 package app
 
 import (
+	"context"
+	"time"
+
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/kluzzebass/lazyhue/internal/config"
 	"github.com/kluzzebass/lazyhue/internal/hue"
@@ -63,13 +66,17 @@ func (m *Model) handleKey(msg tea.KeyMsg) tea.Cmd {
 }
 
 func (m *Model) handleSelect() tea.Cmd {
-	// Bridge panel: select bridge
+	// Bridge panel: Enter on a bridge triggers pairing if not connected
 	if m.focusedPanelID() == PanelIDBridges {
 		if bridge := m.bridgePanel().SelectedBridge(); bridge != nil {
+			if !bridge.IsConnected() {
+				// Trigger pairing for unconnected bridge
+				return m.startBridgePairing()
+			}
+			// For connected bridges, just switch to hierarchy
 			m.manager.SetActiveBridge(bridge.Info.ID)
 			m.updateBridgePanel()
 			m.refreshAllPanels()
-			// Move to next panel in order
 			if m.focusIndex < len(m.panelOrder)-1 {
 				m.focusIndex++
 			}
@@ -223,7 +230,6 @@ func (m *Model) handlePairingSuccess(msg PairingSuccessMsg) {
 
 func (m *Model) startBridgePairing() tea.Cmd {
 	if m.pairing {
-		m.setStatus("Already pairing...", false)
 		return nil
 	}
 
@@ -252,6 +258,15 @@ func (m *Model) startBridgePairing() tea.Cmd {
 		return discoverBridges()
 	}
 
+	// Cancel any existing pairing attempt
+	if m.pairingCancel != nil {
+		m.pairingCancel()
+	}
+
+	// Create a new context with 60s timeout for this pairing attempt
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	m.pairingCancel = cancel
+
 	m.pairing = true
 	m.pairingFor = &bridgeInfo
 	bridge := m.manager.GetBridge(bridgeInfo.ID)
@@ -259,8 +274,36 @@ func (m *Model) startBridgePairing() tea.Cmd {
 		bridge.Status = hue.StatusPairing
 		m.updateBridgePanel()
 	}
-	m.setStatus("Press the link button on "+bridgeInfo.Name+"...", false)
-	return startPairing(bridgeInfo)
+
+	// Determine display name (same logic as bridge panel)
+	displayName := bridgeInfo.Name
+	if bridge != nil && !bridge.IsConnected() {
+		// Unconnected: prefer mDNS hostname (e.g., "ecb5fa401886.local")
+		if bridgeInfo.Host != "" && bridgeInfo.Host != bridgeInfo.IPAddress {
+			displayName = bridgeInfo.Host
+		} else if bridgeInfo.Name == "" {
+			displayName = bridgeInfo.IPAddress
+		}
+	}
+	if displayName == "" {
+		displayName = bridgeInfo.IPAddress
+	}
+
+	// Show pairing popup
+	m.pairingPanel.Show(bridgeInfo.ID, displayName)
+
+	// Start pairing and countdown tick
+	return tea.Batch(
+		startPairing(ctx, bridgeInfo),
+		pairingTick(),
+	)
+}
+
+// pairingTick returns a command that ticks every second for the pairing countdown.
+func pairingTick() tea.Cmd {
+	return tea.Tick(time.Second, func(t time.Time) tea.Msg {
+		return PairingTickMsg{}
+	})
 }
 
 

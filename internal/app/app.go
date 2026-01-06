@@ -1,8 +1,10 @@
 package app
 
 import (
+	"context"
 	"time"
 
+	"github.com/charmbracelet/bubbles/progress"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/kluzzebass/lazyhue/internal/config"
 	"github.com/kluzzebass/lazyhue/internal/hue"
@@ -35,6 +37,7 @@ type Model struct {
 	lastFocusIndex int      // Previous focus index (for returning from detail)
 	detailPanel    *panels.DetailsPanel
 	helpPanel      *panels.HelpPanel
+	pairingPanel   *panels.PairingPanel
 	statusBar      *panels.StatusBar
 	styles         ui.Styles
 
@@ -53,10 +56,11 @@ type Model struct {
 	height int
 
 	// State
-	ready      bool
-	quitting   bool
-	pairing    bool
-	pairingFor *hue.BridgeInfo
+	ready            bool
+	quitting         bool
+	pairing          bool
+	pairingFor       *hue.BridgeInfo
+	pairingCancel    context.CancelFunc
 	statusMsg  string
 	isError    bool
 }
@@ -96,17 +100,18 @@ func New(cfg *config.Config, creds *config.CredentialStore) Model {
 	)
 
 	m := Model{
-		config:      cfg,
-		credentials: creds,
-		manager:     hue.NewManager(creds),
-		styles:      styles,
-		panelMap:    panelMap,
-		panelOrder:  panelOrder,
-		focusIndex:  0,
-		layoutTree:  layoutTree,
-		detailPanel: panels.NewDetailsPanel(styles),
-		helpPanel:   panels.NewHelpPanel(styles),
-		statusBar:   panels.NewStatusBar(styles),
+		config:       cfg,
+		credentials:  creds,
+		manager:      hue.NewManager(creds),
+		styles:       styles,
+		panelMap:     panelMap,
+		panelOrder:   panelOrder,
+		focusIndex:   0,
+		layoutTree:   layoutTree,
+		detailPanel:  panels.NewDetailsPanel(styles),
+		helpPanel:    panels.NewHelpPanel(styles),
+		pairingPanel: panels.NewPairingPanel(styles),
+		statusBar:    panels.NewStatusBar(styles),
 	}
 
 	// Initialize keybindings - handlers are defined here, right next to keys
@@ -159,12 +164,23 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.ready = true
 
 	case tea.KeyMsg:
+		// Handle pairing panel input first
+		if m.pairingPanel.IsVisible() {
+			if cmd := m.pairingPanel.Update(msg); cmd != nil {
+				cmds = append(cmds, cmd)
+			}
+			return m, tea.Batch(cmds...)
+		}
+
+		// Clear status message on user interaction
+		m.clearStatus()
+
 		cmd := m.handleKey(msg)
 		if cmd != nil {
 			cmds = append(cmds, cmd)
 		}
-		// Also pass key to focused panel (for viewport scrolling, etc.)
-		if !m.helpPanel.IsVisible() {
+		// Pass keys to detail panel for viewport scrolling (other panels use dispatch)
+		if !m.helpPanel.IsVisible() && m.focusedOnDetail() {
 			if panelCmd := m.updateFocusedPanel(msg); panelCmd != nil {
 				cmds = append(cmds, panelCmd)
 			}
@@ -177,6 +193,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			cmd := m.helpPanel.Update(msg)
 			return m, cmd
 		}
+
+		// Clear status message on user interaction
+		m.clearStatus()
+
 		cmd := m.handleMouse(msg)
 		if cmd != nil {
 			cmds = append(cmds, cmd)
@@ -235,7 +255,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case SyncTickMsg:
 		bridge := m.manager.GetActiveBridge()
 		if bridge != nil && bridge.IsConnected() {
-			m.statusBar.SetPolling(true)
 			m.bridgePanel().SetPolling(true)
 			cmds = append(cmds, syncLightsAndGroups(bridge))
 			cmds = append(cmds, tea.Tick(300*time.Millisecond, func(t time.Time) tea.Msg {
@@ -245,7 +264,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		cmds = append(cmds, startSyncTicker())
 
 	case DiscoveryTickMsg:
-		m.statusBar.SetDiscovering(true)
 		m.bridgePanel().SetDiscovering(true)
 		cmds = append(cmds, discoverBridges(), startDiscoveryTicker())
 		// Schedule a redraw after indicator duration to turn it off
@@ -256,16 +274,61 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case indicatorRefreshMsg:
 		// Just triggers a redraw to update indicator visibility
 
-	case PairingSuccessMsg:
+	case PairingTickMsg:
+		// Update the pairing panel and continue ticking while pairing is active
+		if m.pairing {
+			if cmd := m.pairingPanel.Update(msg); cmd != nil {
+				cmds = append(cmds, cmd)
+			}
+			cmds = append(cmds, pairingTick())
+		}
+
+	case progress.FrameMsg:
+		// Handle progress bar animation frames
+		if m.pairingPanel.IsVisible() {
+			if cmd := m.pairingPanel.Update(msg); cmd != nil {
+				cmds = append(cmds, cmd)
+			}
+		}
+
+	case panels.PairingCancelledMsg:
+		// Cancel the background pairing goroutine
+		if m.pairingCancel != nil {
+			m.pairingCancel()
+			m.pairingCancel = nil
+		}
 		m.pairing = false
 		m.pairingFor = nil
+		m.pairingPanel.Hide()
+		bridge := m.manager.GetBridge(msg.BridgeID)
+		if bridge != nil {
+			bridge.Status = hue.StatusDisconnected
+		}
+		m.setStatus("Pairing cancelled", false)
+		m.updateBridgePanel()
+
+	case PairingSuccessMsg:
+		if m.pairingCancel != nil {
+			m.pairingCancel = nil
+		}
+		m.pairing = false
+		m.pairingFor = nil
+		m.pairingPanel.Hide()
 		m.handlePairingSuccess(msg)
 		m.updateBridgePanel()
 		cmds = append(cmds, connectBridge(m.manager.GetBridge(msg.BridgeID), msg.ApiKey))
 
 	case PairingFailedMsg:
+		if m.pairingCancel != nil {
+			m.pairingCancel = nil
+		}
 		m.pairing = false
 		m.pairingFor = nil
+		m.pairingPanel.Hide()
+		// Reset bridge status to disconnected
+		if bridge := m.manager.GetBridge(msg.BridgeID); bridge != nil {
+			bridge.Status = hue.StatusDisconnected
+		}
 		m.setStatus("Pairing failed: "+msg.Err.Error(), true)
 		m.updateBridgePanel()
 
