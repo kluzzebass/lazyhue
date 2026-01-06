@@ -25,13 +25,13 @@ todos:
     status: completed
   - id: light-controls
     content: Add light/group toggle, brightness, and color controls
-    status: in-progress
+    status: completed
   - id: scene-activation
     content: Implement scene browsing and activation
-    status: in-progress
+    status: completed
   - id: help-overlay
     content: Build help overlay with full keybinding reference
-    status: pending
+    status: completed
   - id: color-picker
     content: Implement color picker for color-capable lights
     status: pending
@@ -46,6 +46,18 @@ todos:
     status: pending
   - id: entertainment-support
     content: Implement entertainment areas listing and control (currently placeholder)
+    status: pending
+  - id: brightness-slider
+    content: Implement brightness slider popup (b key)
+    status: pending
+  - id: scene-quick-activate
+    content: Implement scene quick-activate with 1-9 keys in scenes panel
+    status: pending
+  - id: bridge-picker-popup
+    content: Implement bridge picker popup (B key)
+    status: pending
+  - id: config-file
+    content: Add config file for poll interval, themes, custom keybindings
     status: pending
 ---
 

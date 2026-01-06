@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/charmbracelet/bubbles/key"
@@ -41,6 +42,7 @@ type Model struct {
 	focusIndex     int      // Index into panelOrder, -1 for detail panel
 	lastFocusIndex int      // Previous focus index (for returning from detail)
 	detailPanel    *panels.DetailsPanel
+	helpPanel      *panels.HelpPanel
 	statusBar      *panels.StatusBar
 	styles         ui.Styles
 	keys           ui.KeyMap
@@ -120,6 +122,7 @@ func New(cfg *config.Config, creds *config.CredentialStore) Model {
 		focusIndex:  0,
 		layoutTree:  layoutTree,
 		detailPanel: panels.NewDetailsPanel(styles),
+		helpPanel:   panels.NewHelpPanel(styles, keys),
 		statusBar:   panels.NewStatusBar(styles, keys),
 	}
 }
@@ -225,6 +228,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 	case tea.MouseMsg:
+		// If help is visible, pass mouse events to it (for scroll wheel)
+		if m.helpPanel.IsVisible() {
+			m.helpPanel.Update(msg)
+			return m, nil
+		}
 		// Handle click for focus switching
 		cmd := m.handleMouse(msg)
 		if cmd != nil {
@@ -321,10 +329,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.clearStatus()
 	}
 
-	// Update focused panel
-	cmd := m.updateFocusedPanel(msg)
-	if cmd != nil {
-		cmds = append(cmds, cmd)
+	// Update focused panel (but not when help is visible)
+	if !m.helpPanel.IsVisible() {
+		cmd := m.updateFocusedPanel(msg)
+		if cmd != nil {
+			cmds = append(cmds, cmd)
+		}
 	}
 
 	return m, tea.Batch(cmds...)
@@ -351,10 +361,44 @@ func (m *Model) updateFocusedPanel(msg tea.Msg) tea.Cmd {
 }
 
 func (m *Model) handleKey(msg tea.KeyMsg) tea.Cmd {
+	// Handle help overlay first - it captures all input when visible
+	if m.helpPanel.IsVisible() {
+		switch {
+		case key.Matches(msg, m.keys.Help), key.Matches(msg, m.keys.Back), key.Matches(msg, m.keys.Quit):
+			m.helpPanel.Hide()
+			return nil
+		default:
+			// Pass scroll keys to help panel
+			m.helpPanel.Update(msg)
+			return nil
+		}
+	}
+
 	switch {
 	case key.Matches(msg, m.keys.Quit):
 		m.quitting = true
 		return tea.Quit
+
+	case key.Matches(msg, m.keys.Help):
+		// Set context based on focused panel
+		switch m.focusedPanelID() {
+		case PanelIDBridges:
+			m.helpPanel.SetContext(panels.HelpContextBridges)
+		case PanelIDScenes:
+			m.helpPanel.SetContext(panels.HelpContextScenes)
+		case PanelIDGroups:
+			m.helpPanel.SetContext(panels.HelpContextGroups)
+		case PanelIDLights:
+			m.helpPanel.SetContext(panels.HelpContextLights)
+		case PanelIDDevices:
+			m.helpPanel.SetContext(panels.HelpContextDevices)
+		case PanelIDDetail:
+			m.helpPanel.SetContext(panels.HelpContextDetail)
+		default:
+			m.helpPanel.SetContext(panels.HelpContextGlobal)
+		}
+		m.helpPanel.Toggle()
+		return nil
 
 	// Panel focus with number keys - check each panel's key
 	case key.Matches(msg, m.keys.FocusDetail):
@@ -663,6 +707,9 @@ func (m *Model) updateLayout() {
 	// Size status bar
 	bounds = m.layoutTree.Bounds(PanelIDStatus)
 	m.statusBar.SetWidth(bounds.Width)
+
+	// Size help panel (uses full screen dimensions)
+	m.helpPanel.SetSize(m.width, m.height)
 }
 
 func (m *Model) refreshAllPanels() {
@@ -848,8 +895,158 @@ func (m Model) View() string {
 	// Combine and constrain to terminal size
 	full := lipgloss.JoinVertical(lipgloss.Left, content, status)
 
-	// Use Place to ensure we don't exceed terminal dimensions
-	return lipgloss.Place(m.width, m.height, lipgloss.Left, lipgloss.Top, full)
+	// Place base UI
+	result := lipgloss.Place(m.width, m.height, lipgloss.Left, lipgloss.Top, full)
+
+	// Overlay help panel if visible
+	if m.helpPanel.IsVisible() {
+		result = m.overlayHelp(result)
+	}
+
+	return result
+}
+
+// overlayHelp composites help panel on top of base UI.
+func (m *Model) overlayHelp(base string) string {
+	helpView := m.helpPanel.View()
+	helpWidth := m.helpPanel.Width()
+	helpHeight := m.helpPanel.Height()
+
+	// Calculate centered position
+	startX := (m.width - helpWidth) / 2
+	startY := (m.height - helpHeight) / 2
+	if startX < 0 {
+		startX = 0
+	}
+	if startY < 0 {
+		startY = 0
+	}
+
+	baseLines := strings.Split(base, "\n")
+	helpLines := strings.Split(helpView, "\n")
+
+	// Ensure we have enough base lines
+	for len(baseLines) < m.height {
+		baseLines = append(baseLines, "")
+	}
+
+	// Overlay each help line onto the corresponding base line
+	for i, helpLine := range helpLines {
+		baseY := startY + i
+		if baseY >= len(baseLines) {
+			break
+		}
+
+		// Get base line, pad if needed
+		baseLine := baseLines[baseY]
+		baseVisualWidth := lipgloss.Width(baseLine)
+
+		// Build: left of base + help line + right of base
+		var result strings.Builder
+
+		// Left portion: take visual columns 0 to startX from base
+		if startX > 0 {
+			if baseVisualWidth > 0 {
+				left := ansiTruncate(baseLine, startX)
+				result.WriteString(left)
+				// Pad if left is shorter than startX
+				leftWidth := lipgloss.Width(left)
+				for j := leftWidth; j < startX; j++ {
+					result.WriteByte(' ')
+				}
+			} else {
+				for j := 0; j < startX; j++ {
+					result.WriteByte(' ')
+				}
+			}
+		}
+
+		// Help line (already has its own styling)
+		result.WriteString(helpLine)
+
+		// Right portion: take visual columns after help ends
+		helpEnd := startX + lipgloss.Width(helpLine)
+		if helpEnd < baseVisualWidth {
+			right := ansiSubstring(baseLine, helpEnd)
+			result.WriteString(right)
+		}
+
+		baseLines[baseY] = result.String()
+	}
+
+	return strings.Join(baseLines, "\n")
+}
+
+// ansiTruncate returns the first n visual columns of s, preserving ANSI codes.
+func ansiTruncate(s string, n int) string {
+	if n <= 0 {
+		return ""
+	}
+
+	var result strings.Builder
+	col := 0
+	i := 0
+	runes := []rune(s)
+
+	for i < len(runes) && col < n {
+		if runes[i] == '\x1b' {
+			// Consume entire escape sequence
+			result.WriteRune(runes[i])
+			i++
+			for i < len(runes) && !isAnsiTerminator(runes[i]) {
+				result.WriteRune(runes[i])
+				i++
+			}
+			if i < len(runes) {
+				result.WriteRune(runes[i])
+				i++
+			}
+		} else {
+			result.WriteRune(runes[i])
+			col++
+			i++
+		}
+	}
+
+	return result.String()
+}
+
+// ansiSubstring returns s starting from visual column n.
+func ansiSubstring(s string, n int) string {
+	if n <= 0 {
+		return s
+	}
+
+	col := 0
+	i := 0
+	runes := []rune(s)
+
+	// Skip to column n
+	for i < len(runes) && col < n {
+		if runes[i] == '\x1b' {
+			// Skip entire escape sequence
+			i++
+			for i < len(runes) && !isAnsiTerminator(runes[i]) {
+				i++
+			}
+			if i < len(runes) {
+				i++
+			}
+		} else {
+			col++
+			i++
+		}
+	}
+
+	if i >= len(runes) {
+		return ""
+	}
+
+	return string(runes[i:])
+}
+
+func isAnsiTerminator(r rune) bool {
+	return (r >= 'A' && r <= 'Z') || (r >= 'a' && r <= 'z')
 }
 
 // Commands
