@@ -21,8 +21,7 @@ func (m *Model) handleKey(msg tea.KeyMsg) tea.Cmd {
 			return nil
 		}
 		// Pass navigation keys to help panel
-		m.helpPanel.Update(msg)
-		return nil
+		return m.helpPanel.Update(msg)
 	}
 
 	// Check for panel focus shortcuts (number keys)
@@ -138,10 +137,16 @@ func (m *Model) handleMouse(msg tea.MouseMsg) tea.Cmd {
 		m.syncSelectionFromFocusedPanel()
 	}
 
-	// Pass scroll events to focused panel
+	// Pass scroll events to panel under cursor
 	if msg.Button == tea.MouseButtonWheelUp || msg.Button == tea.MouseButtonWheelDown {
-		if panel := m.focusedPanel(); panel != nil {
-			panel.Update(msg)
+		switch leaf.ID {
+		case PanelIDDetail:
+			m.detailPanel.Update(msg)
+		case PanelIDBridges:
+			m.bridgePanel().Update(msg)
+			m.syncSelectionFromFocusedPanel()
+		case PanelIDHierarchy:
+			m.hierarchyPanel().Update(msg)
 			m.syncSelectionFromFocusedPanel()
 		}
 	}
@@ -164,12 +169,18 @@ func (m *Model) handleBridgesDiscovered(msg BridgesDiscoveredMsg) {
 			// Update IP if changed
 			if existing.Info.IPAddress != info.IPAddress {
 				existing.Info.IPAddress = info.IPAddress
-				existing.Info.Host = info.IPAddress
 				if cred, ok := m.credentials.Get(info.ID); ok {
 					cred.IPAddress = info.IPAddress
 					m.credentials.Set(cred)
 					_ = m.credentials.Save()
 				}
+			}
+			// Update mDNS info from discovery
+			if info.Host != "" {
+				existing.Info.Host = info.Host
+			}
+			if info.InstanceName != "" {
+				existing.Info.InstanceName = info.InstanceName
 			}
 			// Update name if discovery provides one
 			if info.Name != "" && existing.Info.Name != info.Name {

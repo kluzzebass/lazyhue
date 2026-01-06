@@ -88,8 +88,19 @@ func (m *Model) updateBridgePanel() {
 }
 
 func (m *Model) updateDetailPanel() {
+	if m.selectedItem == nil {
+		return
+	}
+
+	// For bridge entities, use the bridge's own state
+	if m.selectedItem.Type == panels.EntityBridge {
+		m.detailPanel.SetItem(m.selectedItem, nil)
+		return
+	}
+
+	// For other entities, use the active bridge's state
 	bridge := m.manager.GetActiveBridge()
-	if bridge != nil && m.selectedItem != nil {
+	if bridge != nil {
 		m.detailPanel.SetItem(m.selectedItem, bridge.GetState())
 	}
 }

@@ -41,8 +41,7 @@ const (
 	ActionPrevTab Action = "prev_tab"
 
 	// Global
-	ActionRefresh Action = "refresh"
-	ActionHelp    Action = "help"
+	ActionHelp Action = "help"
 	ActionQuit    Action = "quit"
 	ActionBack    Action = "back"
 )

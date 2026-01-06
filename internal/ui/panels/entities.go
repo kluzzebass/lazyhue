@@ -25,6 +25,7 @@ const (
 	EntityScene
 	EntityDevice
 	EntityEntertainment
+	EntityBridge
 )
 
 // EntityItem wraps an entity for the list component.
@@ -509,6 +510,20 @@ func GetSceneFromItem(item EntityItem) (openhue.SceneGet, bool) {
 	}
 	scene, ok := item.RawPtr.(openhue.SceneGet)
 	return scene, ok
+}
+
+// BridgeData holds combined bridge information for display.
+type BridgeData struct {
+	Bridge *hue.Bridge
+}
+
+// GetBridgeFromItem extracts the BridgeData from an EntityItem.
+func GetBridgeFromItem(item EntityItem) (BridgeData, bool) {
+	if item.Type != EntityBridge {
+		return BridgeData{}, false
+	}
+	data, ok := item.RawPtr.(BridgeData)
+	return data, ok
 }
 
 // BuildHierarchyTree creates a unified tree with rooms/zones as top-level,

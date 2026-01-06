@@ -220,26 +220,8 @@ func buildTabbedTopBorder(border lipgloss.Border, width int, borderColor lipglos
 
 func buildBottomBorder(border lipgloss.Border, width int, borderColor lipgloss.Color, styles Styles, cfg BorderConfig) string {
 	bs := lipgloss.NewStyle().Foreground(borderColor)
-
-	if cfg.ItemCount == 0 {
-		// Plain bottom border
-		return bs.Render(border.BottomLeft + strings.Repeat(border.Bottom, width) + border.BottomRight)
-	}
-
-	// Build "X of Y" indicator
-	countStr := styles.Muted.Render(formatCount(cfg.ItemIndex+1, cfg.ItemCount))
-	countWidth := lipgloss.Width(countStr)
-
-	// Calculate remaining border width
-	remainingWidth := width - countWidth
-	rightPadding := 1
-	leftPadding := max(remainingWidth-rightPadding, 0)
-
-	return bs.Render(border.BottomLeft) +
-		bs.Render(strings.Repeat(border.Bottom, leftPadding)) +
-		countStr +
-		bs.Render(strings.Repeat(border.Bottom, rightPadding)) +
-		bs.Render(border.BottomRight)
+	// Plain bottom border
+	return bs.Render(border.BottomLeft + strings.Repeat(border.Bottom, width) + border.BottomRight)
 }
 
 func buildRightBorder(border lipgloss.Border, height int, borderColor lipgloss.Color, cfg BorderConfig) []string {
@@ -289,22 +271,6 @@ func calculateScrollThumb(scrollPos, totalHeight, viewHeight, borderHeight int) 
 	thumbPos := int(scrollProgress * float64(maxThumbPos))
 
 	return thumbPos, thumbPos + thumbSize
-}
-
-func formatCount(current, total int) string {
-	return strings.Repeat(" ", 1) + itoa(current) + " of " + itoa(total) + " "
-}
-
-func itoa(n int) string {
-	if n == 0 {
-		return "0"
-	}
-	var result []byte
-	for n > 0 {
-		result = append([]byte{byte('0' + n%10)}, result...)
-		n /= 10
-	}
-	return string(result)
 }
 
 func truncateString(s string, maxWidth int) string {

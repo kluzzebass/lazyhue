@@ -22,6 +22,11 @@ type BridgeState struct {
 	Temperatures  map[string]openhue.TemperatureGet
 	LightLevels   map[string]openhue.LightLevelGet
 	DevicePowers  map[string]openhue.DevicePowerGet
+
+	// Bridge-specific resources
+	BridgeResource *openhue.BridgeGet     // The bridge resource itself
+	BridgeHome     *openhue.BridgeHomeGet // The home associated with the bridge
+	AuthApps       []AuthV1Entry          // Authenticated applications
 }
 
 // NewBridgeState creates an empty bridge state.
@@ -488,6 +493,66 @@ func (s *BridgeState) UpdateDevicePowers(powers map[string]openhue.DevicePowerGe
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.DevicePowers = powers
+}
+
+// UpdateBridgeResource sets the bridge resource.
+func (s *BridgeState) UpdateBridgeResource(bridge *openhue.BridgeGet) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.BridgeResource = bridge
+}
+
+// UpdateBridgeHome sets the bridge home resource.
+func (s *BridgeState) UpdateBridgeHome(home *openhue.BridgeHomeGet) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.BridgeHome = home
+}
+
+// GetBridgeResource returns the bridge resource.
+func (s *BridgeState) GetBridgeResource() *openhue.BridgeGet {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.BridgeResource
+}
+
+// GetBridgeHome returns the bridge home resource.
+func (s *BridgeState) GetBridgeHome() *openhue.BridgeHomeGet {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.BridgeHome
+}
+
+// GetBridgeDevice returns the device that owns the bridge service.
+func (s *BridgeState) GetBridgeDevice() (openhue.DeviceGet, bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	for _, device := range s.Devices {
+		if device.Services == nil {
+			continue
+		}
+		for _, svc := range *device.Services {
+			if svc.Rtype != nil && *svc.Rtype == openhue.ResourceIdentifierRtypeBridge {
+				return device, true
+			}
+		}
+	}
+	return openhue.DeviceGet{}, false
+}
+
+// UpdateAuthApps sets the authenticated applications list.
+func (s *BridgeState) UpdateAuthApps(apps []AuthV1Entry) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.AuthApps = apps
+}
+
+// GetAuthApps returns the authenticated applications list.
+func (s *BridgeState) GetAuthApps() []AuthV1Entry {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.AuthApps
 }
 
 // AllDevices returns all devices sorted by name.

@@ -3,10 +3,12 @@ package panels
 import (
 	"fmt"
 	"math"
+	"sort"
 	"strings"
 
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 	"github.com/kluzzebass/lazyhue/internal/hue"
 	"github.com/kluzzebass/lazyhue/internal/ui"
 	"github.com/openhue/openhue-go"
@@ -83,6 +85,10 @@ func (p *DetailsPanel) updateContent() {
 	case EntityDevice:
 		if device, ok := GetDeviceFromItem(*p.item); ok {
 			p.renderDevice(&content, device)
+		}
+	case EntityBridge:
+		if bridgeData, ok := GetBridgeFromItem(*p.item); ok {
+			p.renderBridge(&content, bridgeData)
 		}
 	default:
 		content.WriteString(p.styles.Muted.Render(fmt.Sprintf("Type: %d", p.item.Type)))
@@ -709,6 +715,209 @@ func (p *DetailsPanel) renderDevice(w *strings.Builder, device openhue.DeviceGet
 			}
 			w.WriteString(fmt.Sprintf("  • %s\n", rtype))
 			w.WriteString(fmt.Sprintf("    %s\n", p.styles.Muted.Render(rid)))
+		}
+	}
+}
+
+func (p *DetailsPanel) renderBridge(w *strings.Builder, data BridgeData) {
+	bridge := data.Bridge
+	if bridge == nil {
+		return
+	}
+
+	state := bridge.GetState()
+
+	// Connection status
+	w.WriteString(p.styles.Muted.Render("Status: "))
+	switch bridge.Status {
+	case hue.StatusConnected:
+		w.WriteString(p.styles.Success.Render("Connected"))
+	case hue.StatusConnecting:
+		w.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("#ffff00")).Render("Connecting..."))
+	case hue.StatusPairing:
+		w.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("#ffff00")).Render("Pairing..."))
+	case hue.StatusError:
+		w.WriteString(p.styles.Error.Render("Error"))
+	default:
+		w.WriteString(p.styles.Muted.Render("Disconnected"))
+	}
+	w.WriteString("\n")
+
+	// Network info
+	w.WriteString("\n")
+	w.WriteString(p.styles.Subtitle.Render("Network:"))
+	w.WriteString("\n")
+	w.WriteString(fmt.Sprintf("  IP Address: %s\n", bridge.Info.IPAddress))
+	if bridge.Info.Host != "" && bridge.Info.Host != bridge.Info.IPAddress {
+		w.WriteString(fmt.Sprintf("  mDNS Hostname: %s\n", bridge.Info.Host))
+	}
+	if bridge.Info.InstanceName != "" {
+		w.WriteString(fmt.Sprintf("  mDNS Instance: %s\n", bridge.Info.InstanceName))
+	}
+	w.WriteString(fmt.Sprintf("  Bridge ID: %s\n", bridge.Info.ID))
+
+	// Last sync time
+	if !bridge.LastSync.IsZero() {
+		w.WriteString(fmt.Sprintf("  Last sync: %s\n", bridge.LastSync.Format("15:04:05")))
+	}
+
+	// Error info if any
+	if bridge.LastErr != nil {
+		w.WriteString("\n")
+		w.WriteString(p.styles.Error.Render("Last error: "))
+		w.WriteString(bridge.LastErr.Error())
+		w.WriteString("\n")
+	}
+
+	// Bridge resource info
+	if state != nil {
+		bridgeRes := state.GetBridgeResource()
+		if bridgeRes != nil {
+			w.WriteString("\n")
+			w.WriteString(p.styles.Subtitle.Render("Bridge Resource:"))
+			w.WriteString("\n")
+
+			if bridgeRes.Id != nil {
+				w.WriteString(fmt.Sprintf("  Resource ID: %s\n", *bridgeRes.Id))
+			}
+			if bridgeRes.BridgeId != nil {
+				w.WriteString(fmt.Sprintf("  Bridge ID: %s\n", *bridgeRes.BridgeId))
+			}
+			if bridgeRes.IdV1 != nil {
+				w.WriteString(fmt.Sprintf("  V1 ID: %s\n", *bridgeRes.IdV1))
+			}
+			if bridgeRes.TimeZone != nil && bridgeRes.TimeZone.TimeZone != nil {
+				w.WriteString(fmt.Sprintf("  Timezone: %s\n", *bridgeRes.TimeZone.TimeZone))
+			}
+		}
+
+		// Bridge device info (the physical bridge)
+		if bridgeDevice, ok := state.GetBridgeDevice(); ok {
+			w.WriteString("\n")
+			w.WriteString(p.styles.Subtitle.Render("Hardware:"))
+			w.WriteString("\n")
+
+			if bridgeDevice.ProductData != nil {
+				if bridgeDevice.ProductData.ManufacturerName != nil {
+					w.WriteString(fmt.Sprintf("  Manufacturer: %s\n", *bridgeDevice.ProductData.ManufacturerName))
+				}
+				if bridgeDevice.ProductData.ProductName != nil {
+					w.WriteString(fmt.Sprintf("  Product: %s\n", *bridgeDevice.ProductData.ProductName))
+				}
+				if bridgeDevice.ProductData.ModelId != nil {
+					w.WriteString(fmt.Sprintf("  Model: %s\n", *bridgeDevice.ProductData.ModelId))
+				}
+				if bridgeDevice.ProductData.HardwarePlatformType != nil {
+					w.WriteString(fmt.Sprintf("  Platform: %s\n", *bridgeDevice.ProductData.HardwarePlatformType))
+				}
+				if bridgeDevice.ProductData.SoftwareVersion != nil {
+					w.WriteString(fmt.Sprintf("  Firmware: %s\n", *bridgeDevice.ProductData.SoftwareVersion))
+				}
+				if bridgeDevice.ProductData.Certified != nil {
+					w.WriteString(fmt.Sprintf("  Certified: %v\n", *bridgeDevice.ProductData.Certified))
+				}
+			}
+
+			// Bridge device services
+			if bridgeDevice.Services != nil && len(*bridgeDevice.Services) > 0 {
+				w.WriteString("\n")
+				w.WriteString(p.styles.Subtitle.Render("Bridge Services:"))
+				w.WriteString("\n")
+				for _, svc := range *bridgeDevice.Services {
+					rtype := "unknown"
+					if svc.Rtype != nil {
+						rtype = string(*svc.Rtype)
+					}
+					w.WriteString(fmt.Sprintf("  • %s\n", rtype))
+				}
+			}
+		}
+
+		// Bridge home info
+		bridgeHome := state.GetBridgeHome()
+		if bridgeHome != nil {
+			w.WriteString("\n")
+			w.WriteString(p.styles.Subtitle.Render("Home:"))
+			w.WriteString("\n")
+
+			if bridgeHome.Id != nil {
+				w.WriteString(fmt.Sprintf("  Home ID: %s\n", *bridgeHome.Id))
+			}
+			if bridgeHome.IdV1 != nil {
+				w.WriteString(fmt.Sprintf("  V1 ID: %s\n", *bridgeHome.IdV1))
+			}
+
+			// Children - count by type and show names
+			if bridgeHome.Children != nil && len(*bridgeHome.Children) > 0 {
+				w.WriteString(fmt.Sprintf("  Children: %d devices\n", len(*bridgeHome.Children)))
+
+				// Count by type and collect names
+				typeCounts := make(map[string]int)
+				for _, child := range *bridgeHome.Children {
+					rtype := "unknown"
+					if child.Rtype != nil {
+						rtype = string(*child.Rtype)
+					}
+					typeCounts[rtype]++
+				}
+
+				// Sort type names for stable output
+				typeNames := make([]string, 0, len(typeCounts))
+				for rtype := range typeCounts {
+					typeNames = append(typeNames, rtype)
+				}
+				sort.Strings(typeNames)
+
+				// Show breakdown by type
+				for _, rtype := range typeNames {
+					w.WriteString(fmt.Sprintf("    %s: %d\n", rtype, typeCounts[rtype]))
+				}
+			}
+
+			// Services
+			if bridgeHome.Services != nil && len(*bridgeHome.Services) > 0 {
+				w.WriteString(fmt.Sprintf("  Services: %d\n", len(*bridgeHome.Services)))
+			}
+		}
+
+		// Summary statistics
+		w.WriteString("\n")
+		w.WriteString(p.styles.Subtitle.Render("Summary:"))
+		w.WriteString("\n")
+
+		rooms := state.AllRooms()
+		zones := state.AllZones()
+		lights := state.AllLights()
+		scenes := state.AllScenes()
+		devices := state.AllDevices()
+
+		w.WriteString(fmt.Sprintf("  Rooms: %d\n", len(rooms)))
+		w.WriteString(fmt.Sprintf("  Zones: %d\n", len(zones)))
+		w.WriteString(fmt.Sprintf("  Lights: %d\n", len(lights)))
+		w.WriteString(fmt.Sprintf("  Scenes: %d\n", len(scenes)))
+		w.WriteString(fmt.Sprintf("  Devices: %d\n", len(devices)))
+
+		// Count lights that are on
+		lightsOn := 0
+		for _, light := range lights {
+			if light.IsOn() {
+				lightsOn++
+			}
+		}
+		w.WriteString(fmt.Sprintf("  Lights on: %d/%d\n", lightsOn, len(lights)))
+
+		// Authenticated applications (from V1 API whitelist)
+		authApps := state.GetAuthApps()
+		if len(authApps) > 0 {
+			w.WriteString("\n")
+			w.WriteString(p.styles.Subtitle.Render(fmt.Sprintf("Authenticated Apps (%d):", len(authApps))))
+			w.WriteString("\n")
+			for _, app := range authApps {
+				w.WriteString(fmt.Sprintf("  • %s\n", app.AppName))
+				if app.LastUseDate != "" {
+					w.WriteString(fmt.Sprintf("    Last used: %s\n", app.LastUseDate))
+				}
+			}
 		}
 	}
 }

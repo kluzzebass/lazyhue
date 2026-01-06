@@ -3,6 +3,9 @@ package hue
 import (
 	"context"
 	"crypto/tls"
+	"encoding/json"
+	"fmt"
+	"io"
 	"net/http"
 
 	"github.com/openhue/openhue-go"
@@ -10,7 +13,9 @@ import (
 
 // ExtendedClient wraps the openhue client to add methods not exposed by Home.
 type ExtendedClient struct {
-	api *openhue.ClientWithResponses
+	api      *openhue.ClientWithResponses
+	bridgeIP string
+	apiKey   string
 }
 
 // NewExtendedClient creates a client for extended API access.
@@ -28,7 +33,11 @@ func NewExtendedClient(bridgeIP, apiKey string) (*ExtendedClient, error) {
 		return nil, err
 	}
 
-	return &ExtendedClient{api: client}, nil
+	return &ExtendedClient{
+		api:      client,
+		bridgeIP: bridgeIP,
+		apiKey:   apiKey,
+	}, nil
 }
 
 // GetZones fetches all zones from the bridge.
@@ -145,6 +154,106 @@ func (c *ExtendedClient) GetDevicePowers(ctx context.Context) (map[string]openhu
 	}
 
 	return powers, nil
+}
+
+// GetBridges fetches all bridge resources from the bridge.
+func (c *ExtendedClient) GetBridges(ctx context.Context) ([]openhue.BridgeGet, error) {
+	resp, err := c.api.GetBridgesWithResponse(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	if resp.HTTPResponse.StatusCode != http.StatusOK {
+		return nil, ErrAuthFailed
+	}
+
+	var bridges []openhue.BridgeGet
+	if resp.JSON200 != nil && resp.JSON200.Data != nil {
+		bridges = *resp.JSON200.Data
+	}
+
+	return bridges, nil
+}
+
+// GetBridgeHome fetches the bridge home resource.
+func (c *ExtendedClient) GetBridgeHome(ctx context.Context) (*openhue.BridgeHomeGet, error) {
+	resp, err := c.api.GetBridgeHomesWithResponse(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	if resp.HTTPResponse.StatusCode != http.StatusOK {
+		return nil, ErrAuthFailed
+	}
+
+	if resp.JSON200 != nil && resp.JSON200.Data != nil && len(*resp.JSON200.Data) > 0 {
+		return &(*resp.JSON200.Data)[0], nil
+	}
+
+	return nil, nil
+}
+
+// AuthV1Entry represents an authenticated application from the V1 API whitelist.
+type AuthV1Entry struct {
+	Username    string // The API key/username
+	AppName     string // Application name (from "name" field, format: "app#device")
+	CreateDate  string // When the app was registered
+	LastUseDate string // When the app was last used
+}
+
+// whitelistEntry represents a single entry in the V1 config whitelist.
+type whitelistEntry struct {
+	Name           string `json:"name"`
+	CreateDate     string `json:"create date"`
+	LastUseDate    string `json:"last use date"`
+}
+
+// v1ConfigResponse is the relevant part of the V1 /config response.
+type v1ConfigResponse struct {
+	Whitelist map[string]whitelistEntry `json:"whitelist"`
+}
+
+// GetAuthenticatedApps fetches all authenticated applications via the V1 API config endpoint.
+func (c *ExtendedClient) GetAuthenticatedApps(ctx context.Context) ([]AuthV1Entry, error) {
+	// Make a direct V1 API call to /api/<username>/config
+	url := fmt.Sprintf("https://%s/api/%s/config", c.bridgeIP, c.apiKey)
+
+	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, ErrAuthFailed
+	}
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+
+	var config v1ConfigResponse
+	if err := json.Unmarshal(body, &config); err != nil {
+		return nil, err
+	}
+
+	var apps []AuthV1Entry
+	for username, entry := range config.Whitelist {
+		apps = append(apps, AuthV1Entry{
+			Username:    username,
+			AppName:     entry.Name,
+			CreateDate:  entry.CreateDate,
+			LastUseDate: entry.LastUseDate,
+		})
+	}
+
+	return apps, nil
 }
 
 // Note: Entertainment configurations are not yet supported by openhue-go v0.4.0.

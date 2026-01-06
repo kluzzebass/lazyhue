@@ -24,6 +24,7 @@ type BridgePanel struct {
 	panelTitle   string
 	cursor       int
 	offset       int
+	selectedID   string // Track selection by bridge ID for stability across list changes
 	// Polling indicator: visible for max(operation_duration, minIndicatorVisible)
 	pollingActive bool
 	pollingUntil  time.Time
@@ -46,14 +47,33 @@ func (p *BridgePanel) SetBridges(bridges []*hue.Bridge, activeBridgeID string) {
 	p.bridges = bridges
 	p.activeBridge = activeBridgeID
 
-	// Clamp cursor
 	if len(p.bridges) == 0 {
 		p.cursor = 0
 		p.offset = 0
-	} else if p.cursor >= len(p.bridges) {
-		p.cursor = len(p.bridges) - 1
-		p.ensureCursorVisible()
+		p.selectedID = ""
+		return
 	}
+
+	// Restore cursor position based on selectedID (sticky selection)
+	if p.selectedID != "" {
+		for i, bridge := range p.bridges {
+			if bridge.Info.ID == p.selectedID {
+				p.cursor = i
+				p.ensureCursorVisible()
+				return
+			}
+		}
+	}
+
+	// selectedID not found or empty - clamp cursor and set selectedID
+	if p.cursor >= len(p.bridges) {
+		p.cursor = len(p.bridges) - 1
+	}
+	if p.cursor < 0 {
+		p.cursor = 0
+	}
+	p.selectedID = p.bridges[p.cursor].Info.ID
+	p.ensureCursorVisible()
 }
 
 // SetPolling sets whether the active bridge is being polled.
@@ -101,7 +121,7 @@ func (p *BridgePanel) viewHeight() int {
 	return max(1, p.height-2)
 }
 
-// moveCursor moves the cursor by delta.
+// moveCursor moves the cursor by delta and updates selectedID.
 func (p *BridgePanel) moveCursor(delta int) {
 	if len(p.bridges) == 0 {
 		return
@@ -113,6 +133,8 @@ func (p *BridgePanel) moveCursor(delta int) {
 	if p.cursor >= len(p.bridges) {
 		p.cursor = len(p.bridges) - 1
 	}
+	// Update selectedID for sticky selection
+	p.selectedID = p.bridges[p.cursor].Info.ID
 	p.ensureCursorVisible()
 }
 
@@ -172,9 +194,15 @@ func (p *BridgePanel) Update(msg tea.Msg) tea.Cmd {
 		case key.Matches(msg, key.NewBinding(key.WithKeys("home", "g"))):
 			p.cursor = 0
 			p.offset = 0
+			if len(p.bridges) > 0 {
+				p.selectedID = p.bridges[0].Info.ID
+			}
 		case key.Matches(msg, key.NewBinding(key.WithKeys("end", "G"))):
 			p.cursor = max(0, len(p.bridges)-1)
 			p.ensureCursorVisible()
+			if len(p.bridges) > 0 {
+				p.selectedID = p.bridges[p.cursor].Info.ID
+			}
 		}
 	}
 	return nil
@@ -262,9 +290,23 @@ func (p *BridgePanel) renderBridge(bridge *hue.Bridge, selected, active bool, wi
 		indicatorColor = lipgloss.Color("#888888")
 	}
 
-	name := bridge.Info.Name
-	if name == "" {
-		name = bridge.Info.IPAddress
+	// For connected bridges, use the name from the API
+	// For unconnected bridges, prefer mDNS hostname over instance name
+	var name string
+	if bridge.IsConnected() {
+		name = bridge.Info.Name
+		if name == "" {
+			name = bridge.Info.IPAddress
+		}
+	} else {
+		// Unconnected: prefer mDNS hostname (e.g., "ecb5fa401886.local")
+		if bridge.Info.Host != "" && bridge.Info.Host != bridge.Info.IPAddress {
+			name = bridge.Info.Host
+		} else if bridge.Info.Name != "" {
+			name = bridge.Info.Name
+		} else {
+			name = bridge.Info.IPAddress
+		}
 	}
 
 	// Calculate padding for full-width background
@@ -305,9 +347,39 @@ func (p *BridgePanel) Title() string {
 	return p.panelTitle
 }
 
-// SelectedEntity returns nil for bridge panel (bridges aren't entities).
+// SelectedEntity returns an EntityItem for the selected bridge.
 func (p *BridgePanel) SelectedEntity() (*EntityItem, bool) {
-	return nil, false
+	bridge := p.SelectedBridge()
+	if bridge == nil {
+		return nil, false
+	}
+
+	// For connected bridges, use the name from the API
+	// For unconnected bridges, prefer mDNS hostname over instance name
+	var name string
+	if bridge.IsConnected() {
+		name = bridge.Info.Name
+		if name == "" {
+			name = bridge.Info.IPAddress
+		}
+	} else {
+		// Unconnected: prefer mDNS hostname (e.g., "ecb5fa401886.local")
+		if bridge.Info.Host != "" && bridge.Info.Host != bridge.Info.IPAddress {
+			name = bridge.Info.Host
+		} else if bridge.Info.Name != "" {
+			name = bridge.Info.Name
+		} else {
+			name = bridge.Info.IPAddress
+		}
+	}
+
+	return &EntityItem{
+		ID:     bridge.Info.ID,
+		Name:   name,
+		Type:   EntityBridge,
+		IsOn:   bridge.IsConnected(),
+		RawPtr: BridgeData{Bridge: bridge},
+	}, true
 }
 
 // HasBridges returns true if there are any bridges.
@@ -331,5 +403,7 @@ func (p *BridgePanel) HandleClick(relX, relY int) {
 	itemIndex := p.offset + (relY - 1)
 	if itemIndex >= 0 && itemIndex < len(p.bridges) {
 		p.cursor = itemIndex
+		// Update selectedID for sticky selection
+		p.selectedID = p.bridges[p.cursor].Info.ID
 	}
 }

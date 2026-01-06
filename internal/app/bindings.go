@@ -40,7 +40,6 @@ func (m *Model) initBindings() {
 		{Keys: []string{"shift+tab"}, Display: "S-Tab", Desc: "Prev panel", Action: ui.ActionPrevPanel},
 		{Keys: []string{"]"}, Display: "]", Desc: "Next bridge", Action: ui.ActionNextBridge},
 		{Keys: []string{"["}, Display: "[", Desc: "Prev bridge", Action: ui.ActionPrevBridge},
-		{Keys: []string{"R"}, Display: "R", Desc: "Refresh", Action: ui.ActionRefresh},
 		{Keys: []string{"?"}, Display: "?", Desc: "Help", Action: ui.ActionHelp, Priority: 10},
 		{Keys: []string{"q", "ctrl+c"}, Display: "q", Desc: "Quit", Action: ui.ActionQuit, Priority: 5},
 	}

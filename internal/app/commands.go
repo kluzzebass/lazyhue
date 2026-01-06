@@ -74,7 +74,7 @@ func startSyncTicker() tea.Cmd {
 }
 
 func startDiscoveryTicker() tea.Cmd {
-	return tea.Tick(30*time.Second, func(t time.Time) tea.Msg {
+	return tea.Tick(10*time.Second, func(t time.Time) tea.Msg {
 		return DiscoveryTickMsg{}
 	})
 }

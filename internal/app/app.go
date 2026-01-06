@@ -163,13 +163,19 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if cmd != nil {
 			cmds = append(cmds, cmd)
 		}
+		// Also pass key to focused panel (for viewport scrolling, etc.)
+		if !m.helpPanel.IsVisible() {
+			if panelCmd := m.updateFocusedPanel(msg); panelCmd != nil {
+				cmds = append(cmds, panelCmd)
+			}
+		}
 		return m, tea.Batch(cmds...)
 
 	case tea.MouseMsg:
 		// Handle mouse in help panel when visible
 		if m.helpPanel.IsVisible() {
-			m.helpPanel.Update(msg)
-			return m, nil
+			cmd := m.helpPanel.Update(msg)
+			return m, cmd
 		}
 		cmd := m.handleMouse(msg)
 		if cmd != nil {
@@ -271,6 +277,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case ClearStatusMsg:
 		m.clearStatus()
+
+	case panels.HelpExecuteMsg:
+		// Execute action selected from help panel
+		m.statusBar.ClearPopupHints()
+		if cmd := m.dispatch(msg.Action); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
 	}
 
 	// Update focused panel (but not when help is visible)

@@ -143,6 +143,11 @@ func (b *Bridge) SyncAll(ctx context.Context) error {
 	_ = b.SyncLightLevels(ctx)
 	_ = b.SyncDevicePowers(ctx)
 
+	// Bridge resource, home, and auth apps (non-fatal)
+	_ = b.SyncBridgeResource(ctx)
+	_ = b.SyncBridgeHome(ctx)
+	_ = b.SyncAuthApps(ctx)
+
 	// Update bridge name from device metadata
 	if name := b.state.BridgeName(); name != "" {
 		b.mu.Lock()
@@ -343,6 +348,65 @@ func (b *Bridge) SyncDevicePowers(ctx context.Context) error {
 	}
 
 	b.state.UpdateDevicePowers(powers)
+	return nil
+}
+
+// SyncBridgeResource fetches the bridge resource.
+func (b *Bridge) SyncBridgeResource(ctx context.Context) error {
+	b.mu.RLock()
+	extended := b.extended
+	b.mu.RUnlock()
+
+	if extended == nil {
+		return ErrAuthFailed
+	}
+
+	bridges, err := extended.GetBridges(ctx)
+	if err != nil {
+		return err
+	}
+
+	if len(bridges) > 0 {
+		b.state.UpdateBridgeResource(&bridges[0])
+	}
+	return nil
+}
+
+// SyncBridgeHome fetches the bridge home resource.
+func (b *Bridge) SyncBridgeHome(ctx context.Context) error {
+	b.mu.RLock()
+	extended := b.extended
+	b.mu.RUnlock()
+
+	if extended == nil {
+		return ErrAuthFailed
+	}
+
+	home, err := extended.GetBridgeHome(ctx)
+	if err != nil {
+		return err
+	}
+
+	b.state.UpdateBridgeHome(home)
+	return nil
+}
+
+// SyncAuthApps fetches the authenticated applications list.
+func (b *Bridge) SyncAuthApps(ctx context.Context) error {
+	b.mu.RLock()
+	extended := b.extended
+	b.mu.RUnlock()
+
+	if extended == nil {
+		return ErrAuthFailed
+	}
+
+	apps, err := extended.GetAuthenticatedApps(ctx)
+	if err != nil {
+		return err
+	}
+
+	b.state.UpdateAuthApps(apps)
 	return nil
 }
 

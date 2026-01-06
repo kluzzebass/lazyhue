@@ -3,6 +3,7 @@ package app
 import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/kluzzebass/lazyhue/internal/ui"
+	"github.com/kluzzebass/lazyhue/internal/ui/panels"
 )
 
 // dispatch executes an action and returns a tea.Cmd if any.
@@ -74,11 +75,6 @@ func (m *Model) dispatch(action ui.Action) tea.Cmd {
 		}
 
 	// Global
-	case ui.ActionRefresh:
-		if bridge := m.manager.GetActiveBridge(); bridge != nil {
-			m.setStatus("Refreshing...", false)
-			return syncBridgeState(bridge)
-		}
 	case ui.ActionHelp:
 		m.toggleHelp()
 	case ui.ActionQuit:
@@ -163,11 +159,32 @@ func (m *Model) prevPanel() {
 
 func (m *Model) toggleHelp() {
 	if panel := m.focusedPanel(); panel != nil {
-		m.helpPanel.SetPanelBindings(panel.Title(), m.panelBindings[m.focusedPanelID()])
+		panelID := m.focusedPanelID()
+		bindings := m.panelBindings[panelID]
+		// Filter bindings based on selection for hierarchy panel
+		if panelID == PanelIDHierarchy {
+			bindings = m.filterBindingsForSelection(bindings)
+		}
+		m.helpPanel.SetPanelBindings(panel.Title(), bindings)
 	} else {
 		m.helpPanel.SetPanelBindings("", nil)
 	}
 	m.helpPanel.SetGlobalBindings(m.globalBindings)
+
+	// Build panel focus keys dynamically
+	panelKeys := []panels.PanelInfo{
+		{Key: "0", Title: "Details"},
+	}
+	for _, id := range m.panelOrder {
+		if panel := m.panelMap[id]; panel != nil {
+			panelKeys = append(panelKeys, panels.PanelInfo{
+				Key:   panel.Key(),
+				Title: panel.Title(),
+			})
+		}
+	}
+	m.helpPanel.SetPanelKeys(panelKeys)
+
 	m.helpPanel.Toggle()
 	if m.helpPanel.IsVisible() {
 		m.statusBar.SetPopupHints("Esc close  ↑/↓ scroll")
