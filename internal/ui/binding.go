@@ -33,6 +33,8 @@ const (
 	ActionBrightnessUp   Action = "brightness_up"
 	ActionBrightnessDown Action = "brightness_down"
 	ActionExpandCollapse Action = "expand_collapse"
+	ActionExpand         Action = "expand"
+	ActionCollapse       Action = "collapse"
 
 	// Tabs
 	ActionNextTab Action = "next_tab"

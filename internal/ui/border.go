@@ -8,15 +8,16 @@ import (
 
 // BorderConfig holds configuration for custom border rendering.
 type BorderConfig struct {
-	PanelKey    string   // Panel key number (e.g., "1")
-	Title       string   // Title to embed in top border (e.g., "Bridges")
-	Tabs        []string // Tab names for tabbed panels
-	ActiveTab   int      // Which tab is active
-	ItemIndex   int      // Current item index (0-based)
-	ItemCount   int      // Total item count
-	ScrollPos   int      // Current scroll position
-	TotalHeight int      // Total scrollable height
-	ViewHeight  int      // Visible viewport height
+	PanelKey       string   // Panel key number (e.g., "1")
+	Title          string   // Title to embed in top border (e.g., "Bridges")
+	TitleIndicator string   // Optional indicator after title (e.g., "●" for activity)
+	Tabs           []string // Tab names for tabbed panels
+	ActiveTab      int      // Which tab is active
+	ItemIndex      int      // Current item index (0-based)
+	ItemCount      int      // Total item count
+	ScrollPos      int      // Current scroll position
+	TotalHeight    int      // Total scrollable height
+	ViewHeight     int      // Visible viewport height
 }
 
 // RenderBorderedPanel renders content with custom borders including title, tabs, and scroll indicators.
@@ -112,38 +113,56 @@ func buildTitledTopBorder(border lipgloss.Border, width int, borderColor lipglos
 
 	// Build title
 	title := cfg.Title
-	maxTitleLen := width - keyWidth - 6 // leave room for corners and border segments
+	maxTitleLen := width - keyWidth - 8 // leave room for corners, border segments, and indicator
 	if len(title) > maxTitleLen && maxTitleLen > 2 {
 		title = title[:maxTitleLen-2] + ".."
 	}
 	titleRendered := styles.PanelTitle.Render(title)
 	titleWidth := lipgloss.Width(titleRendered)
 
+	// Build indicator (e.g., "●" for activity)
+	indicatorRendered := ""
+	indicatorWidth := 0
+	if cfg.TitleIndicator != "" {
+		indicatorRendered = styles.PanelTitle.Render(cfg.TitleIndicator)
+		indicatorWidth = lipgloss.Width(indicatorRendered)
+	}
+
 	// Calculate border segments
-	// Layout: TopLeft + border + [key] + border + title + border... + TopRight
+	// Layout: TopLeft + border + [key] + border + title + border + indicator + border... + TopRight
 	leftPadding := 1
 	middlePadding := 1 // between key and title
-	rightPadding := width - keyWidth - titleWidth - leftPadding - middlePadding
+	indicatorPadding := 0
+	if indicatorWidth > 0 {
+		indicatorPadding = 1 // border segment before indicator
+	}
+	rightPadding := width - keyWidth - titleWidth - indicatorWidth - leftPadding - middlePadding - indicatorPadding
 
 	if rightPadding < 1 {
 		rightPadding = 1
 	}
 
 	if keyRendered != "" {
-		return bs.Render(border.TopLeft) +
+		result := bs.Render(border.TopLeft) +
 			bs.Render(strings.Repeat(border.Top, leftPadding)) +
 			keyRendered +
 			bs.Render(strings.Repeat(border.Top, middlePadding)) +
-			titleRendered +
-			bs.Render(strings.Repeat(border.Top, rightPadding)) +
-			bs.Render(border.TopRight)
+			titleRendered
+		if indicatorRendered != "" {
+			result += bs.Render(strings.Repeat(border.Top, indicatorPadding)) + indicatorRendered
+		}
+		result += bs.Render(strings.Repeat(border.Top, rightPadding)) + bs.Render(border.TopRight)
+		return result
 	}
 
-	return bs.Render(border.TopLeft) +
+	result := bs.Render(border.TopLeft) +
 		bs.Render(strings.Repeat(border.Top, leftPadding)) +
-		titleRendered +
-		bs.Render(strings.Repeat(border.Top, rightPadding+middlePadding)) +
-		bs.Render(border.TopRight)
+		titleRendered
+	if indicatorRendered != "" {
+		result += bs.Render(strings.Repeat(border.Top, indicatorPadding)) + indicatorRendered
+	}
+	result += bs.Render(strings.Repeat(border.Top, rightPadding+middlePadding)) + bs.Render(border.TopRight)
+	return result
 }
 
 func buildTabbedTopBorder(border lipgloss.Border, width int, borderColor lipgloss.Color, styles Styles, cfg BorderConfig) string {

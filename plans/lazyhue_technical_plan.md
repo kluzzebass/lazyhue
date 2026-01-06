@@ -32,6 +32,18 @@ todos:
   - id: help-overlay
     content: Build help overlay with full keybinding reference
     status: completed
+  - id: details-panel-complete
+    content: Fill in details panel with comprehensive info for all entity types
+    status: completed
+  - id: zones-support
+    content: Fix zones listing via extended API client (GetZones)
+    status: completed
+  - id: entertainment-support
+    content: Entertainment areas - blocked by openhue-go limitations (no types defined)
+    status: blocked
+  - id: merge-panels
+    content: Merged Scenes, Groups, Lights, Devices into unified Hierarchy panel
+    status: completed
   - id: color-picker
     content: Implement color picker for color-capable lights
     status: pending
@@ -40,12 +52,6 @@ todos:
     status: pending
   - id: visual-mode
     content: Implement visual/multi-select mode for bulk operations
-    status: pending
-  - id: zones-support
-    content: Implement zones listing and control (currently placeholder)
-    status: pending
-  - id: entertainment-support
-    content: Implement entertainment areas listing and control (currently placeholder)
     status: pending
   - id: brightness-slider
     content: Implement brightness slider popup (b key)

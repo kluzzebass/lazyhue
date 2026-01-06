@@ -56,6 +56,11 @@ func syncLightsAndGroups(bridge *hue.Bridge) tea.Cmd {
 		if err := bridge.SyncGroupedLights(ctx); err != nil {
 			return StateSyncErrorMsg{BridgeID: bridge.Info.ID, Err: err}
 		}
+		// Sync sensor services for live updates (non-fatal if they fail)
+		_ = bridge.SyncMotionSensors(ctx)
+		_ = bridge.SyncTemperatures(ctx)
+		_ = bridge.SyncLightLevels(ctx)
+		_ = bridge.SyncDevicePowers(ctx)
 		return LightsSyncedMsg{BridgeID: bridge.Info.ID}
 	}
 }

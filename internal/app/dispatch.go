@@ -57,19 +57,19 @@ func (m *Model) dispatch(action ui.Action) tea.Cmd {
 	case ui.ActionBrightnessDown:
 		return m.adjustBrightness(-10)
 	case ui.ActionExpandCollapse:
-		if m.focusedPanelID() == PanelIDScenes {
-			m.scenesPanel().ToggleSelected()
+		if m.focusedPanelID() == PanelIDHierarchy {
+			m.hierarchyPanel().ToggleSelected()
 		}
-
-	// Tabs
-	case ui.ActionNextTab:
-		if m.focusedPanelID() == PanelIDGroups {
-			m.groupsPanel().NextTab()
+	case ui.ActionExpand:
+		// Pass to the hierarchy panel's Update which handles right/l key for expand
+		if m.focusedPanelID() == PanelIDHierarchy {
+			m.hierarchyPanel().Update(tea.KeyMsg{Type: tea.KeyRight})
 			m.syncSelectionFromFocusedPanel()
 		}
-	case ui.ActionPrevTab:
-		if m.focusedPanelID() == PanelIDGroups {
-			m.groupsPanel().PrevTab()
+	case ui.ActionCollapse:
+		// Pass to the hierarchy panel's Update which handles left/h key for collapse
+		if m.focusedPanelID() == PanelIDHierarchy {
+			m.hierarchyPanel().Update(tea.KeyMsg{Type: tea.KeyLeft})
 			m.syncSelectionFromFocusedPanel()
 		}
 

@@ -3,6 +3,7 @@ package app
 import (
 	"sort"
 
+	"github.com/kluzzebass/lazyhue/internal/ui"
 	"github.com/kluzzebass/lazyhue/internal/ui/panels"
 )
 
@@ -12,20 +13,8 @@ func (m *Model) bridgePanel() *panels.BridgePanel {
 	return m.panelMap[PanelIDBridges].(*panels.BridgePanel)
 }
 
-func (m *Model) scenesPanel() *panels.TreePanel {
-	return m.panelMap[PanelIDScenes].(*panels.TreePanel)
-}
-
-func (m *Model) groupsPanel() *panels.TabbedPanel {
-	return m.panelMap[PanelIDGroups].(*panels.TabbedPanel)
-}
-
-func (m *Model) lightsPanel() *panels.ListPanel {
-	return m.panelMap[PanelIDLights].(*panels.ListPanel)
-}
-
-func (m *Model) devicesPanel() *panels.ListPanel {
-	return m.panelMap[PanelIDDevices].(*panels.ListPanel)
+func (m *Model) hierarchyPanel() *panels.TreePanel {
+	return m.panelMap[PanelIDHierarchy].(*panels.TreePanel)
 }
 
 func (m *Model) focusedOnDetail() bool {
@@ -71,19 +60,14 @@ func (m *Model) updateLayout() {
 }
 
 func (m *Model) refreshAllPanels() {
-	m.refreshGroupsPanel()
-	m.refreshLightsPanel()
-	m.refreshDevicesPanel()
-	m.refreshScenesPanel()
+	m.refreshHierarchyPanel()
 	m.updateDetailPanel() // Always refresh details with latest state
 }
 
-func (m *Model) refreshGroupsPanel() {
+func (m *Model) refreshHierarchyPanel() {
 	bridge := m.manager.GetActiveBridge()
 	if bridge == nil {
-		m.groupsPanel().SetItemsByID("Rooms", nil)
-		m.groupsPanel().SetItemsByID("Zones", nil)
-		m.groupsPanel().SetItemsByID("Entertainment", nil)
+		m.hierarchyPanel().SetRoots(nil)
 		return
 	}
 
@@ -92,53 +76,7 @@ func (m *Model) refreshGroupsPanel() {
 		return
 	}
 
-	// Rooms tab
-	m.groupsPanel().SetItemsByID("Rooms", panels.BuildRoomItems(state))
-
-	// Zones tab
-	m.groupsPanel().SetItemsByID("Zones", panels.BuildZoneItems(state))
-
-	// Entertainment tab
-	m.groupsPanel().SetItemsByID("Entertainment", panels.BuildEntertainmentItems(state))
-}
-
-func (m *Model) refreshLightsPanel() {
-	bridge := m.manager.GetActiveBridge()
-	if bridge == nil {
-		m.lightsPanel().SetItems(nil)
-		return
-	}
-	state := bridge.GetState()
-	if state == nil {
-		return
-	}
-	m.lightsPanel().SetItems(panels.BuildLightItems(state))
-}
-
-func (m *Model) refreshDevicesPanel() {
-	bridge := m.manager.GetActiveBridge()
-	if bridge == nil {
-		m.devicesPanel().SetItems(nil)
-		return
-	}
-	state := bridge.GetState()
-	if state == nil {
-		return
-	}
-	m.devicesPanel().SetItems(panels.BuildDeviceItems(state))
-}
-
-func (m *Model) refreshScenesPanel() {
-	bridge := m.manager.GetActiveBridge()
-	if bridge == nil {
-		m.scenesPanel().SetRoots(nil)
-		return
-	}
-	state := bridge.GetState()
-	if state == nil {
-		return
-	}
-	m.scenesPanel().SetRoots(panels.BuildSceneTree(state))
+	m.hierarchyPanel().SetRoots(panels.BuildHierarchyTree(state))
 }
 
 func (m *Model) updateBridgePanel() {
@@ -178,13 +116,73 @@ func (m *Model) clearStatus() {
 }
 
 func (m *Model) updateStatusContext() {
-	// Get focused panel's bindings and pass to status bar
 	panelID := m.focusedPanelID()
-	if bindings, ok := m.panelBindings[panelID]; ok {
-		m.statusBar.SetBindings(bindings)
-	} else {
+	bindings, ok := m.panelBindings[panelID]
+	if !ok {
 		m.statusBar.SetBindings(nil)
+		return
 	}
+
+	// For hierarchy panel, filter bindings based on selected entity type
+	if panelID == PanelIDHierarchy {
+		bindings = m.filterBindingsForSelection(bindings)
+	}
+
+	m.statusBar.SetBindings(bindings)
+}
+
+// filterBindingsForSelection returns only relevant bindings for the current selection.
+func (m *Model) filterBindingsForSelection(bindings []ui.Binding) []ui.Binding {
+	// If on a group node (no item selected), only show navigation
+	if m.selectedItem == nil {
+		return filterBindingsByAction(bindings,
+			ui.ActionSelect, ui.ActionExpand, ui.ActionCollapse)
+	}
+
+	switch m.selectedItem.Type {
+	case panels.EntityLight:
+		// Lights: toggle, on/off, brightness
+		return filterBindingsByAction(bindings,
+			ui.ActionSelect, ui.ActionToggle, ui.ActionTurnOn, ui.ActionTurnOff,
+			ui.ActionBrightnessUp, ui.ActionBrightnessDown,
+			ui.ActionExpand, ui.ActionCollapse)
+
+	case panels.EntityScene:
+		// Scenes: activate only
+		return filterBindingsByAction(bindings,
+			ui.ActionSelect, ui.ActionExpand, ui.ActionCollapse)
+
+	case panels.EntityDevice:
+		// Devices: just select (view details)
+		return filterBindingsByAction(bindings,
+			ui.ActionSelect, ui.ActionExpand, ui.ActionCollapse)
+
+	case panels.EntityRoom, panels.EntityZone:
+		// Rooms/Zones: toggle (grouped light), brightness
+		return filterBindingsByAction(bindings,
+			ui.ActionSelect, ui.ActionToggle,
+			ui.ActionBrightnessUp, ui.ActionBrightnessDown,
+			ui.ActionExpand, ui.ActionCollapse)
+
+	default:
+		return bindings
+	}
+}
+
+// filterBindingsByAction returns only bindings matching the given actions.
+func filterBindingsByAction(bindings []ui.Binding, actions ...ui.Action) []ui.Binding {
+	actionSet := make(map[ui.Action]bool)
+	for _, a := range actions {
+		actionSet[a] = true
+	}
+
+	var filtered []ui.Binding
+	for _, b := range bindings {
+		if actionSet[b.Action] {
+			filtered = append(filtered, b)
+		}
+	}
+	return filtered
 }
 
 

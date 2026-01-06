@@ -43,9 +43,10 @@ type Bridge struct {
 	LastSync time.Time
 	LastErr  error
 
-	home  *openhue.Home
-	state *BridgeState
-	mu    sync.RWMutex
+	home     *openhue.Home
+	extended *ExtendedClient
+	state    *BridgeState
+	mu       sync.RWMutex
 }
 
 // NewBridge creates a new bridge connection.
@@ -71,7 +72,16 @@ func (b *Bridge) Connect(apiKey string) error {
 		return err
 	}
 
+	// Create extended client for zones and other APIs not exposed by Home
+	extended, err := NewExtendedClient(b.Info.IPAddress, apiKey)
+	if err != nil {
+		b.Status = StatusError
+		b.LastErr = err
+		return err
+	}
+
 	b.home = home
+	b.extended = extended
 	b.Status = StatusConnected
 	b.LastErr = nil
 	return nil
@@ -115,6 +125,9 @@ func (b *Bridge) SyncAll(ctx context.Context) error {
 	if err := b.SyncRooms(ctx); err != nil {
 		return err
 	}
+	if err := b.SyncZones(ctx); err != nil {
+		return err
+	}
 	if err := b.SyncGroupedLights(ctx); err != nil {
 		return err
 	}
@@ -124,6 +137,11 @@ func (b *Bridge) SyncAll(ctx context.Context) error {
 	if err := b.SyncDevices(ctx); err != nil {
 		return err
 	}
+	// Sensor services (non-fatal if they fail - device may not have them)
+	_ = b.SyncMotionSensors(ctx)
+	_ = b.SyncTemperatures(ctx)
+	_ = b.SyncLightLevels(ctx)
+	_ = b.SyncDevicePowers(ctx)
 
 	// Update bridge name from device metadata
 	if name := b.state.BridgeName(); name != "" {
@@ -173,6 +191,25 @@ func (b *Bridge) SyncRooms(ctx context.Context) error {
 	}
 
 	b.state.UpdateRooms(rooms)
+	return nil
+}
+
+// SyncZones fetches only zones from the bridge.
+func (b *Bridge) SyncZones(ctx context.Context) error {
+	b.mu.RLock()
+	extended := b.extended
+	b.mu.RUnlock()
+
+	if extended == nil {
+		return ErrAuthFailed
+	}
+
+	zones, err := extended.GetZones(ctx)
+	if err != nil {
+		return err
+	}
+
+	b.state.UpdateZones(zones)
 	return nil
 }
 
@@ -230,6 +267,82 @@ func (b *Bridge) SyncDevices(ctx context.Context) error {
 	}
 
 	b.state.UpdateDevices(devices)
+	return nil
+}
+
+// SyncMotionSensors fetches only motion sensors from the bridge.
+func (b *Bridge) SyncMotionSensors(ctx context.Context) error {
+	b.mu.RLock()
+	extended := b.extended
+	b.mu.RUnlock()
+
+	if extended == nil {
+		return ErrAuthFailed
+	}
+
+	sensors, err := extended.GetMotionSensors(ctx)
+	if err != nil {
+		return err
+	}
+
+	b.state.UpdateMotionSensors(sensors)
+	return nil
+}
+
+// SyncTemperatures fetches only temperature sensors from the bridge.
+func (b *Bridge) SyncTemperatures(ctx context.Context) error {
+	b.mu.RLock()
+	extended := b.extended
+	b.mu.RUnlock()
+
+	if extended == nil {
+		return ErrAuthFailed
+	}
+
+	temps, err := extended.GetTemperatures(ctx)
+	if err != nil {
+		return err
+	}
+
+	b.state.UpdateTemperatures(temps)
+	return nil
+}
+
+// SyncLightLevels fetches only light level sensors from the bridge.
+func (b *Bridge) SyncLightLevels(ctx context.Context) error {
+	b.mu.RLock()
+	extended := b.extended
+	b.mu.RUnlock()
+
+	if extended == nil {
+		return ErrAuthFailed
+	}
+
+	levels, err := extended.GetLightLevels(ctx)
+	if err != nil {
+		return err
+	}
+
+	b.state.UpdateLightLevels(levels)
+	return nil
+}
+
+// SyncDevicePowers fetches only device power (battery) statuses from the bridge.
+func (b *Bridge) SyncDevicePowers(ctx context.Context) error {
+	b.mu.RLock()
+	extended := b.extended
+	b.mu.RUnlock()
+
+	if extended == nil {
+		return ErrAuthFailed
+	}
+
+	powers, err := extended.GetDevicePowers(ctx)
+	if err != nil {
+		return err
+	}
+
+	b.state.UpdateDevicePowers(powers)
 	return nil
 }
 

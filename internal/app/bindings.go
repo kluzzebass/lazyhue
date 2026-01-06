@@ -13,26 +13,15 @@ func (m *Model) initBindings() {
 			{Keys: []string{"enter"}, Display: "<enter>", Desc: "Select", Action: ui.ActionSelect, Priority: 100},
 			{Keys: []string{"P"}, Display: "P", Desc: "Pair bridge", Action: ui.ActionPairBridge, Priority: 90},
 		},
-		PanelIDScenes: {
-			{Keys: []string{"enter"}, Display: "<enter>", Desc: "Activate", Action: ui.ActionSelect, Priority: 100},
-			{Keys: []string{" "}, Display: "<space>", Desc: "Expand/Collapse", Action: ui.ActionExpandCollapse, Priority: 90},
-		},
-		PanelIDGroups: {
-			{Keys: []string{" "}, Display: "<space>", Desc: "Toggle", Action: ui.ActionToggle, Priority: 100},
-			{Keys: []string{"+", "="}, Display: "+", Desc: "Brighter", Action: ui.ActionBrightnessUp, Priority: 80},
-			{Keys: []string{"-"}, Display: "-", Desc: "Dimmer", Action: ui.ActionBrightnessDown, Priority: 80},
-			{Keys: []string{"left", "h"}, Display: "←/h", Desc: "Prev tab", Action: ui.ActionPrevTab, Priority: 70},
-			{Keys: []string{"right", "l"}, Display: "→/l", Desc: "Next tab", Action: ui.ActionNextTab, Priority: 70},
-		},
-		PanelIDLights: {
-			{Keys: []string{" "}, Display: "<space>", Desc: "Toggle", Action: ui.ActionToggle, Priority: 100},
-			{Keys: []string{"o"}, Display: "o", Desc: "Turn on", Action: ui.ActionTurnOn, Priority: 90},
-			{Keys: []string{"O"}, Display: "O", Desc: "Turn off", Action: ui.ActionTurnOff, Priority: 90},
-			{Keys: []string{"+", "="}, Display: "+", Desc: "Brighter", Action: ui.ActionBrightnessUp, Priority: 80},
-			{Keys: []string{"-"}, Display: "-", Desc: "Dimmer", Action: ui.ActionBrightnessDown, Priority: 80},
-		},
-		PanelIDDevices: {
-			{Keys: []string{"enter"}, Display: "<enter>", Desc: "Select", Action: ui.ActionSelect, Priority: 100},
+		PanelIDHierarchy: {
+			{Keys: []string{"enter"}, Display: "<enter>", Desc: "Select/Activate", Action: ui.ActionSelect, Priority: 100},
+			{Keys: []string{" "}, Display: "<space>", Desc: "Toggle light", Action: ui.ActionToggle, Priority: 95},
+			{Keys: []string{"left", "h"}, Display: "←/h", Desc: "Collapse", Action: ui.ActionCollapse, Priority: 90},
+			{Keys: []string{"right", "l"}, Display: "→/l", Desc: "Expand", Action: ui.ActionExpand, Priority: 90},
+			{Keys: []string{"o"}, Display: "o", Desc: "Turn on", Action: ui.ActionTurnOn, Priority: 80},
+			{Keys: []string{"O"}, Display: "O", Desc: "Turn off", Action: ui.ActionTurnOff, Priority: 80},
+			{Keys: []string{"+", "="}, Display: "+", Desc: "Brighter", Action: ui.ActionBrightnessUp, Priority: 70},
+			{Keys: []string{"-"}, Display: "-", Desc: "Dimmer", Action: ui.ActionBrightnessDown, Priority: 70},
 		},
 		PanelIDDetail: {
 			{Keys: []string{"esc"}, Display: "<esc>", Desc: "Back", Action: ui.ActionBack, Priority: 100},

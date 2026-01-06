@@ -340,3 +340,37 @@ func (p *TabbedPanel) HasItems() bool {
 	}
 	return false
 }
+
+// HandleClick handles a mouse click at relative coordinates within the panel.
+func (p *TabbedPanel) HandleClick(relX, relY int) {
+	// Check if click is in the top border row (y=0) where tabs are
+	if relY == 0 {
+		// Calculate tab positions
+		// Layout: border + [key] + border + tab1 + sep + tab2 + sep + tab3 + ...
+		// The panel key takes about 4 chars "[3]" plus some border
+		startX := 5 // Skip "╭[3]─"
+
+		for i, tab := range p.tabs {
+			tabWidth := lipgloss.Width(tab.Title)
+			endX := startX + tabWidth
+
+			if relX >= startX && relX < endX {
+				p.activeTab = i
+				return
+			}
+
+			// Move past this tab and the separator "─"
+			startX = endX + 1
+		}
+		return
+	}
+
+	// Click on content area - select item
+	if relY >= 1 && p.activeTab >= 0 && p.activeTab < len(p.tabs) {
+		tab := &p.tabs[p.activeTab]
+		itemIndex := tab.Offset + (relY - 1)
+		if itemIndex >= 0 && itemIndex < len(tab.Items) {
+			tab.Cursor = itemIndex
+		}
+	}
+}

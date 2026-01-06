@@ -78,11 +78,11 @@ func (m *Model) handleSelect() tea.Cmd {
 		return nil
 	}
 
-	// Scene panel: toggle group or activate scene
-	if m.focusedPanelID() == PanelIDScenes {
-		sp := m.scenesPanel()
-		if sp.IsGroupSelected() {
-			sp.ToggleSelected()
+	// Hierarchy panel: toggle group or activate scene
+	if m.focusedPanelID() == PanelIDHierarchy {
+		hp := m.hierarchyPanel()
+		if hp.IsGroupSelected() {
+			hp.ToggleSelected()
 			return nil
 		}
 	}
@@ -100,19 +100,25 @@ func (m *Model) handleSelect() tea.Cmd {
 func (m *Model) handleMouse(msg tea.MouseMsg) tea.Cmd {
 	defer m.updateStatusContext()
 
-	if msg.Action != tea.MouseActionPress {
+	// Use layout tree to find clicked panel
+	leaf := m.layoutTree.At(msg.X, msg.Y)
+	if leaf == nil {
 		return nil
 	}
 
-	// Use layout tree to find clicked panel
-	if leaf := m.layoutTree.At(msg.X, msg.Y); leaf != nil {
+	// Get panel bounds for relative coordinate calculation
+	bounds := m.layoutTree.Bounds(leaf.ID)
+	relX := msg.X - bounds.X
+	relY := msg.Y - bounds.Y
+
+	// Handle panel focus and item selection on click
+	if msg.Action == tea.MouseActionPress && msg.Button == tea.MouseButtonLeft {
 		if leaf.ID == PanelIDDetail {
 			if m.focusIndex >= 0 {
 				m.lastFocusIndex = m.focusIndex
 			}
 			m.focusIndex = -1
 		} else {
-			// Find index in panelOrder
 			for i, id := range m.panelOrder {
 				if id == leaf.ID {
 					m.focusIndex = i
@@ -120,8 +126,26 @@ func (m *Model) handleMouse(msg tea.MouseMsg) tea.Cmd {
 				}
 			}
 		}
+
+		// Pass relative coordinates to panels for item selection
+		switch leaf.ID {
+		case PanelIDBridges:
+			m.bridgePanel().HandleClick(relX, relY)
+		case PanelIDHierarchy:
+			m.hierarchyPanel().HandleClick(relX, relY)
+		}
+
 		m.syncSelectionFromFocusedPanel()
 	}
+
+	// Pass scroll events to focused panel
+	if msg.Button == tea.MouseButtonWheelUp || msg.Button == tea.MouseButtonWheelDown {
+		if panel := m.focusedPanel(); panel != nil {
+			panel.Update(msg)
+			m.syncSelectionFromFocusedPanel()
+		}
+	}
+
 	return nil
 }
 
@@ -227,5 +251,6 @@ func (m *Model) startBridgePairing() tea.Cmd {
 	m.setStatus("Press the link button on "+bridgeInfo.Name+"...", false)
 	return startPairing(bridgeInfo)
 }
+
 
 

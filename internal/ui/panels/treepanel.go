@@ -1,6 +1,8 @@
 package panels
 
 import (
+	"strings"
+
 	"github.com/charmbracelet/bubbles/key"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -45,14 +47,58 @@ func (p *TreePanel) SetSize(width, height int) {
 	p.height = height
 }
 
-// SetRoots sets the tree data.
+// SetRoots sets the tree data, preserving expanded state from previous tree.
 func (p *TreePanel) SetRoots(roots []*TreeNode) {
+	// Save current expanded state before replacing
+	expandedState := p.getExpandedState()
+
 	p.roots = roots
+
+	// Restore expanded state to new tree
+	p.restoreExpandedState(expandedState)
+
 	p.rebuildFlatList()
 	// Keep cursor in bounds
 	if p.cursor >= len(p.flatList) {
 		p.cursor = max(0, len(p.flatList)-1)
 	}
+}
+
+// getExpandedState captures the expanded state of all nodes, keyed by path.
+func (p *TreePanel) getExpandedState() map[string]bool {
+	state := make(map[string]bool)
+	var walk func(nodes []*TreeNode, path string)
+	walk = func(nodes []*TreeNode, path string) {
+		for _, node := range nodes {
+			nodePath := path + "/" + node.Label
+			state[nodePath] = node.Expanded
+			if len(node.Children) > 0 {
+				walk(node.Children, nodePath)
+			}
+		}
+	}
+	walk(p.roots, "")
+	return state
+}
+
+// restoreExpandedState applies saved expanded state to the new tree.
+func (p *TreePanel) restoreExpandedState(state map[string]bool) {
+	if len(state) == 0 {
+		return // First load, keep defaults
+	}
+	var walk func(nodes []*TreeNode, path string)
+	walk = func(nodes []*TreeNode, path string) {
+		for _, node := range nodes {
+			nodePath := path + "/" + node.Label
+			if expanded, ok := state[nodePath]; ok {
+				node.Expanded = expanded
+			}
+			if len(node.Children) > 0 {
+				walk(node.Children, nodePath)
+			}
+		}
+	}
+	walk(p.roots, "")
 }
 
 // rebuildFlatList creates a flat list of visible nodes for navigation.
@@ -249,34 +295,77 @@ func (p *TreePanel) renderNode(node *TreeNode, selected, active bool) string {
 		prefix += "  "
 	}
 
-	// Expand indicator
-	indicator := "  "
+	// Expand indicator for groups
+	expandIndicator := "  "
 	if len(node.Children) > 0 {
 		if node.Expanded {
-			indicator = "▼ "
+			expandIndicator = "▼ "
 		} else {
-			indicator = "▶ "
+			expandIndicator = "▶ "
 		}
 	}
 
+	// Build the line content
 	label := node.Label
-
-	line := prefix + indicator + label
-
-	// Style based on selection and whether it's a group
-	// Use full panel width for background highlight
 	lineWidth := max(1, p.width-2)
-	var style lipgloss.Style
-	if selected && active {
-		style = p.styles.SelectedItem.Width(lineWidth)
-	} else if node.Item == nil {
-		// Group header
-		style = p.styles.Muted.Bold(true).Width(lineWidth)
+
+	// If this is a light with a color, we need to render the indicator separately
+	var line string
+	if node.Item != nil && node.Item.IndicatorColor != "" && len(label) > 0 {
+		// Split off the first character (brightness indicator) and color it
+		runes := []rune(label)
+		indicator := string(runes[0])
+		rest := string(runes[1:])
+
+		// Build line with colored indicator
+		plainLine := prefix + expandIndicator + indicator + rest
+		visibleWidth := lipgloss.Width(plainLine)
+		padding := ""
+		if visibleWidth < lineWidth {
+			padding = strings.Repeat(" ", lineWidth-visibleWidth)
+		}
+
+		// Apply selection style to everything except the colored indicator
+		var style lipgloss.Style
+		if selected && active {
+			style = p.styles.SelectedItem
+		} else {
+			style = p.styles.ListItem
+		}
+
+		// For the colored indicator, keep its foreground but inherit background from selection
+		indicatorStyle := lipgloss.NewStyle().
+			Foreground(lipgloss.Color(node.Item.IndicatorColor))
+		if selected && active {
+			// Copy the background from SelectedItem style
+			indicatorStyle = indicatorStyle.Background(p.styles.SelectedItem.GetBackground())
+		}
+		coloredIndicator := indicatorStyle.Render(indicator)
+
+		// Render: prefix + expandIndicator styled, then colored indicator, then rest + padding styled
+		styledPrefix := style.Render(prefix + expandIndicator)
+		styledRest := style.Render(rest + padding)
+		line = styledPrefix + coloredIndicator + styledRest
 	} else {
-		style = p.styles.ListItem.Width(lineWidth)
+		// No special coloring needed
+		line = prefix + expandIndicator + label
+		visibleWidth := lipgloss.Width(line)
+		if visibleWidth < lineWidth {
+			line = line + strings.Repeat(" ", lineWidth-visibleWidth)
+		}
+
+		var style lipgloss.Style
+		if selected && active {
+			style = p.styles.SelectedItem
+		} else if node.Item == nil {
+			style = p.styles.Muted.Bold(true)
+		} else {
+			style = p.styles.ListItem
+		}
+		line = style.Render(line)
 	}
 
-	return style.Render(line)
+	return line
 }
 
 // nodeDepth finds the depth of a node.
@@ -329,4 +418,36 @@ func (p *TreePanel) SelectedNode() *TreeNode {
 		return p.flatList[p.cursor]
 	}
 	return nil
+}
+
+// HandleClick handles a mouse click at relative coordinates within the panel.
+func (p *TreePanel) HandleClick(relX, relY int) {
+	// Content starts at y=1 (after top border), x=1 (after left border)
+	if relY < 1 {
+		return
+	}
+
+	// Calculate which item was clicked
+	itemIndex := p.offset + (relY - 1)
+	if itemIndex >= 0 && itemIndex < len(p.flatList) {
+		node := p.flatList[itemIndex]
+		wasAlreadySelected := (itemIndex == p.cursor)
+		p.cursor = itemIndex
+
+		// Toggle expand/collapse if:
+		// 1. Click is on the expand/collapse indicator, OR
+		// 2. Clicking on an already-selected group node
+		if len(node.Children) > 0 {
+			depth := p.nodeDepth(node)
+			indicatorStart := 1 + (depth * 2) // 1 for border, then indentation
+			indicatorEnd := indicatorStart + 2 // indicator is 2 chars wide (▶ or ▼ + space)
+
+			clickedOnIndicator := relX >= indicatorStart && relX < indicatorEnd
+
+			if clickedOnIndicator || wasAlreadySelected {
+				node.Expanded = !node.Expanded
+				p.rebuildFlatList()
+			}
+		}
+	}
 }

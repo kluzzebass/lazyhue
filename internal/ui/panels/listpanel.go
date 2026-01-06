@@ -236,3 +236,17 @@ func (p *ListPanel) Index() int {
 func (p *ListPanel) SetDelegate(delegate list.ItemDelegate) {
 	p.delegate = delegate
 }
+
+// HandleClick handles a mouse click at relative coordinates within the panel.
+func (p *ListPanel) HandleClick(relX, relY int) {
+	// Content starts at y=1 (after top border)
+	if relY < 1 {
+		return
+	}
+
+	// Calculate which item was clicked
+	itemIndex := p.offset + (relY - 1)
+	if itemIndex >= 0 && itemIndex < len(p.items) {
+		p.cursor = itemIndex
+	}
+}

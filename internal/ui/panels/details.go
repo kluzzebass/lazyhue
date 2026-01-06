@@ -2,6 +2,7 @@ package panels
 
 import (
 	"fmt"
+	"math"
 	"strings"
 
 	"github.com/charmbracelet/bubbles/viewport"
@@ -65,11 +66,23 @@ func (p *DetailsPanel) updateContent() {
 	switch p.item.Type {
 	case EntityRoom:
 		if room, ok := GetRoomFromItem(*p.item); ok {
-			p.renderRoom(&content, room)
+			p.renderRoom(&content, room, false)
+		}
+	case EntityZone:
+		if zone, ok := GetRoomFromItem(*p.item); ok {
+			p.renderRoom(&content, zone, true) // Zones use same type as rooms
 		}
 	case EntityLight:
 		if light, ok := GetLightFromItem(*p.item); ok {
 			p.renderLight(&content, light)
+		}
+	case EntityScene:
+		if scene, ok := GetSceneFromItem(*p.item); ok {
+			p.renderScene(&content, scene)
+		}
+	case EntityDevice:
+		if device, ok := GetDeviceFromItem(*p.item); ok {
+			p.renderDevice(&content, device)
 		}
 	default:
 		content.WriteString(p.styles.Muted.Render(fmt.Sprintf("Type: %d", p.item.Type)))
@@ -78,9 +91,33 @@ func (p *DetailsPanel) updateContent() {
 	p.viewport.SetContent(content.String())
 }
 
-func (p *DetailsPanel) renderRoom(w *strings.Builder, room openhue.RoomGet) {
+func (p *DetailsPanel) renderRoom(w *strings.Builder, room openhue.RoomGet, isZone bool) {
 	if p.state == nil {
 		return
+	}
+
+	groupType := "Room"
+	if isZone {
+		groupType = "Zone"
+	}
+
+	// ID
+	if room.Id != nil {
+		w.WriteString(p.styles.Muted.Render("ID: "))
+		w.WriteString(*room.Id)
+		w.WriteString("\n")
+	}
+
+	// Type
+	w.WriteString(p.styles.Muted.Render("Type: "))
+	w.WriteString(groupType)
+	w.WriteString("\n")
+
+	// Archetype
+	if room.Metadata != nil && room.Metadata.Archetype != nil {
+		w.WriteString(p.styles.Muted.Render("Archetype: "))
+		w.WriteString(string(*room.Metadata.Archetype))
+		w.WriteString("\n")
 	}
 
 	lights := p.state.RoomLights(room)
@@ -91,6 +128,7 @@ func (p *DetailsPanel) renderRoom(w *strings.Builder, room openhue.RoomGet) {
 		}
 	}
 
+	w.WriteString("\n")
 	status := fmt.Sprintf("Status: %d/%d lights on", onCount, len(lights))
 	w.WriteString(status)
 	w.WriteString("\n")
@@ -103,29 +141,69 @@ func (p *DetailsPanel) renderRoom(w *strings.Builder, room openhue.RoomGet) {
 		}
 	}
 
-	w.WriteString("\n")
-	w.WriteString(p.styles.Subtitle.Render("Lights:"))
-	w.WriteString("\n")
-
-	for _, light := range lights {
-		name := ""
-		if light.Metadata != nil && light.Metadata.Name != nil {
-			name = *light.Metadata.Name
-		}
-		indicator := p.styles.OnOffIndicator(light.IsOn())
-		brightness := ""
-		if light.IsOn() {
-			if light.Dimming != nil && light.Dimming.Brightness != nil {
-				brightness = fmt.Sprintf(" %.0f%%", float64(*light.Dimming.Brightness))
-			}
-		} else {
-			brightness = " Off"
-		}
-		line := fmt.Sprintf("  %s %s%s", indicator, name, brightness)
-		w.WriteString(line)
+	// Lights section
+	if len(lights) > 0 {
 		w.WriteString("\n")
+		w.WriteString(p.styles.Subtitle.Render("Lights:"))
+		w.WriteString("\n")
+
+		for _, light := range lights {
+			name := ""
+			if light.Metadata != nil && light.Metadata.Name != nil {
+				name = *light.Metadata.Name
+			}
+			indicator := p.styles.OnOffIndicator(light.IsOn())
+			brightness := ""
+			if light.IsOn() {
+				if light.Dimming != nil && light.Dimming.Brightness != nil {
+					brightness = fmt.Sprintf(" %.0f%%", float64(*light.Dimming.Brightness))
+				}
+			} else {
+				brightness = " Off"
+			}
+			line := fmt.Sprintf("  %s %s%s", indicator, name, brightness)
+			w.WriteString(line)
+			w.WriteString("\n")
+		}
 	}
 
+	// Children (devices) section
+	if room.Children != nil && len(*room.Children) > 0 {
+		w.WriteString("\n")
+		w.WriteString(p.styles.Subtitle.Render("Children:"))
+		w.WriteString("\n")
+		for _, child := range *room.Children {
+			rtype := "unknown"
+			rid := ""
+			if child.Rtype != nil {
+				rtype = string(*child.Rtype)
+			}
+			if child.Rid != nil {
+				rid = *child.Rid
+			}
+			w.WriteString(fmt.Sprintf("  • %s: %s\n", rtype, p.styles.Muted.Render(rid)))
+		}
+	}
+
+	// Services section
+	if room.Services != nil && len(*room.Services) > 0 {
+		w.WriteString("\n")
+		w.WriteString(p.styles.Subtitle.Render("Services:"))
+		w.WriteString("\n")
+		for _, svc := range *room.Services {
+			rtype := "unknown"
+			rid := ""
+			if svc.Rtype != nil {
+				rtype = string(*svc.Rtype)
+			}
+			if svc.Rid != nil {
+				rid = *svc.Rid
+			}
+			w.WriteString(fmt.Sprintf("  • %s: %s\n", rtype, p.styles.Muted.Render(rid)))
+		}
+	}
+
+	// Scenes section
 	roomID := ""
 	if room.Id != nil {
 		roomID = *room.Id
@@ -146,17 +224,139 @@ func (p *DetailsPanel) renderRoom(w *strings.Builder, room openhue.RoomGet) {
 }
 
 func (p *DetailsPanel) renderLight(w *strings.Builder, light openhue.LightGet) {
+	// Get owning device info for product details
+	var device *openhue.DeviceGet
+	if p.state != nil && light.Owner != nil && light.Owner.Rid != nil {
+		if d, ok := p.state.GetDevice(*light.Owner.Rid); ok {
+			device = &d
+		}
+	}
+
+	// Product info from device
+	if device != nil {
+		if device.ProductData != nil {
+			if device.ProductData.ProductName != nil {
+				w.WriteString(p.styles.Muted.Render("Product: "))
+				w.WriteString(*device.ProductData.ProductName)
+				w.WriteString("\n")
+			}
+			if device.ProductData.ManufacturerName != nil {
+				w.WriteString(p.styles.Muted.Render("Manufacturer: "))
+				w.WriteString(*device.ProductData.ManufacturerName)
+				w.WriteString("\n")
+			}
+			if device.ProductData.ModelId != nil {
+				w.WriteString(p.styles.Muted.Render("Model: "))
+				w.WriteString(*device.ProductData.ModelId)
+				w.WriteString("\n")
+			}
+			if device.ProductData.ProductArchetype != nil {
+				w.WriteString(p.styles.Muted.Render("Archetype: "))
+				w.WriteString(string(*device.ProductData.ProductArchetype))
+				w.WriteString("\n")
+			}
+			if device.ProductData.SoftwareVersion != nil {
+				w.WriteString(p.styles.Muted.Render("Firmware: "))
+				w.WriteString(*device.ProductData.SoftwareVersion)
+				w.WriteString("\n")
+			}
+			if device.ProductData.HardwarePlatformType != nil {
+				w.WriteString(p.styles.Muted.Render("Hardware: "))
+				w.WriteString(*device.ProductData.HardwarePlatformType)
+				w.WriteString("\n")
+			}
+		}
+		w.WriteString("\n")
+	}
+
+	// Light ID
+	if light.Id != nil {
+		w.WriteString(p.styles.Muted.Render("Light ID: "))
+		w.WriteString(*light.Id)
+		w.WriteString("\n")
+	}
+
+	// V1 ID (for legacy API compatibility)
+	if light.IdV1 != nil {
+		w.WriteString(p.styles.Muted.Render("V1 ID: "))
+		w.WriteString(*light.IdV1)
+		w.WriteString("\n")
+	}
+
+	// Type
+	if light.Type != nil {
+		w.WriteString(p.styles.Muted.Render("Type: "))
+		w.WriteString(string(*light.Type))
+		w.WriteString("\n")
+	}
+
+	// Mode
+	if light.Mode != nil {
+		w.WriteString(p.styles.Muted.Render("Mode: "))
+		w.WriteString(string(*light.Mode))
+		w.WriteString("\n")
+	}
+
+	// Status
 	indicator := p.styles.OnOffIndicator(light.IsOn())
 	status := "Off"
 	if light.IsOn() {
 		status = "On"
 	}
-	w.WriteString(fmt.Sprintf("Status: %s %s\n", indicator, status))
+	w.WriteString(fmt.Sprintf("\nStatus: %s %s\n", indicator, status))
 
-	if light.IsOn() && light.Dimming != nil && light.Dimming.Brightness != nil {
-		w.WriteString(fmt.Sprintf("Brightness: %.0f%%\n", float64(*light.Dimming.Brightness)))
+	// Dimming
+	if light.Dimming != nil {
+		if light.Dimming.Brightness != nil {
+			w.WriteString(fmt.Sprintf("Brightness: %.0f%%\n", float64(*light.Dimming.Brightness)))
+		}
+		if light.Dimming.MinDimLevel != nil {
+			w.WriteString(fmt.Sprintf("Min dim level: %.0f%%\n", float64(*light.Dimming.MinDimLevel)))
+		}
 	}
 
+	// Color
+	if light.Color != nil && light.Color.Xy != nil {
+		w.WriteString(fmt.Sprintf("Color XY: (%.4f, %.4f)\n", *light.Color.Xy.X, *light.Color.Xy.Y))
+		if light.Color.Gamut != nil {
+			w.WriteString(p.styles.Muted.Render("Gamut: "))
+			if light.Color.GamutType != nil {
+				w.WriteString(string(*light.Color.GamutType))
+			}
+			w.WriteString("\n")
+		}
+	}
+
+	// Color Temperature
+	if light.ColorTemperature != nil {
+		if light.ColorTemperature.Mirek != nil {
+			mirek := *light.ColorTemperature.Mirek
+			kelvin := 1000000 / int(mirek) // Convert mirek to Kelvin
+			w.WriteString(fmt.Sprintf("Color temp: %d mirek (~%dK)\n", mirek, kelvin))
+		}
+		if light.ColorTemperature.MirekSchema != nil {
+			if light.ColorTemperature.MirekSchema.MirekMinimum != nil && light.ColorTemperature.MirekSchema.MirekMaximum != nil {
+				minK := 1000000 / int(*light.ColorTemperature.MirekSchema.MirekMaximum)
+				maxK := 1000000 / int(*light.ColorTemperature.MirekSchema.MirekMinimum)
+				w.WriteString(fmt.Sprintf("CT range: %dK - %dK\n", minK, maxK))
+			}
+		}
+	}
+
+	// Dynamics
+	if light.Dynamics != nil {
+		w.WriteString("\n")
+		w.WriteString(p.styles.Subtitle.Render("Dynamics:"))
+		w.WriteString("\n")
+		if light.Dynamics.Status != nil {
+			w.WriteString(fmt.Sprintf("  Status: %s\n", *light.Dynamics.Status))
+		}
+		if light.Dynamics.Speed != nil {
+			w.WriteString(fmt.Sprintf("  Speed: %.2f\n", *light.Dynamics.Speed))
+		}
+	}
+
+	// Capabilities
 	w.WriteString("\n")
 	w.WriteString(p.styles.Subtitle.Render("Capabilities:"))
 	w.WriteString("\n")
@@ -169,13 +369,347 @@ func (p *DetailsPanel) renderLight(w *strings.Builder, light openhue.LightGet) {
 		caps = append(caps, "Color")
 	}
 	if light.ColorTemperature != nil {
-		caps = append(caps, "Temperature")
+		caps = append(caps, "Color Temperature")
+	}
+	if light.Gradient != nil {
+		caps = append(caps, "Gradient")
+	}
+	if light.Effects != nil {
+		caps = append(caps, "Effects")
+	}
+	if light.TimedEffects != nil {
+		caps = append(caps, "Timed Effects")
 	}
 
 	if len(caps) > 0 {
-		w.WriteString(fmt.Sprintf("  %s\n", strings.Join(caps, ", ")))
+		for _, cap := range caps {
+			w.WriteString(fmt.Sprintf("  • %s\n", cap))
+		}
 	} else {
 		w.WriteString("  On/Off only\n")
+	}
+
+	// Effects
+	if light.Effects != nil && light.Effects.EffectValues != nil && len(*light.Effects.EffectValues) > 0 {
+		w.WriteString("\n")
+		w.WriteString(p.styles.Subtitle.Render("Available Effects:"))
+		w.WriteString("\n")
+		for _, effect := range *light.Effects.EffectValues {
+			w.WriteString(fmt.Sprintf("  • %s\n", effect))
+		}
+	}
+
+	// Gradient (for gradient-capable lights)
+	if light.Gradient != nil {
+		w.WriteString("\n")
+		w.WriteString(p.styles.Subtitle.Render("Gradient:"))
+		w.WriteString("\n")
+		if light.Gradient.Mode != nil {
+			w.WriteString(fmt.Sprintf("  Mode: %s\n", *light.Gradient.Mode))
+		}
+		if light.Gradient.PixelCount != nil {
+			w.WriteString(fmt.Sprintf("  Pixels: %d\n", *light.Gradient.PixelCount))
+		}
+		if light.Gradient.Points != nil && len(*light.Gradient.Points) > 0 {
+			w.WriteString(fmt.Sprintf("  Points: %d\n", len(*light.Gradient.Points)))
+		}
+	}
+
+	// Signaling
+	if light.Signaling != nil && light.Signaling.SignalValues != nil && len(*light.Signaling.SignalValues) > 0 {
+		w.WriteString("\n")
+		w.WriteString(p.styles.Subtitle.Render("Signaling Modes:"))
+		w.WriteString("\n")
+		for _, sig := range *light.Signaling.SignalValues {
+			w.WriteString(fmt.Sprintf("  • %s\n", sig))
+		}
+	}
+
+	// Powerup behavior
+	if light.Powerup != nil && light.Powerup.Preset != nil {
+		w.WriteString("\n")
+		w.WriteString(p.styles.Muted.Render("Power-on behavior: "))
+		w.WriteString(string(*light.Powerup.Preset))
+		w.WriteString("\n")
+	}
+
+	// Device services (sibling services on the owning device)
+	if device != nil && device.Services != nil && len(*device.Services) > 0 {
+		w.WriteString("\n")
+		w.WriteString(p.styles.Subtitle.Render("Device Services:"))
+		w.WriteString("\n")
+		for _, svc := range *device.Services {
+			rtype := "unknown"
+			if svc.Rtype != nil {
+				rtype = string(*svc.Rtype)
+			}
+			// Mark the current light service
+			if svc.Rid != nil && light.Id != nil && *svc.Rid == *light.Id {
+				w.WriteString(fmt.Sprintf("  • %s %s\n", rtype, p.styles.Muted.Render("(this)")))
+			} else {
+				w.WriteString(fmt.Sprintf("  • %s\n", rtype))
+			}
+		}
+	}
+
+	// Owner device ID (for reference)
+	if light.Owner != nil && light.Owner.Rid != nil {
+		w.WriteString("\n")
+		w.WriteString(p.styles.Muted.Render("Device ID: "))
+		w.WriteString(*light.Owner.Rid)
+		w.WriteString("\n")
+	}
+}
+
+func (p *DetailsPanel) renderScene(w *strings.Builder, scene openhue.SceneGet) {
+	// ID
+	if scene.Id != nil {
+		w.WriteString(p.styles.Muted.Render("ID: "))
+		w.WriteString(*scene.Id)
+		w.WriteString("\n")
+	}
+
+	// Type
+	if scene.Type != nil {
+		w.WriteString(p.styles.Muted.Render("Type: "))
+		w.WriteString(string(*scene.Type))
+		w.WriteString("\n")
+	}
+
+	// Status
+	if scene.Status != nil && scene.Status.Active != nil {
+		w.WriteString(p.styles.Muted.Render("Active: "))
+		w.WriteString(string(*scene.Status.Active))
+		w.WriteString("\n")
+	}
+
+	// Group (room/zone)
+	if scene.Group != nil && scene.Group.Rid != nil {
+		w.WriteString("\n")
+		w.WriteString(p.styles.Subtitle.Render("Group:"))
+		w.WriteString("\n")
+		rtype := "unknown"
+		if scene.Group.Rtype != nil {
+			rtype = string(*scene.Group.Rtype)
+		}
+		w.WriteString(fmt.Sprintf("  Type: %s\n", rtype))
+		w.WriteString(fmt.Sprintf("  ID: %s\n", p.styles.Muted.Render(*scene.Group.Rid)))
+
+		// Try to get group name
+		if p.state != nil {
+			if room, ok := p.state.GetRoom(*scene.Group.Rid); ok {
+				if room.Metadata != nil && room.Metadata.Name != nil {
+					w.WriteString(fmt.Sprintf("  Name: %s\n", *room.Metadata.Name))
+				}
+			} else if zone, ok := p.state.GetZone(*scene.Group.Rid); ok {
+				if zone.Metadata != nil && zone.Metadata.Name != nil {
+					w.WriteString(fmt.Sprintf("  Name: %s (zone)\n", *zone.Metadata.Name))
+				}
+			}
+		}
+	}
+
+	// Speed
+	if scene.Speed != nil {
+		w.WriteString(fmt.Sprintf("\nTransition speed: %.2f\n", *scene.Speed))
+	}
+
+	// Auto dynamic
+	if scene.AutoDynamic != nil {
+		w.WriteString(fmt.Sprintf("Auto dynamic: %v\n", *scene.AutoDynamic))
+	}
+
+	// Palette
+	if scene.Palette != nil {
+		w.WriteString("\n")
+		w.WriteString(p.styles.Subtitle.Render("Palette:"))
+		w.WriteString("\n")
+
+		if scene.Palette.Color != nil && len(*scene.Palette.Color) > 0 {
+			w.WriteString(fmt.Sprintf("  Colors: %d\n", len(*scene.Palette.Color)))
+		}
+		if scene.Palette.Dimming != nil && len(*scene.Palette.Dimming) > 0 {
+			w.WriteString(fmt.Sprintf("  Dimming levels: %d\n", len(*scene.Palette.Dimming)))
+		}
+		if scene.Palette.ColorTemperature != nil && len(*scene.Palette.ColorTemperature) > 0 {
+			w.WriteString(fmt.Sprintf("  Color temps: %d\n", len(*scene.Palette.ColorTemperature)))
+		}
+	}
+
+	// Actions
+	if scene.Actions != nil && len(*scene.Actions) > 0 {
+		w.WriteString("\n")
+		w.WriteString(p.styles.Subtitle.Render(fmt.Sprintf("Actions (%d):", len(*scene.Actions))))
+		w.WriteString("\n")
+		for i, action := range *scene.Actions {
+			if i >= 10 { // Limit display to first 10
+				w.WriteString(fmt.Sprintf("  ... and %d more\n", len(*scene.Actions)-10))
+				break
+			}
+			targetName := "unknown"
+			if action.Target != nil && action.Target.Rid != nil {
+				targetName = *action.Target.Rid
+				// Try to get friendly name
+				if p.state != nil {
+					if light, ok := p.state.GetLight(*action.Target.Rid); ok {
+						if light.Metadata != nil && light.Metadata.Name != nil {
+							targetName = *light.Metadata.Name
+						}
+					}
+				}
+			}
+			w.WriteString(fmt.Sprintf("  • %s\n", targetName))
+		}
+	}
+
+	// Metadata image
+	if scene.Metadata != nil && scene.Metadata.Image != nil && scene.Metadata.Image.Rid != nil {
+		w.WriteString("\n")
+		w.WriteString(p.styles.Muted.Render("Image: "))
+		w.WriteString(*scene.Metadata.Image.Rid)
+		w.WriteString("\n")
+	}
+}
+
+func (p *DetailsPanel) renderDevice(w *strings.Builder, device openhue.DeviceGet) {
+	// ID
+	if device.Id != nil {
+		w.WriteString(p.styles.Muted.Render("ID: "))
+		w.WriteString(*device.Id)
+		w.WriteString("\n")
+	}
+
+	// Type
+	if device.Type != nil {
+		w.WriteString(p.styles.Muted.Render("Type: "))
+		w.WriteString(string(*device.Type))
+		w.WriteString("\n")
+	}
+
+	// Product data
+	if device.ProductData != nil {
+		w.WriteString("\n")
+		w.WriteString(p.styles.Subtitle.Render("Product:"))
+		w.WriteString("\n")
+
+		if device.ProductData.ManufacturerName != nil {
+			w.WriteString(fmt.Sprintf("  Manufacturer: %s\n", *device.ProductData.ManufacturerName))
+		}
+		if device.ProductData.ProductName != nil {
+			w.WriteString(fmt.Sprintf("  Product: %s\n", *device.ProductData.ProductName))
+		}
+		if device.ProductData.ModelId != nil {
+			w.WriteString(fmt.Sprintf("  Model ID: %s\n", *device.ProductData.ModelId))
+		}
+		if device.ProductData.ProductArchetype != nil {
+			w.WriteString(fmt.Sprintf("  Archetype: %s\n", string(*device.ProductData.ProductArchetype)))
+		}
+		if device.ProductData.SoftwareVersion != nil {
+			w.WriteString(fmt.Sprintf("  Firmware: %s\n", *device.ProductData.SoftwareVersion))
+		}
+		if device.ProductData.HardwarePlatformType != nil {
+			w.WriteString(fmt.Sprintf("  Platform: %s\n", *device.ProductData.HardwarePlatformType))
+		}
+		if device.ProductData.Certified != nil {
+			w.WriteString(fmt.Sprintf("  Certified: %v\n", *device.ProductData.Certified))
+		}
+	}
+
+	// Metadata
+	if device.Metadata != nil {
+		if device.Metadata.Archetype != nil {
+			w.WriteString("\n")
+			w.WriteString(p.styles.Muted.Render("Archetype: "))
+			w.WriteString(string(*device.Metadata.Archetype))
+			w.WriteString("\n")
+		}
+	}
+
+	// Sensor readings (if applicable)
+	if p.state != nil {
+		hasSensors := false
+
+		// Motion sensor
+		hasMotion, isDetecting := p.state.GetDeviceMotionState(device)
+		if hasMotion {
+			if !hasSensors {
+				w.WriteString("\n")
+				w.WriteString(p.styles.Subtitle.Render("Sensors:"))
+				w.WriteString("\n")
+				hasSensors = true
+			}
+			if isDetecting {
+				w.WriteString(fmt.Sprintf("  Motion: %s Detected\n", p.styles.OnOffIndicator(true)))
+			} else {
+				w.WriteString(fmt.Sprintf("  Motion: %s None\n", p.styles.OnOffIndicator(false)))
+			}
+		}
+
+		// Temperature sensor
+		hasTemp, tempC := p.state.GetDeviceTemperature(device)
+		if hasTemp {
+			if !hasSensors {
+				w.WriteString("\n")
+				w.WriteString(p.styles.Subtitle.Render("Sensors:"))
+				w.WriteString("\n")
+				hasSensors = true
+			}
+			w.WriteString(fmt.Sprintf("  Temperature: %.1f C\n", tempC))
+		}
+
+		// Light level sensor
+		hasLevel, level := p.state.GetDeviceLightLevel(device)
+		if hasLevel {
+			if !hasSensors {
+				w.WriteString("\n")
+				w.WriteString(p.styles.Subtitle.Render("Sensors:"))
+				w.WriteString("\n")
+				hasSensors = true
+			}
+			// Convert from 10000*log10(lux)+1 to approximate lux
+			// level = 10000 * log10(lux) + 1
+			// lux = 10^((level-1)/10000)
+			lux := 0.0
+			if level > 1 {
+				lux = math.Pow(10, float64(level-1)/10000.0)
+			}
+			w.WriteString(fmt.Sprintf("  Light level: %.0f lux\n", lux))
+		}
+
+		// Battery status
+		hasBattery, battLevel, battState := p.state.GetDeviceBattery(device)
+		if hasBattery {
+			if !hasSensors {
+				w.WriteString("\n")
+				w.WriteString(p.styles.Subtitle.Render("Sensors:"))
+				w.WriteString("\n")
+				hasSensors = true
+			}
+			stateStr := ""
+			if battState != "" {
+				stateStr = fmt.Sprintf(" (%s)", battState)
+			}
+			w.WriteString(fmt.Sprintf("  Battery: %d%%%s\n", battLevel, stateStr))
+		}
+	}
+
+	// Services
+	if device.Services != nil && len(*device.Services) > 0 {
+		w.WriteString("\n")
+		w.WriteString(p.styles.Subtitle.Render("Services:"))
+		w.WriteString("\n")
+		for _, svc := range *device.Services {
+			rtype := "unknown"
+			rid := ""
+			if svc.Rtype != nil {
+				rtype = string(*svc.Rtype)
+			}
+			if svc.Rid != nil {
+				rid = *svc.Rid
+			}
+			w.WriteString(fmt.Sprintf("  • %s\n", rtype))
+			w.WriteString(fmt.Sprintf("    %s\n", p.styles.Muted.Render(rid)))
+		}
 	}
 }
 

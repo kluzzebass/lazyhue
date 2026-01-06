@@ -13,13 +13,10 @@ import (
 
 // Panel IDs for layout tree
 const (
-	PanelIDBridges = "bridges"
-	PanelIDScenes  = "scenes"
-	PanelIDGroups  = "groups"
-	PanelIDLights  = "lights"
-	PanelIDDevices = "devices"
-	PanelIDDetail  = "detail"
-	PanelIDStatus  = "status"
+	PanelIDBridges   = "bridges"
+	PanelIDHierarchy = "hierarchy"
+	PanelIDDetail    = "detail"
+	PanelIDStatus    = "status"
 )
 
 // Model is the main Bubble Tea model for the application.
@@ -70,24 +67,17 @@ func New(cfg *config.Config, creds *config.CredentialStore) Model {
 
 	// Create panels indexed by ID
 	panelMap := map[string]panels.Panel{
-		PanelIDBridges: panels.NewBridgePanel(styles, "1"),
-		PanelIDScenes:  panels.NewTreePanel(styles, "Scenes", "2"),
-		PanelIDGroups:  panels.NewTabbedPanel(styles, "Groups", "3", []string{"Rooms", "Zones", "Entertainment"}),
-		PanelIDLights:  panels.NewListPanel(styles, "Lights", "4", "No lights", panels.EntityDelegate{Styles: styles}),
-		PanelIDDevices: panels.NewListPanel(styles, "Devices", "5", "No devices", panels.EntityDelegate{Styles: styles}),
+		PanelIDBridges:   panels.NewBridgePanel(styles, "1"),
+		PanelIDHierarchy: panels.NewTreePanel(styles, "Hierarchy", "2"),
 	}
 
-	// Panel order for keyboard focus cycling (reorder here!)
+	// Panel order for keyboard focus cycling
 	panelOrder := []string{
 		PanelIDBridges,
-		PanelIDScenes,
-		PanelIDGroups,
-		PanelIDLights,
-		PanelIDDevices,
+		PanelIDHierarchy,
 	}
 
 	// Build layout tree - this defines visual structure
-	// To reorder visually, change the tree structure here
 	layoutTree := layout.NewTree(
 		layout.VSplit(
 			// Main content area
@@ -95,10 +85,7 @@ func New(cfg *config.Config, creds *config.CredentialStore) Model {
 				// Left column (40%)
 				layout.Child{Size: layout.Flex(0.4), Node: layout.VSplit(
 					layout.Child{Size: layout.Fixed(5), Node: layout.NewLeaf(PanelIDBridges)},
-					layout.Child{Size: layout.Flex(1), Node: layout.NewLeaf(PanelIDScenes)},
-					layout.Child{Size: layout.Flex(1), Node: layout.NewLeaf(PanelIDGroups)},
-					layout.Child{Size: layout.Flex(1), Node: layout.NewLeaf(PanelIDLights)},
-					layout.Child{Size: layout.Flex(1), Node: layout.NewLeaf(PanelIDDevices)},
+					layout.Child{Size: layout.Flex(1), Node: layout.NewLeaf(PanelIDHierarchy)},
 				)},
 				// Right column (60%)
 				layout.Child{Size: layout.Flex(0.6), Node: layout.NewLeaf(PanelIDDetail)},
@@ -191,6 +178,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.Batch(cmds...)
 
 	case BridgesDiscoveredMsg:
+		m.bridgePanel().SetDiscovering(false)
 		m.handleBridgesDiscovered(msg)
 		m.updateBridgePanel()
 
@@ -234,14 +222,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.setStatus("Sync error: "+msg.Err.Error(), true)
 
 	case LightsSyncedMsg:
-		m.refreshLightsPanel()
-		m.refreshGroupsPanel()
+		m.bridgePanel().SetPolling(false)
+		m.refreshHierarchyPanel()
 		m.updateDetailPanel()
 
 	case SyncTickMsg:
 		bridge := m.manager.GetActiveBridge()
 		if bridge != nil && bridge.IsConnected() {
 			m.statusBar.SetPolling(true)
+			m.bridgePanel().SetPolling(true)
 			cmds = append(cmds, syncLightsAndGroups(bridge))
 			cmds = append(cmds, tea.Tick(300*time.Millisecond, func(t time.Time) tea.Msg {
 				return indicatorRefreshMsg{}
@@ -251,6 +240,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case DiscoveryTickMsg:
 		m.statusBar.SetDiscovering(true)
+		m.bridgePanel().SetDiscovering(true)
 		cmds = append(cmds, discoverBridges(), startDiscoveryTicker())
 		// Schedule a redraw after indicator duration to turn it off
 		cmds = append(cmds, tea.Tick(300*time.Millisecond, func(t time.Time) tea.Msg {

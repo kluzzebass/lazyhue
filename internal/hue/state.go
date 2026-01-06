@@ -14,9 +14,14 @@ type BridgeState struct {
 
 	Lights        map[string]openhue.LightGet
 	Rooms         map[string]openhue.RoomGet
+	Zones         map[string]openhue.RoomGet // Zones use the same type as Rooms
 	Scenes        map[string]openhue.SceneGet
 	GroupedLights map[string]openhue.GroupedLightGet
 	Devices       map[string]openhue.DeviceGet
+	MotionSensors map[string]openhue.MotionGet
+	Temperatures  map[string]openhue.TemperatureGet
+	LightLevels   map[string]openhue.LightLevelGet
+	DevicePowers  map[string]openhue.DevicePowerGet
 }
 
 // NewBridgeState creates an empty bridge state.
@@ -24,9 +29,14 @@ func NewBridgeState() *BridgeState {
 	return &BridgeState{
 		Lights:        make(map[string]openhue.LightGet),
 		Rooms:         make(map[string]openhue.RoomGet),
+		Zones:         make(map[string]openhue.RoomGet),
 		Scenes:        make(map[string]openhue.SceneGet),
 		GroupedLights: make(map[string]openhue.GroupedLightGet),
 		Devices:       make(map[string]openhue.DeviceGet),
+		MotionSensors: make(map[string]openhue.MotionGet),
+		Temperatures:  make(map[string]openhue.TemperatureGet),
+		LightLevels:   make(map[string]openhue.LightLevelGet),
+		DevicePowers:  make(map[string]openhue.DevicePowerGet),
 	}
 }
 
@@ -44,6 +54,14 @@ func (s *BridgeState) GetRoom(id string) (openhue.RoomGet, bool) {
 	defer s.mu.RUnlock()
 	r, ok := s.Rooms[id]
 	return r, ok
+}
+
+// GetZone returns a zone by ID.
+func (s *BridgeState) GetZone(id string) (openhue.RoomGet, bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	z, ok := s.Zones[id]
+	return z, ok
 }
 
 // GetGroupedLight returns a grouped light by ID.
@@ -149,6 +167,30 @@ func (s *BridgeState) RoomScenes(roomID string) []openhue.SceneGet {
 	return scenes
 }
 
+// ZoneScenes returns scenes belonging to a zone, sorted by name.
+func (s *BridgeState) ZoneScenes(zoneID string) []openhue.SceneGet {
+	// Zones use the same scene grouping as rooms
+	return s.RoomScenes(zoneID)
+}
+
+// ZoneGroupedLight returns the grouped light for a zone.
+func (s *BridgeState) ZoneGroupedLight(zone openhue.RoomGet) (openhue.GroupedLightGet, bool) {
+	// Zones use the same services structure as rooms
+	return s.RoomGroupedLight(zone)
+}
+
+// IsZoneOn returns true if any light in the zone is on.
+func (s *BridgeState) IsZoneOn(zone openhue.RoomGet) bool {
+	// Zones work the same way as rooms
+	return s.IsRoomOn(zone)
+}
+
+// ZoneBrightness returns the grouped light brightness for a zone.
+func (s *BridgeState) ZoneBrightness(zone openhue.RoomGet) float64 {
+	// Zones work the same way as rooms
+	return s.RoomBrightness(zone)
+}
+
 // AllRooms returns all rooms sorted by name.
 func (s *BridgeState) AllRooms() []openhue.RoomGet {
 	s.mu.RLock()
@@ -173,6 +215,32 @@ func (s *BridgeState) AllRooms() []openhue.RoomGet {
 	})
 	
 	return rooms
+}
+
+// AllZones returns all zones sorted by name.
+func (s *BridgeState) AllZones() []openhue.RoomGet {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	zones := make([]openhue.RoomGet, 0, len(s.Zones))
+	for _, z := range s.Zones {
+		zones = append(zones, z)
+	}
+	
+	// Sort by name for stable ordering
+	sort.Slice(zones, func(i, j int) bool {
+		nameI := ""
+		nameJ := ""
+		if zones[i].Metadata != nil && zones[i].Metadata.Name != nil {
+			nameI = *zones[i].Metadata.Name
+		}
+		if zones[j].Metadata != nil && zones[j].Metadata.Name != nil {
+			nameJ = *zones[j].Metadata.Name
+		}
+		return nameI < nameJ
+	})
+	
+	return zones
 }
 
 // AllLights returns all lights sorted by name.
@@ -241,6 +309,13 @@ func (s *BridgeState) UpdateRooms(rooms map[string]openhue.RoomGet) {
 	s.Rooms = rooms
 }
 
+// UpdateZones replaces the zones cache.
+func (s *BridgeState) UpdateZones(zones map[string]openhue.RoomGet) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.Zones = zones
+}
+
 // UpdateGroupedLights replaces the grouped lights cache.
 func (s *BridgeState) UpdateGroupedLights(grouped map[string]openhue.GroupedLightGet) {
 	s.mu.Lock()
@@ -260,6 +335,159 @@ func (s *BridgeState) UpdateDevices(devices map[string]openhue.DeviceGet) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.Devices = devices
+}
+
+// UpdateMotionSensors replaces the motion sensors cache.
+func (s *BridgeState) UpdateMotionSensors(sensors map[string]openhue.MotionGet) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.MotionSensors = sensors
+}
+
+// GetMotionSensor returns a motion sensor by ID.
+func (s *BridgeState) GetMotionSensor(id string) (openhue.MotionGet, bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	m, ok := s.MotionSensors[id]
+	return m, ok
+}
+
+// GetDeviceMotionState returns true if the device has a motion sensor service that detects motion.
+func (s *BridgeState) GetDeviceMotionState(device openhue.DeviceGet) (hasMotion bool, isDetecting bool) {
+	if device.Services == nil {
+		return false, false
+	}
+
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	for _, svc := range *device.Services {
+		if svc.Rtype != nil && *svc.Rtype == openhue.ResourceIdentifierRtypeMotion && svc.Rid != nil {
+			// Found motion service, check its state
+			if motion, ok := s.MotionSensors[*svc.Rid]; ok {
+				if motion.Motion != nil {
+					// Check motion_report first (newer API), then fallback to motion
+					if motion.Motion.MotionReport != nil && motion.Motion.MotionReport.Motion != nil {
+						return true, *motion.Motion.MotionReport.Motion
+					}
+					if motion.Motion.Motion != nil {
+						return true, *motion.Motion.Motion
+					}
+				}
+				return true, false
+			}
+			return true, false
+		}
+	}
+	return false, false
+}
+
+// GetDeviceTemperature returns the temperature reading for a device if it has a temperature service.
+func (s *BridgeState) GetDeviceTemperature(device openhue.DeviceGet) (hasTemp bool, tempC float32) {
+	if device.Services == nil {
+		return false, 0
+	}
+
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	for _, svc := range *device.Services {
+		if svc.Rtype != nil && *svc.Rtype == openhue.ResourceIdentifierRtypeTemperature && svc.Rid != nil {
+			if temp, ok := s.Temperatures[*svc.Rid]; ok {
+				if temp.Temperature != nil {
+					if temp.Temperature.TemperatureReport != nil && temp.Temperature.TemperatureReport.Temperature != nil {
+						return true, *temp.Temperature.TemperatureReport.Temperature
+					}
+					if temp.Temperature.Temperature != nil {
+						return true, *temp.Temperature.Temperature
+					}
+				}
+				return true, 0
+			}
+			return true, 0
+		}
+	}
+	return false, 0
+}
+
+// GetDeviceLightLevel returns the light level reading for a device if it has a light_level service.
+func (s *BridgeState) GetDeviceLightLevel(device openhue.DeviceGet) (hasLevel bool, level int) {
+	if device.Services == nil {
+		return false, 0
+	}
+
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	for _, svc := range *device.Services {
+		if svc.Rtype != nil && *svc.Rtype == openhue.ResourceIdentifierRtypeLightLevel && svc.Rid != nil {
+			if ll, ok := s.LightLevels[*svc.Rid]; ok {
+				if ll.Light != nil {
+					if ll.Light.LightLevelReport != nil && ll.Light.LightLevelReport.LightLevel != nil {
+						return true, *ll.Light.LightLevelReport.LightLevel
+					}
+					if ll.Light.LightLevel != nil {
+						return true, *ll.Light.LightLevel
+					}
+				}
+				return true, 0
+			}
+			return true, 0
+		}
+	}
+	return false, 0
+}
+
+// GetDeviceBattery returns the battery status for a device if it has a device_power service.
+func (s *BridgeState) GetDeviceBattery(device openhue.DeviceGet) (hasBattery bool, level int, state string) {
+	if device.Services == nil {
+		return false, 0, ""
+	}
+
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	for _, svc := range *device.Services {
+		if svc.Rtype != nil && *svc.Rtype == openhue.ResourceIdentifierRtypeDevicePower && svc.Rid != nil {
+			if power, ok := s.DevicePowers[*svc.Rid]; ok {
+				if power.PowerState != nil {
+					lvl := 0
+					st := ""
+					if power.PowerState.BatteryLevel != nil {
+						lvl = *power.PowerState.BatteryLevel
+					}
+					if power.PowerState.BatteryState != nil {
+						st = string(*power.PowerState.BatteryState)
+					}
+					return true, lvl, st
+				}
+				return true, 0, ""
+			}
+			return true, 0, ""
+		}
+	}
+	return false, 0, ""
+}
+
+// UpdateTemperatures replaces the temperatures cache.
+func (s *BridgeState) UpdateTemperatures(temps map[string]openhue.TemperatureGet) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.Temperatures = temps
+}
+
+// UpdateLightLevels replaces the light levels cache.
+func (s *BridgeState) UpdateLightLevels(levels map[string]openhue.LightLevelGet) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.LightLevels = levels
+}
+
+// UpdateDevicePowers replaces the device powers cache.
+func (s *BridgeState) UpdateDevicePowers(powers map[string]openhue.DevicePowerGet) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.DevicePowers = powers
 }
 
 // AllDevices returns all devices sorted by name.

@@ -17,8 +17,7 @@ func (m Model) View() string {
 	}
 
 	// Render left column panels in layout order
-	// The layout tree defines the visual order via the VSplit children
-	leftPanelIDs := []string{PanelIDBridges, PanelIDScenes, PanelIDGroups, PanelIDLights, PanelIDDevices}
+	leftPanelIDs := []string{PanelIDBridges, PanelIDHierarchy}
 	panelViews := make([]string, 0, len(leftPanelIDs))
 	for _, id := range leftPanelIDs {
 		if panel := m.panelMap[id]; panel != nil {
