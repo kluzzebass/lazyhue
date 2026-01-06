@@ -112,9 +112,10 @@ lazyhue/
 │   │   ├── light.go             # Light entity model
 │   │   ├── room.go              # Room entity model
 │   │   ├── zone.go              # Zone entity model
-│   │   ├── scene.go             # Scene entity model
+│   │   ├── scene.go             # Scene and SmartScene models
 │   │   ├── group.go             # Grouped light abstraction
 │   │   ├── device.go            # Physical device model
+│   │   ├── entertainment.go     # Entertainment area model
 │   │   └── relationships.go     # Entity relationship mapping
 │   └── config/
 │       ├── config.go            # Configuration loading/saving
@@ -236,6 +237,8 @@ classDiagram
         +Zones []Zone
         +Lights []Light
         +Scenes []Scene
+        +EntertainmentAreas []EntertainmentArea
+        +Devices []Device
     }
     
     class Room {
@@ -262,6 +265,7 @@ classDiagram
         +Brightness float64
         +Color ColorState
         +Reachable bool
+        +Capabilities LightCapabilities
     }
     
     class Scene {
@@ -272,21 +276,49 @@ classDiagram
         +Actions []SceneAction
     }
     
+    class SmartScene {
+        +ID string
+        +Name string
+        +GroupID string
+        +State string
+        +ActiveTimeslot Timeslot
+    }
+    
     class GroupedLight {
         +ID string
         +On bool
         +Brightness float64
     }
     
+    class EntertainmentArea {
+        +ID string
+        +Name string
+        +Lights []Light
+        +Channels []Channel
+        +StreamActive bool
+    }
+    
+    class Device {
+        +ID string
+        +Name string
+        +ProductName string
+        +ModelID string
+        +Services []ResourceID
+    }
+    
     Bridge "1" --> "*" Room
     Bridge "1" --> "*" Zone
     Bridge "1" --> "*" Light
+    Bridge "1" --> "*" EntertainmentArea
+    Bridge "1" --> "*" Device
     Room "1" --> "*" Light
     Room "1" --> "1" GroupedLight
     Zone "1" --> "*" Light
     Zone "1" --> "1" GroupedLight
     Room "1" --> "*" Scene
     Zone "1" --> "*" Scene
+    EntertainmentArea "1" --> "*" Light
+    Device "1" --> "*" Light
 ```
 
 ### Entity Relationships
@@ -299,7 +331,9 @@ The Hue v2 API uses resource references. Key mappings:
 | Zone | Lights (arbitrary grouping) | GroupedLight service |
 | Light | - | Direct LightPut |
 | Scene | Actions for a room/zone | Recall action |
-| Entertainment Area | Lights for streaming | Entertainment API (Stage 2) |
+| SmartScene | Time-based scene automation | State toggle (active/inactive) |
+| Entertainment Area | Lights with spatial positions | Entertainment streaming API |
+| Device | Physical hardware, hosts services | Identify, rename |
 
 ### Translation from openhue-go
 
