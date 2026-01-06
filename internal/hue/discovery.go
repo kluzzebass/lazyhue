@@ -2,7 +2,10 @@
 package hue
 
 import (
-	"strings"
+	"crypto/tls"
+	"encoding/json"
+	"fmt"
+	"net/http"
 	"time"
 
 	"github.com/openhue/openhue-go"
@@ -10,11 +13,15 @@ import (
 
 // BridgeInfo contains discovered bridge details.
 type BridgeInfo struct {
-	ID           string // Unique bridge identifier (from mDNS hostname or URL discovery)
-	Name         string // Display name (user-assigned after connection, or mDNS instance before)
-	IPAddress    string // IP address
-	Host         string // mDNS hostname (e.g., "ecb5fa401886.local") - empty for URL discovery
-	InstanceName string // mDNS instance name (e.g., "Hue Bridge - 401886")
+	ID        string // Unique bridge hardware ID (e.g., "001788FFFE401886")
+	Name      string // User-assigned bridge name
+	IPAddress string // IP address
+}
+
+// bridgeConfig is the response from /api/0/config (unauthenticated)
+type bridgeConfig struct {
+	Name     string `json:"name"`
+	BridgeID string `json:"bridgeid"`
 }
 
 // DiscoveryService handles finding Hue bridges on the network.
@@ -28,7 +35,6 @@ func NewDiscoveryService(timeout time.Duration) *DiscoveryService {
 }
 
 // Discover finds Hue bridges on the local network.
-// It first tries mDNS, then falls back to discovery.meethue.com.
 func (d *DiscoveryService) Discover() ([]BridgeInfo, error) {
 	discovery := openhue.NewBridgeDiscovery(openhue.WithTimeout(d.timeout))
 
@@ -37,39 +43,51 @@ func (d *DiscoveryService) Discover() ([]BridgeInfo, error) {
 		return nil, err
 	}
 
-	// Determine the bridge ID from discovery data
-	// For mDNS: extract from hostname (e.g., "ecb5fa401886.local" -> "ecb5fa401886")
-	// For URL discovery: openhue puts the bridge ID in HostName field
-	var bridgeID string
-	var hostname string
-	var displayName string
-	var instanceName string
-
-	if bridge.Instance == "N/A" {
-		// URL discovery fallback - HostName contains the bridge ID
-		bridgeID = bridge.HostName
-		hostname = ""                            // No mDNS hostname available
-		displayName = "Bridge " + bridge.HostName // Use bridge ID as display name
-		instanceName = ""                        // No mDNS instance
-	} else {
-		// mDNS discovery - HostName is the actual .local hostname
-		hostname = bridge.HostName
-		// Extract ID from hostname (strip .local suffix)
-		bridgeID = strings.TrimSuffix(bridge.HostName, ".local")
-		bridgeID = strings.TrimSuffix(bridgeID, ".") // Some systems include trailing dot
-		displayName = bridge.Instance
-		instanceName = bridge.Instance
+	// Get the real bridge ID and name from the unauthenticated config endpoint
+	config, err := fetchBridgeConfig(bridge.IpAddress)
+	if err != nil {
+		// Fallback if config fetch fails
+		return []BridgeInfo{{
+			ID:        bridge.IpAddress, // Use IP as fallback ID
+			Name:      bridge.IpAddress,
+			IPAddress: bridge.IpAddress,
+		}}, nil
 	}
 
-	info := BridgeInfo{
-		ID:           bridgeID,
-		Name:         displayName, // Will be replaced with user name after connection
-		IPAddress:    bridge.IpAddress,
-		Host:         hostname,
-		InstanceName: instanceName,
+	return []BridgeInfo{{
+		ID:        config.BridgeID,
+		Name:      config.Name,
+		IPAddress: bridge.IpAddress,
+	}}, nil
+}
+
+// fetchBridgeConfig gets bridge info from the unauthenticated config endpoint.
+func fetchBridgeConfig(ipAddress string) (*bridgeConfig, error) {
+	// Hue bridges use self-signed certs
+	client := &http.Client{
+		Timeout: 5 * time.Second,
+		Transport: &http.Transport{
+			TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+		},
 	}
 
-	return []BridgeInfo{info}, nil
+	url := fmt.Sprintf("https://%s/api/0/config", ipAddress)
+	resp, err := client.Get(url)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("config endpoint returned %d", resp.StatusCode)
+	}
+
+	var config bridgeConfig
+	if err := json.NewDecoder(resp.Body).Decode(&config); err != nil {
+		return nil, err
+	}
+
+	return &config, nil
 }
 
 // DiscoverAll attempts to find all bridges, continuing on partial failures.
@@ -80,4 +98,3 @@ func (d *DiscoveryService) DiscoverAll() []BridgeInfo {
 	}
 	return bridges
 }
-

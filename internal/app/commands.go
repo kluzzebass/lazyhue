@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"sync"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -62,6 +63,34 @@ func syncLightsAndGroups(bridge *hue.Bridge) tea.Cmd {
 		_ = bridge.SyncLightLevels(ctx)
 		_ = bridge.SyncDevicePowers(ctx)
 		return LightsSyncedMsg{BridgeID: bridge.Info.ID}
+	}
+}
+
+func syncAllConnectedBridges(bridges []*hue.Bridge) tea.Cmd {
+	return func() tea.Msg {
+		ctx := context.Background()
+		var wg sync.WaitGroup
+
+		for _, bridge := range bridges {
+			if !bridge.IsConnected() {
+				continue
+			}
+			wg.Add(1)
+			go func(b *hue.Bridge) {
+				defer wg.Done()
+				// Sync lights and grouped lights
+				_ = b.SyncLights(ctx)
+				_ = b.SyncGroupedLights(ctx)
+				// Sync sensor services (non-fatal)
+				_ = b.SyncMotionSensors(ctx)
+				_ = b.SyncTemperatures(ctx)
+				_ = b.SyncLightLevels(ctx)
+				_ = b.SyncDevicePowers(ctx)
+			}(bridge)
+		}
+
+		wg.Wait()
+		return LightsSyncedMsg{} // No specific bridge ID - all were synced
 	}
 }
 
@@ -165,5 +194,3 @@ func recallScene(bridge *hue.Bridge, sceneID string) tea.Cmd {
 		return LightsSyncedMsg{BridgeID: bridge.Info.ID}
 	}
 }
-
-

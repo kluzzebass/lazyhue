@@ -115,6 +115,13 @@ func (m *Model) syncSelectionFromFocusedPanel() {
 			m.updateDetailPanel()
 		}
 	}
+
+	// Clear hierarchy when a disconnected bridge is selected
+	if m.focusedPanelID() == PanelIDBridges {
+		if bridge := m.bridgePanel().SelectedBridge(); bridge != nil && !bridge.IsConnected() {
+			m.hierarchyPanel().SetRoots(nil)
+		}
+	}
 }
 
 func (m *Model) setStatus(msg string, isError bool) {

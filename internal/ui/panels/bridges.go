@@ -263,12 +263,11 @@ func (p *BridgePanel) renderBridge(bridge *hue.Bridge, selected, active bool, wi
 	// Status indicator
 	var indicator string
 	var indicatorColor lipgloss.Color
-	isActive := bridge.Info.ID == p.activeBridge
 
 	switch bridge.Status {
 	case hue.StatusConnected:
 		indicator = "●"
-		if isActive && p.isPollingVisible() {
+		if p.isPollingVisible() {
 			indicatorColor = lipgloss.Color("#00ff00") // Green when polling
 		} else {
 			indicatorColor = lipgloss.Color("#ffffff") // White when idle
@@ -290,23 +289,10 @@ func (p *BridgePanel) renderBridge(bridge *hue.Bridge, selected, active bool, wi
 		indicatorColor = lipgloss.Color("#888888")
 	}
 
-	// For connected bridges, use the name from the API
-	// For unconnected bridges, prefer mDNS hostname over instance name
-	var name string
-	if bridge.IsConnected() {
-		name = bridge.Info.Name
-		if name == "" {
-			name = bridge.Info.IPAddress
-		}
-	} else {
-		// Unconnected: prefer mDNS hostname (e.g., "ecb5fa401886.local")
-		if bridge.Info.Host != "" && bridge.Info.Host != bridge.Info.IPAddress {
-			name = bridge.Info.Host
-		} else if bridge.Info.Name != "" {
-			name = bridge.Info.Name
-		} else {
-			name = bridge.Info.IPAddress
-		}
+	// Use the bridge name, falling back to IP if empty
+	name := bridge.Info.Name
+	if name == "" {
+		name = bridge.Info.IPAddress
 	}
 
 	// Calculate padding for full-width background
@@ -354,23 +340,9 @@ func (p *BridgePanel) SelectedEntity() (*EntityItem, bool) {
 		return nil, false
 	}
 
-	// For connected bridges, use the name from the API
-	// For unconnected bridges, prefer mDNS hostname over instance name
-	var name string
-	if bridge.IsConnected() {
-		name = bridge.Info.Name
-		if name == "" {
-			name = bridge.Info.IPAddress
-		}
-	} else {
-		// Unconnected: prefer mDNS hostname (e.g., "ecb5fa401886.local")
-		if bridge.Info.Host != "" && bridge.Info.Host != bridge.Info.IPAddress {
-			name = bridge.Info.Host
-		} else if bridge.Info.Name != "" {
-			name = bridge.Info.Name
-		} else {
-			name = bridge.Info.IPAddress
-		}
+	name := bridge.Info.Name
+	if name == "" {
+		name = bridge.Info.IPAddress
 	}
 
 	return &EntityItem{

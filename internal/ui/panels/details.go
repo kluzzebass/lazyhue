@@ -834,12 +834,6 @@ func (p *DetailsPanel) renderBridge(w *strings.Builder, data BridgeData) {
 	w.WriteString(p.styles.Subtitle.Render("Network:"))
 	w.WriteString("\n")
 	w.WriteString(fmt.Sprintf("  IP Address: %s\n", bridge.Info.IPAddress))
-	if bridge.Info.Host != "" && bridge.Info.Host != bridge.Info.IPAddress {
-		w.WriteString(fmt.Sprintf("  mDNS Hostname: %s\n", bridge.Info.Host))
-	}
-	if bridge.Info.InstanceName != "" {
-		w.WriteString(fmt.Sprintf("  mDNS Instance: %s\n", bridge.Info.InstanceName))
-	}
 	w.WriteString(fmt.Sprintf("  Bridge ID: %s\n", bridge.Info.ID))
 
 	// Last sync time

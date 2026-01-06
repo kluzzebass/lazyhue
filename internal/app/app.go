@@ -136,15 +136,17 @@ func (m *Model) connectFromStoredCredentials() tea.Cmd {
 	var cmds []tea.Cmd
 
 	for _, cred := range m.credentials.Bridges {
+		name := cred.Name
+		if name == "" {
+			name = cred.BridgeID // Fallback for old credentials without name
+		}
 		info := hue.BridgeInfo{
 			ID:        cred.BridgeID,
-			Name:      cred.BridgeName,
+			Name:      name,
 			IPAddress: cred.IPAddress,
-			Host:      cred.IPAddress,
 		}
 		m.manager.AddBridge(info)
-		bridge := m.manager.GetBridge(cred.BridgeID)
-		if bridge != nil {
+		if bridge := m.manager.GetBridge(cred.BridgeID); bridge != nil {
 			cmds = append(cmds, connectBridge(bridge, cred.ApiKey))
 		}
 	}
@@ -227,19 +229,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.setStatus("Connection failed: "+msg.Err.Error(), true)
 
 	case StateSyncedMsg:
-		bridge := m.manager.GetBridge(msg.BridgeID)
-		if bridge != nil {
-			// Update bridge name from synced data
-			if name := bridge.GetState().BridgeName(); name != "" && bridge.Info.Name != name {
-				bridge.Info.Name = name
-				// Update stored credential
-				if cred, ok := m.credentials.Get(msg.BridgeID); ok {
-					cred.BridgeName = name
-					m.credentials.Set(cred)
-					_ = m.credentials.Save()
-				}
-			}
-		}
 		m.refreshAllPanels()
 		m.updateBridgePanel()
 		m.clearStatus()
@@ -253,10 +242,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.updateDetailPanel()
 
 	case SyncTickMsg:
-		bridge := m.manager.GetActiveBridge()
-		if bridge != nil && bridge.IsConnected() {
+		connectedBridges := m.manager.ConnectedBridges()
+		if len(connectedBridges) > 0 {
 			m.bridgePanel().SetPolling(true)
-			cmds = append(cmds, syncLightsAndGroups(bridge))
+			cmds = append(cmds, syncAllConnectedBridges(connectedBridges))
 			cmds = append(cmds, tea.Tick(300*time.Millisecond, func(t time.Time) tea.Msg {
 				return indicatorRefreshMsg{}
 			}))

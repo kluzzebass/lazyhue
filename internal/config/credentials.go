@@ -11,11 +11,11 @@ const credentialsFileName = "credentials.json"
 
 // BridgeCredential stores authentication info for a single bridge.
 type BridgeCredential struct {
-	BridgeID   string `json:"bridge_id"`
-	BridgeName string `json:"bridge_name"`
-	IPAddress  string `json:"ip_address"`
-	ApiKey     string `json:"api_key"`
-	LastUsed   string `json:"last_used"`
+	BridgeID  string `json:"bridge_id"`
+	Name      string `json:"name"`
+	IPAddress string `json:"ip_address"`
+	ApiKey    string `json:"api_key"`
+	LastUsed  string `json:"last_used"`
 }
 
 // CredentialStore manages credentials for multiple bridges.

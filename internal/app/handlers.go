@@ -175,25 +175,28 @@ func (m *Model) handleBridgesDiscovered(msg BridgesDiscoveredMsg) {
 		// Check if we already have this bridge by ID
 		existing := m.manager.GetBridge(info.ID)
 		if existing != nil {
+			needsSave := false
+
 			// Update IP if changed
 			if existing.Info.IPAddress != info.IPAddress {
 				existing.Info.IPAddress = info.IPAddress
+				needsSave = true
+			}
+
+			// Update name if changed
+			if info.Name != "" && existing.Info.Name != info.Name {
+				existing.Info.Name = info.Name
+				needsSave = true
+			}
+
+			// Persist changes to credentials
+			if needsSave {
 				if cred, ok := m.credentials.Get(info.ID); ok {
-					cred.IPAddress = info.IPAddress
+					cred.IPAddress = existing.Info.IPAddress
+					cred.Name = existing.Info.Name
 					m.credentials.Set(cred)
 					_ = m.credentials.Save()
 				}
-			}
-			// Update mDNS info from discovery
-			if info.Host != "" {
-				existing.Info.Host = info.Host
-			}
-			if info.InstanceName != "" {
-				existing.Info.InstanceName = info.InstanceName
-			}
-			// Update name if discovery provides one
-			if info.Name != "" && existing.Info.Name != info.Name {
-				existing.Info.Name = info.Name
 			}
 			continue
 		}
@@ -221,10 +224,10 @@ func (m *Model) handlePairingSuccess(msg PairingSuccessMsg) {
 	}
 
 	m.credentials.Set(config.BridgeCredential{
-		BridgeID:   msg.BridgeID,
-		BridgeName: bridge.Info.Name,
-		IPAddress:  bridge.Info.IPAddress,
-		ApiKey:     msg.ApiKey,
+		BridgeID:  msg.BridgeID,
+		Name:      bridge.Info.Name,
+		IPAddress: bridge.Info.IPAddress,
+		ApiKey:    msg.ApiKey,
 	})
 	_ = m.credentials.Save()
 	m.setStatus("Pairing successful!", false)
@@ -277,16 +280,8 @@ func (m *Model) startBridgePairing() tea.Cmd {
 		m.updateBridgePanel()
 	}
 
-	// Determine display name (same logic as bridge panel)
+	// Use the bridge name, falling back to IP if empty
 	displayName := bridgeInfo.Name
-	if bridge != nil && !bridge.IsConnected() {
-		// Unconnected: prefer mDNS hostname (e.g., "ecb5fa401886.local")
-		if bridgeInfo.Host != "" && bridgeInfo.Host != bridgeInfo.IPAddress {
-			displayName = bridgeInfo.Host
-		} else if bridgeInfo.Name == "" {
-			displayName = bridgeInfo.IPAddress
-		}
-	}
 	if displayName == "" {
 		displayName = bridgeInfo.IPAddress
 	}
