@@ -88,35 +88,22 @@ lazyhue/
 ├── internal/
 │   ├── app/
 │   │   ├── app.go               # Root Bubble Tea model
-│   │   ├── state.go             # Centralized application state
 │   │   └── messages.go          # Custom tea.Msg types
 │   ├── ui/
-│   │   ├── layout.go            # Panel layout management
 │   │   ├── theme.go             # Colors, styles (lipgloss)
 │   │   ├── keys.go              # Keybinding definitions
-│   │   ├── help.go              # Help overlay component
 │   │   └── panels/
-│   │       ├── bridges.go       # Bridge selector panel
 │   │       ├── entities.go      # Entity list panel (lights/rooms/zones)
 │   │       ├── details.go       # Entity details panel
-│   │       ├── scenes.go        # Scene browser panel
+│   │       ├── header.go        # Header bar component
 │   │       └── status.go        # Status bar component
 │   ├── hue/
 │   │   ├── bridge.go            # Bridge connection wrapper
+│   │   ├── state.go             # BridgeState with openhue-go types
+│   │   ├── actions.go           # Light/scene control actions
 │   │   ├── manager.go           # Multi-bridge coordinator
 │   │   ├── discovery.go         # Discovery orchestration
-│   │   ├── auth.go              # Authentication flow handler
-│   │   ├── poller.go            # Background state synchronization
-│   │   └── events.go            # Bridge event types
-│   ├── domain/
-│   │   ├── light.go             # Light entity model
-│   │   ├── room.go              # Room entity model
-│   │   ├── zone.go              # Zone entity model
-│   │   ├── scene.go             # Scene and SmartScene models
-│   │   ├── group.go             # Grouped light abstraction
-│   │   ├── device.go            # Physical device model
-│   │   ├── entertainment.go     # Entertainment area model
-│   │   └── relationships.go     # Entity relationship mapping
+│   │   └── auth.go              # Authentication flow handler
 │   └── config/
 │       ├── config.go            # Configuration loading/saving
 │       └── credentials.go       # Secure credential storage
@@ -127,9 +114,10 @@ lazyhue/
 **Design Rationale:**
 
 - `internal/` prevents external imports, keeping the API surface clean
-- Separation of `ui/`, `hue/`, `domain/`, `config/` enforces clear boundaries
+- **No domain package** - we use openhue-go types (`LightGet`, `RoomGet`, etc.) directly
+- This enables partial queries (sync only lights) without rebuilding a relationship graph
+- Relationships are resolved on-demand via `BridgeState` helper methods
 - `panels/` as a subdirectory allows each panel to be self-contained
-- Domain models are decoupled from openhue-go types to allow abstraction
 
 ---
 
@@ -225,136 +213,61 @@ type BridgeCredential struct {
 
 ## 3. Entity Modeling
 
-### Domain Model Hierarchy
+### Using openhue-go Types Directly
 
-```mermaid
-classDiagram
-    class Bridge {
-        +ID string
-        +Name string
-        +IP string
-        +Rooms []Room
-        +Zones []Zone
-        +Lights []Light
-        +Scenes []Scene
-        +EntertainmentAreas []EntertainmentArea
-        +Devices []Device
-    }
-    
-    class Room {
-        +ID string
-        +Name string
-        +Lights []Light
-        +GroupedLight GroupedLight
-        +Scenes []Scene
-    }
-    
-    class Zone {
-        +ID string
-        +Name string
-        +Lights []Light
-        +GroupedLight GroupedLight
-        +Scenes []Scene
-    }
-    
-    class Light {
-        +ID string
-        +Name string
-        +DeviceID string
-        +On bool
-        +Brightness float64
-        +Color ColorState
-        +Reachable bool
-        +Capabilities LightCapabilities
-    }
-    
-    class Scene {
-        +ID string
-        +Name string
-        +GroupID string
-        +GroupType string
-        +Actions []SceneAction
-    }
-    
-    class SmartScene {
-        +ID string
-        +Name string
-        +GroupID string
-        +State string
-        +ActiveTimeslot Timeslot
-    }
-    
-    class GroupedLight {
-        +ID string
-        +On bool
-        +Brightness float64
-    }
-    
-    class EntertainmentArea {
-        +ID string
-        +Name string
-        +Lights []Light
-        +Channels []Channel
-        +StreamActive bool
-    }
-    
-    class Device {
-        +ID string
-        +Name string
-        +ProductName string
-        +ModelID string
-        +Services []ResourceID
-    }
-    
-    Bridge "1" --> "*" Room
-    Bridge "1" --> "*" Zone
-    Bridge "1" --> "*" Light
-    Bridge "1" --> "*" EntertainmentArea
-    Bridge "1" --> "*" Device
-    Room "1" --> "*" Light
-    Room "1" --> "1" GroupedLight
-    Zone "1" --> "*" Light
-    Zone "1" --> "1" GroupedLight
-    Room "1" --> "*" Scene
-    Zone "1" --> "*" Scene
-    EntertainmentArea "1" --> "*" Light
-    Device "1" --> "*" Light
+We use openhue-go's auto-generated types (`LightGet`, `RoomGet`, `SceneGet`, etc.) directly rather than maintaining our own domain models. This provides:
+
+- **Partial sync support** - Can fetch only lights without rebuilding a relationship graph
+- **No translation overhead** - Types from API go straight to cache
+- **Auto-updated with library** - New API fields available immediately
+- **Lazy relationship resolution** - Resolve room→lights on-demand, not upfront
+
+### BridgeState Structure
+
+```go
+type BridgeState struct {
+    Lights        map[string]openhue.LightGet
+    Rooms         map[string]openhue.RoomGet
+    Scenes        map[string]openhue.SceneGet
+    GroupedLights map[string]openhue.GroupedLightGet
+    Devices       map[string]openhue.DeviceGet
+}
+```
+
+### On-Demand Relationship Resolution
+
+```go
+// Resolve room → lights when needed, not at sync time
+func (s *BridgeState) RoomLights(room openhue.RoomGet) []openhue.LightGet
+
+// Resolve room → grouped light for control
+func (s *BridgeState) RoomGroupedLight(room openhue.RoomGet) (openhue.GroupedLightGet, bool)
+
+// Resolve room → scenes for scene picker
+func (s *BridgeState) RoomScenes(roomID string) []openhue.SceneGet
 ```
 
 ### Entity Relationships
 
-The Hue v2 API uses resource references. Key mappings:
+The Hue v2 API uses resource references (IDs). Key mappings:
 
 | Entity | Contains | Controllable Via |
 |--------|----------|------------------|
-| Room | Lights (by device assignment) | GroupedLight service |
-| Zone | Lights (arbitrary grouping) | GroupedLight service |
+| Room | Devices (children) → Lights (via owner) | GroupedLight service |
 | Light | - | Direct LightPut |
 | Scene | Actions for a room/zone | Recall action |
-| SmartScene | Time-based scene automation | State toggle (active/inactive) |
-| Entertainment Area | Lights with spatial positions | Entertainment streaming API |
+| GroupedLight | Virtual aggregate of room/zone | GroupedLightPut |
 | Device | Physical hardware, hosts services | Identify, rename |
 
-### Translation from openhue-go
+### Partial Sync Strategy
 
 ```go
-// Pseudocode: Converting openhue types to domain types
-func (b *BridgeConnection) SyncState(ctx context.Context) error {
-    rooms, _ := b.home.GetRooms()
-    lights, _ := b.home.GetLights()
-    scenes, _ := b.home.GetScenes()
-    zones, _ := b.home.GetZones()
-    groupedLights, _ := b.home.GetGroupedLights()
-    
-    // Build relationship graph
-    b.state = &BridgeState{
-        Rooms:  mapRooms(rooms, lights, scenes, groupedLights),
-        Zones:  mapZones(zones, lights, scenes, groupedLights),
-        Lights: mapLights(lights),
-        Scenes: mapScenes(scenes),
-    }
-    return nil
-}
+// Full sync on connect
+bridge.SyncAll(ctx)  // Fetches lights, rooms, scenes, grouped lights, devices
+
+// Efficient polling - only sync what changes frequently
+bridge.SyncLights(ctx)        // Just lights (on tick)
+bridge.SyncGroupedLights(ctx) // Just grouped lights (if needed)
 ```
 
 ---
@@ -654,7 +567,10 @@ type EntityProvider interface {
 
 | Decision | Alternatives Considered | Rationale |
 |----------|------------------------|-----------|
+| openhue-go types directly | Custom domain models | Enables partial queries; no translation layer; auto-updated with library |
 | Polling over SSE | Implement SSE client | openhue-go doesn't support SSE; polling is simpler for Stage 1 |
+| Partial sync (lights only) | Full sync on every tick | Lights change frequently; rooms/scenes rarely change; reduces network load |
+| On-demand relationship resolution | Upfront graph building | Allows fetching rooms without lights; lazy loading for performance |
 | File-based credentials | Keychain integration | Simpler initial implementation; keychain can be added later |
 | Single main model | Nested sub-models | Easier to reason about for initial implementation; can refactor later |
 | bubbles/list over custom | Custom virtual list | bubbles/list has filtering, good defaults; optimize only if needed |
@@ -682,7 +598,7 @@ sequenceDiagram
     
     loop Each known bridge with credentials
         BridgeMgr->>BridgeMgr: Connect(bridge)
-        BridgeMgr->>BridgeMgr: SyncState()
+        BridgeMgr->>BridgeMgr: SyncAll()
     end
     
     Main->>TUI: tea.NewProgram(model)
