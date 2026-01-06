@@ -86,6 +86,14 @@ func (p *TreePanel) Update(msg tea.Msg) tea.Cmd {
 	viewHeight := p.viewHeight()
 
 	switch msg := msg.(type) {
+	case tea.MouseMsg:
+		switch msg.Button {
+		case tea.MouseButtonWheelUp:
+			p.moveCursor(-1)
+		case tea.MouseButtonWheelDown:
+			p.moveCursor(1)
+		}
+
 	case tea.KeyMsg:
 		switch {
 		case key.Matches(msg, key.NewBinding(key.WithKeys("up", "k"))):
@@ -231,6 +239,12 @@ func (p *TreePanel) View(active bool) string {
 
 // renderNode renders a single node line.
 func (p *TreePanel) renderNode(node *TreeNode, selected, active bool) string {
+	// Selection indicator
+	selector := "  "
+	if selected {
+		selector = "> "
+	}
+
 	// Find depth
 	depth := p.nodeDepth(node)
 
@@ -263,7 +277,7 @@ func (p *TreePanel) renderNode(node *TreeNode, selected, active bool) string {
 		style = p.styles.ListItem
 	}
 
-	return style.Render(prefix + indicator + label)
+	return style.Render(selector + prefix + indicator + label)
 }
 
 // nodeDepth finds the depth of a node.

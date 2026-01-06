@@ -1,110 +1,29 @@
 package panels
 
 import (
-	"fmt"
-	"io"
-
-	"github.com/charmbracelet/bubbles/list"
+	"github.com/charmbracelet/bubbles/key"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 	"github.com/kluzzebass/lazyhue/internal/hue"
 	"github.com/kluzzebass/lazyhue/internal/ui"
 )
 
-// BridgeItem wraps a bridge for the list component.
-type BridgeItem struct {
-	Bridge *hue.Bridge
-}
-
-func (i BridgeItem) FilterValue() string {
-	if i.Bridge != nil {
-		return i.Bridge.Info.Name
-	}
-	return ""
-}
-
-// BridgeDelegate renders bridge list items.
-type BridgeDelegate struct {
-	Styles       ui.Styles
-	ActiveBridge string
-}
-
-func (d BridgeDelegate) Height() int                             { return 1 }
-func (d BridgeDelegate) Spacing() int                            { return 0 }
-func (d BridgeDelegate) Update(_ tea.Msg, _ *list.Model) tea.Cmd { return nil }
-
-func (d BridgeDelegate) Render(w io.Writer, m list.Model, index int, item list.Item) {
-	i, ok := item.(BridgeItem)
-	if !ok || i.Bridge == nil {
-		return
-	}
-
-	bridge := i.Bridge
-
-	// Active indicator
-	active := " "
-	if bridge.Info.ID == d.ActiveBridge {
-		active = ">"
-	}
-
-	// Status indicator
-	var status string
-	switch bridge.Status {
-	case hue.StatusConnected:
-		status = d.Styles.Connected.Render("●")
-	case hue.StatusConnecting:
-		status = d.Styles.Muted.Render("○")
-	case hue.StatusPairing:
-		status = d.Styles.Muted.Render("◐")
-	case hue.StatusDisconnected:
-		status = d.Styles.Disconnected.Render("○")
-	case hue.StatusError:
-		status = d.Styles.Error.Render("✕")
-	default:
-		status = d.Styles.Muted.Render("?")
-	}
-
-	name := bridge.Info.Name
-	if name == "" {
-		name = bridge.Info.IPAddress
-	}
-
-	// Truncate if needed
-	maxLen := 20
-	if len(name) > maxLen {
-		name = name[:maxLen-1] + "…"
-	}
-
-	if index == m.Index() {
-		name = d.Styles.SelectedItem.Render(name)
-	}
-
-	fmt.Fprintf(w, "%s %s %s", active, status, name)
-}
-
-// BridgePanel shows the list of bridges.
+// BridgePanel shows the list of bridges with custom scrolling.
 type BridgePanel struct {
-	list         list.Model
+	bridges      []*hue.Bridge
 	styles       ui.Styles
 	width        int
 	height       int
 	activeBridge string
 	panelKey     string
 	panelTitle   string
+	cursor       int
+	offset       int
 }
 
 // NewBridgePanel creates a new bridge panel.
 func NewBridgePanel(styles ui.Styles, panelKey string) *BridgePanel {
-	delegate := BridgeDelegate{Styles: styles}
-	l := list.New([]list.Item{}, delegate, 0, 0)
-	l.SetShowTitle(false)
-	l.SetShowStatusBar(false)
-	l.SetFilteringEnabled(false)
-	l.SetShowHelp(false)
-	l.SetShowPagination(false)
-	l.InfiniteScrolling = false
-
 	return &BridgePanel{
-		list:       l,
 		styles:     styles,
 		panelKey:   panelKey,
 		panelTitle: "Bridges",
@@ -113,69 +32,196 @@ func NewBridgePanel(styles ui.Styles, panelKey string) *BridgePanel {
 
 // SetBridges updates the bridge list.
 func (p *BridgePanel) SetBridges(bridges []*hue.Bridge, activeBridgeID string) {
+	p.bridges = bridges
 	p.activeBridge = activeBridgeID
 
-	// Update delegate with active bridge
-	p.list.SetDelegate(BridgeDelegate{
-		Styles:       p.styles,
-		ActiveBridge: activeBridgeID,
-	})
-
-	items := make([]list.Item, len(bridges))
-	for i, b := range bridges {
-		items[i] = BridgeItem{Bridge: b}
+	// Clamp cursor
+	if len(p.bridges) == 0 {
+		p.cursor = 0
+		p.offset = 0
+	} else if p.cursor >= len(p.bridges) {
+		p.cursor = len(p.bridges) - 1
+		p.ensureCursorVisible()
 	}
-	p.list.SetItems(items)
 }
 
 // SetSize updates the panel dimensions.
 func (p *BridgePanel) SetSize(width, height int) {
 	p.width = width
 	p.height = height
+}
 
-	// Content area: width minus borders (2), height minus borders (2)
-	contentWidth := max(1, width-2)
-	contentHeight := max(1, height-2)
+// viewHeight returns the number of visible lines.
+func (p *BridgePanel) viewHeight() int {
+	return max(1, p.height-2)
+}
 
-	p.list.SetSize(contentWidth, contentHeight)
+// moveCursor moves the cursor by delta.
+func (p *BridgePanel) moveCursor(delta int) {
+	if len(p.bridges) == 0 {
+		return
+	}
+	p.cursor += delta
+	if p.cursor < 0 {
+		p.cursor = 0
+	}
+	if p.cursor >= len(p.bridges) {
+		p.cursor = len(p.bridges) - 1
+	}
+	p.ensureCursorVisible()
+}
+
+// ensureCursorVisible adjusts scroll offset.
+func (p *BridgePanel) ensureCursorVisible() {
+	viewHeight := p.viewHeight()
+
+	if p.cursor < p.offset {
+		p.offset = p.cursor
+	}
+	if p.cursor >= p.offset+viewHeight {
+		p.offset = p.cursor - viewHeight + 1
+	}
+
+	maxOffset := max(0, len(p.bridges)-viewHeight)
+	if p.offset > maxOffset {
+		p.offset = maxOffset
+	}
+	if p.offset < 0 {
+		p.offset = 0
+	}
 }
 
 // SelectedBridge returns the currently selected bridge.
 func (p *BridgePanel) SelectedBridge() *hue.Bridge {
-	item := p.list.SelectedItem()
-	if item == nil {
-		return nil
-	}
-	if bi, ok := item.(BridgeItem); ok {
-		return bi.Bridge
+	if p.cursor >= 0 && p.cursor < len(p.bridges) {
+		return p.bridges[p.cursor]
 	}
 	return nil
 }
 
 // Update handles input for the bridge panel.
 func (p *BridgePanel) Update(msg tea.Msg) tea.Cmd {
-	var cmd tea.Cmd
-	p.list, cmd = p.list.Update(msg)
-	return cmd
+	viewHeight := p.viewHeight()
+
+	switch msg := msg.(type) {
+	case tea.MouseMsg:
+		switch msg.Button {
+		case tea.MouseButtonWheelUp:
+			p.moveCursor(-1)
+			return nil
+		case tea.MouseButtonWheelDown:
+			p.moveCursor(1)
+			return nil
+		}
+
+	case tea.KeyMsg:
+		switch {
+		case key.Matches(msg, key.NewBinding(key.WithKeys("up", "k"))):
+			p.moveCursor(-1)
+		case key.Matches(msg, key.NewBinding(key.WithKeys("down", "j"))):
+			p.moveCursor(1)
+		case key.Matches(msg, key.NewBinding(key.WithKeys("pgup"))):
+			p.moveCursor(-viewHeight)
+		case key.Matches(msg, key.NewBinding(key.WithKeys("pgdown"))):
+			p.moveCursor(viewHeight)
+		case key.Matches(msg, key.NewBinding(key.WithKeys("home", "g"))):
+			p.cursor = 0
+			p.offset = 0
+		case key.Matches(msg, key.NewBinding(key.WithKeys("end", "G"))):
+			p.cursor = max(0, len(p.bridges)-1)
+			p.ensureCursorVisible()
+		}
+	}
+	return nil
 }
 
 // View renders the bridge panel.
 func (p *BridgePanel) View(active bool) string {
-	content := p.list.View()
-	if len(p.list.Items()) == 0 {
-		content = p.styles.Muted.Render("No bridges\n\nPress P to pair")
+	contentHeight := p.viewHeight()
+	contentWidth := max(1, p.width-2)
+
+	var lines []string
+
+	if len(p.bridges) == 0 {
+		lines = append(lines, p.styles.Muted.Render("No bridges"))
+		lines = append(lines, "")
+		lines = append(lines, p.styles.Muted.Render("Press P to pair"))
+	} else {
+		endIdx := min(p.offset+contentHeight, len(p.bridges))
+		for i := p.offset; i < endIdx; i++ {
+			bridge := p.bridges[i]
+			selected := i == p.cursor
+			line := p.renderBridge(bridge, selected, active, contentWidth)
+			lines = append(lines, line)
+		}
 	}
+
+	// Pad to fill height
+	for len(lines) < contentHeight {
+		lines = append(lines, "")
+	}
+
+	content := lipgloss.JoinVertical(lipgloss.Left, lines...)
 
 	cfg := ui.BorderConfig{
 		Title:       "[" + p.panelKey + "] " + p.panelTitle,
-		ItemIndex:   p.list.Index(),
-		ItemCount:   len(p.list.Items()),
-		ScrollPos:   p.list.Index(),
-		TotalHeight: len(p.list.Items()),
-		ViewHeight:  p.height - 2,
+		ItemIndex:   p.cursor,
+		ItemCount:   len(p.bridges),
+		ScrollPos:   p.offset,
+		TotalHeight: len(p.bridges),
+		ViewHeight:  contentHeight,
 	}
 
 	return ui.RenderBorderedPanel(content, p.width, p.height, active, p.styles, cfg)
+}
+
+// renderBridge renders a single bridge item.
+func (p *BridgePanel) renderBridge(bridge *hue.Bridge, selected, active bool, width int) string {
+	// Active indicator
+	activeMarker := " "
+	if bridge.Info.ID == p.activeBridge {
+		activeMarker = ">"
+	}
+
+	// Status indicator
+	var status string
+	switch bridge.Status {
+	case hue.StatusConnected:
+		status = p.styles.Connected.Render("●")
+	case hue.StatusConnecting:
+		status = p.styles.Muted.Render("○")
+	case hue.StatusPairing:
+		status = p.styles.Muted.Render("◐")
+	case hue.StatusDisconnected:
+		status = p.styles.Disconnected.Render("○")
+	case hue.StatusError:
+		status = p.styles.Error.Render("✕")
+	default:
+		status = p.styles.Muted.Render("?")
+	}
+
+	name := bridge.Info.Name
+	if name == "" {
+		name = bridge.Info.IPAddress
+	}
+
+	// Build line
+	line := activeMarker + " " + status + " " + name
+
+	// Truncate if needed
+	if lipgloss.Width(line) > width {
+		line = line[:width-1] + "…"
+	}
+
+	// Style
+	var style lipgloss.Style
+	if selected && active {
+		style = p.styles.SelectedItem
+	} else {
+		style = p.styles.ListItem
+	}
+
+	return style.Render(line)
 }
 
 // Key returns the keyboard shortcut key.
@@ -195,5 +241,10 @@ func (p *BridgePanel) SelectedEntity() (*EntityItem, bool) {
 
 // HasBridges returns true if there are any bridges.
 func (p *BridgePanel) HasBridges() bool {
-	return len(p.list.Items()) > 0
+	return len(p.bridges) > 0
+}
+
+// Index returns the current cursor position.
+func (p *BridgePanel) Index() int {
+	return p.cursor
 }

@@ -219,7 +219,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 	case tea.MouseMsg:
+		// Handle click for focus switching
 		cmd := m.handleMouse(msg)
+		if cmd != nil {
+			cmds = append(cmds, cmd)
+		}
+		// Also pass to focused panel for scroll wheel support
+		cmd = m.updateFocusedPanel(msg)
 		if cmd != nil {
 			cmds = append(cmds, cmd)
 		}
