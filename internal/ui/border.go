@@ -30,7 +30,7 @@ func RenderBorderedPanel(content string, width, height int, active bool, styles 
 	}
 
 	// Calculate content area dimensions
-	contentWidth := width - 2  // left + right border
+	contentWidth := width - 2   // left + right border
 	contentHeight := height - 2 // top + bottom border
 
 	// Build top border with title/tabs
@@ -46,7 +46,7 @@ func RenderBorderedPanel(content string, width, height int, active bool, styles 
 	// Pad/truncate content to fit
 	lines := strings.Split(content, "\n")
 	paddedLines := make([]string, contentHeight)
-	for i := 0; i < contentHeight; i++ {
+	for i := range contentHeight {
 		if i < len(lines) {
 			// Truncate or pad line to content width
 			line := lines[i]
@@ -186,11 +186,7 @@ func buildBottomBorder(border lipgloss.Border, width int, borderColor lipgloss.C
 	// Calculate remaining border width
 	remainingWidth := width - countWidth
 	rightPadding := 1
-	leftPadding := remainingWidth - rightPadding
-
-	if leftPadding < 0 {
-		leftPadding = 0
-	}
+	leftPadding := max(remainingWidth-rightPadding, 0)
 
 	return bs.Render(border.BottomLeft) +
 		bs.Render(strings.Repeat(border.Bottom, leftPadding)) +
@@ -226,9 +222,9 @@ func calculateScrollThumb(scrollPos, totalHeight, viewHeight, borderHeight int) 
 	// Fixed thumb size based on visible ratio (minimum 1)
 	thumbSize := max(1, (viewHeight*borderHeight)/totalHeight)
 
-	// Calculate thumb position based on selection progress through list
-	maxScrollPos := totalHeight - 1
-	if maxScrollPos <= 0 {
+	// Maximum scroll offset (when last item is visible at bottom)
+	maxScrollOffset := totalHeight - viewHeight
+	if maxScrollOffset <= 0 {
 		return -1, -1
 	}
 
@@ -236,11 +232,12 @@ func calculateScrollThumb(scrollPos, totalHeight, viewHeight, borderHeight int) 
 	if scrollPos < 0 {
 		scrollPos = 0
 	}
-	if scrollPos > maxScrollPos {
-		scrollPos = maxScrollPos
+	if scrollPos > maxScrollOffset {
+		scrollPos = maxScrollOffset
 	}
 
-	scrollProgress := float64(scrollPos) / float64(maxScrollPos)
+	// Calculate thumb position based on scroll offset progress
+	scrollProgress := float64(scrollPos) / float64(maxScrollOffset)
 	maxThumbPos := borderHeight - thumbSize
 	thumbPos := int(scrollProgress * float64(maxThumbPos))
 
@@ -275,4 +272,3 @@ func truncateString(s string, maxWidth int) string {
 	}
 	return string(runes)
 }
-

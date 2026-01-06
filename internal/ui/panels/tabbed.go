@@ -128,16 +128,16 @@ func (p *TabbedPanel) SelectedItem() (EntityItem, bool) {
 }
 
 // Update handles input for the tabbed panel.
-func (p *TabbedPanel) Update(msg tea.Msg) (*TabbedPanel, tea.Cmd) {
+func (p *TabbedPanel) Update(msg tea.Msg) tea.Cmd {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
 		switch {
 		case key.Matches(msg, key.NewBinding(key.WithKeys("left", "h"))):
 			p.PrevTab()
-			return p, nil
+			return nil
 		case key.Matches(msg, key.NewBinding(key.WithKeys("right", "l"))):
 			p.NextTab()
-			return p, nil
+			return nil
 		}
 	}
 
@@ -145,10 +145,35 @@ func (p *TabbedPanel) Update(msg tea.Msg) (*TabbedPanel, tea.Cmd) {
 	if p.activeTab >= 0 && p.activeTab < len(p.tabs) {
 		var cmd tea.Cmd
 		p.tabs[p.activeTab].List, cmd = p.tabs[p.activeTab].List.Update(msg)
-		return p, cmd
+		return cmd
 	}
 
-	return p, nil
+	return nil
+}
+
+// Key returns the keyboard shortcut key.
+func (p *TabbedPanel) Key() string {
+	return p.panelKey
+}
+
+// Title returns the panel title.
+func (p *TabbedPanel) Title() string {
+	return p.panelTitle
+}
+
+// SelectedEntity returns the currently selected entity.
+func (p *TabbedPanel) SelectedEntity() (*EntityItem, bool) {
+	if p.activeTab < 0 || p.activeTab >= len(p.tabs) {
+		return nil, false
+	}
+	item := p.tabs[p.activeTab].List.SelectedItem()
+	if item == nil {
+		return nil, false
+	}
+	if ei, ok := item.(EntityItem); ok {
+		return &ei, true
+	}
+	return nil, false
 }
 
 // View renders the tabbed panel.

@@ -72,10 +72,32 @@ func (p *ListPanel) SelectedEntityItem() (EntityItem, bool) {
 }
 
 // Update handles input for the list panel.
-func (p *ListPanel) Update(msg tea.Msg) (*ListPanel, tea.Cmd) {
+func (p *ListPanel) Update(msg tea.Msg) tea.Cmd {
 	var cmd tea.Cmd
 	p.list, cmd = p.list.Update(msg)
-	return p, cmd
+	return cmd
+}
+
+// Key returns the keyboard shortcut key.
+func (p *ListPanel) Key() string {
+	return p.panelKey
+}
+
+// Title returns the panel title.
+func (p *ListPanel) Title() string {
+	return p.panelTitle
+}
+
+// SelectedEntity returns the currently selected entity.
+func (p *ListPanel) SelectedEntity() (*EntityItem, bool) {
+	item := p.list.SelectedItem()
+	if item == nil {
+		return nil, false
+	}
+	if ei, ok := item.(EntityItem); ok {
+		return &ei, true
+	}
+	return nil, false
 }
 
 // View renders the list panel.

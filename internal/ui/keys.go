@@ -98,21 +98,21 @@ func DefaultKeyMap() KeyMap {
 			key.WithKeys("1"),
 			key.WithHelp("1", "bridges"),
 		),
-		FocusGroups: key.NewBinding(
+		FocusScenes: key.NewBinding(
 			key.WithKeys("2"),
-			key.WithHelp("2", "groups"),
+			key.WithHelp("2", "scenes"),
+		),
+		FocusGroups: key.NewBinding(
+			key.WithKeys("3"),
+			key.WithHelp("3", "groups"),
 		),
 		FocusLights: key.NewBinding(
-			key.WithKeys("3"),
-			key.WithHelp("3", "lights"),
+			key.WithKeys("4"),
+			key.WithHelp("4", "lights"),
 		),
 		FocusDevices: key.NewBinding(
-			key.WithKeys("4"),
-			key.WithHelp("4", "devices"),
-		),
-		FocusScenes: key.NewBinding(
 			key.WithKeys("5"),
-			key.WithHelp("5", "scenes"),
+			key.WithHelp("5", "devices"),
 		),
 		Select: key.NewBinding(
 			key.WithKeys("enter"),

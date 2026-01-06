@@ -10,11 +10,11 @@ import (
 
 // StatusBar renders the bottom status bar with keybinding hints.
 type StatusBar struct {
-	styles    ui.Styles
-	keys      ui.KeyMap
-	width     int
-	message   string
-	isError   bool
+	styles  ui.Styles
+	keys    ui.KeyMap
+	width   int
+	message string
+	isError bool
 }
 
 // NewStatusBar creates a new status bar.
@@ -79,4 +79,3 @@ func keyStr(k key.Binding) string {
 	}
 	return keys[0]
 }
-

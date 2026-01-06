@@ -172,18 +172,36 @@ func BuildRoomItems(state *hue.BridgeState) []list.Item {
 }
 
 // BuildLightItems converts lights to list items.
+// Note: Light names come from the owning device, not the light's deprecated Metadata.Name
 func BuildLightItems(state *hue.BridgeState) []list.Item {
 	lights := state.AllLights()
 	items := make([]list.Item, 0, len(lights))
-	for _, light := range lights {
-		name := ""
-		if light.Metadata != nil && light.Metadata.Name != nil {
-			name = *light.Metadata.Name
+
+	// Build device ID -> name lookup for proper light names
+	deviceNames := make(map[string]string)
+	for _, device := range state.AllDevices() {
+		if device.Id != nil && device.Metadata != nil && device.Metadata.Name != nil {
+			deviceNames[*device.Id] = *device.Metadata.Name
 		}
+	}
+
+	for _, light := range lights {
 		id := ""
 		if light.Id != nil {
 			id = *light.Id
 		}
+
+		// Get name from owning device (preferred) or fall back to light metadata
+		name := ""
+		if light.Owner != nil && light.Owner.Rid != nil {
+			if deviceName, ok := deviceNames[*light.Owner.Rid]; ok {
+				name = deviceName
+			}
+		}
+		if name == "" && light.Metadata != nil && light.Metadata.Name != nil {
+			name = *light.Metadata.Name
+		}
+
 		items = append(items, EntityItem{
 			ID:     id,
 			Name:   name,
@@ -236,6 +254,111 @@ func BuildSceneItems(state *hue.BridgeState) []list.Item {
 	return items
 }
 
+// BuildSceneTree creates a tree structure of scenes grouped by room/zone.
+func BuildSceneTree(state *hue.BridgeState) []*TreeNode {
+	scenes := state.AllScenes()
+
+	// Build room ID -> name and room ID -> scenes
+	roomNames := make(map[string]string)
+	roomScenes := make(map[string][]openhue.SceneGet)
+	ungroupedScenes := []openhue.SceneGet{}
+
+	for _, room := range state.AllRooms() {
+		if room.Id != nil && room.Metadata != nil && room.Metadata.Name != nil {
+			roomNames[*room.Id] = *room.Metadata.Name
+		}
+	}
+
+	// Group scenes by room
+	for _, scene := range scenes {
+		if scene.Group != nil && scene.Group.Rid != nil {
+			rid := *scene.Group.Rid
+			roomScenes[rid] = append(roomScenes[rid], scene)
+		} else {
+			ungroupedScenes = append(ungroupedScenes, scene)
+		}
+	}
+
+	// Build tree nodes
+	var roots []*TreeNode
+
+	// Sort room IDs by name for stable ordering
+	type roomEntry struct {
+		id   string
+		name string
+	}
+	var roomList []roomEntry
+	for rid, name := range roomNames {
+		if len(roomScenes[rid]) > 0 {
+			roomList = append(roomList, roomEntry{rid, name})
+		}
+	}
+	// Sort by name
+	for i := 0; i < len(roomList)-1; i++ {
+		for j := i + 1; j < len(roomList); j++ {
+			if roomList[i].name > roomList[j].name {
+				roomList[i], roomList[j] = roomList[j], roomList[i]
+			}
+		}
+	}
+
+	for _, entry := range roomList {
+		roomNode := &TreeNode{
+			Label:    entry.name,
+			Item:     nil, // Group header, not selectable as entity
+			Expanded: true,
+		}
+
+		for _, scene := range roomScenes[entry.id] {
+			name := ""
+			if scene.Metadata != nil && scene.Metadata.Name != nil {
+				name = *scene.Metadata.Name
+			}
+			id := ""
+			if scene.Id != nil {
+				id = *scene.Id
+			}
+			sceneNode := &TreeNode{
+				Label: name,
+				Item: &EntityItem{
+					ID:     id,
+					Name:   name,
+					Type:   EntityScene,
+					IsOn:   false,
+					RawPtr: scene,
+				},
+			}
+			roomNode.Children = append(roomNode.Children, sceneNode)
+		}
+
+		roots = append(roots, roomNode)
+	}
+
+	// Add ungrouped scenes at root level
+	for _, scene := range ungroupedScenes {
+		name := ""
+		if scene.Metadata != nil && scene.Metadata.Name != nil {
+			name = *scene.Metadata.Name
+		}
+		id := ""
+		if scene.Id != nil {
+			id = *scene.Id
+		}
+		roots = append(roots, &TreeNode{
+			Label: name,
+			Item: &EntityItem{
+				ID:     id,
+				Name:   name,
+				Type:   EntityScene,
+				IsOn:   false,
+				RawPtr: scene,
+			},
+		})
+	}
+
+	return roots
+}
+
 // BuildZoneItems returns an empty list (zones not yet supported by openhue-go Home).
 func BuildZoneItems(state *hue.BridgeState) []list.Item {
 	// Zones are not yet exposed via openhue-go Home interface
@@ -266,12 +389,18 @@ func BuildDeviceItems(state *hue.BridgeState) []list.Item {
 			continue
 		}
 
-		// Skip bridge devices (check product archetype)
-		if device.ProductData != nil && device.ProductData.ProductArchetype != nil {
-			archetype := string(*device.ProductData.ProductArchetype)
-			if archetype == "bridge_v2" {
-				continue
+		// Skip bridge devices (check if device provides a "bridge" service)
+		isBridge := false
+		if device.Services != nil {
+			for _, svc := range *device.Services {
+				if svc.Rtype != nil && *svc.Rtype == openhue.ResourceIdentifierRtypeBridge {
+					isBridge = true
+					break
+				}
 			}
+		}
+		if isBridge {
+			continue
 		}
 
 		name := ""

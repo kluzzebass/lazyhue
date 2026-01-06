@@ -97,4 +97,3 @@ func (s *CredentialStore) UpdateLastUsed(bridgeID string) {
 		s.Bridges[bridgeID] = cred
 	}
 }
-

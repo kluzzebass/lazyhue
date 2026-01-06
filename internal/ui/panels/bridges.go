@@ -39,7 +39,7 @@ func (d BridgeDelegate) Render(w io.Writer, m list.Model, index int, item list.I
 	}
 
 	bridge := i.Bridge
-	
+
 	// Active indicator
 	active := " "
 	if bridge.Info.ID == d.ActiveBridge {
@@ -88,10 +88,12 @@ type BridgePanel struct {
 	width        int
 	height       int
 	activeBridge string
+	panelKey     string
+	panelTitle   string
 }
 
 // NewBridgePanel creates a new bridge panel.
-func NewBridgePanel(styles ui.Styles) *BridgePanel {
+func NewBridgePanel(styles ui.Styles, panelKey string) *BridgePanel {
 	delegate := BridgeDelegate{Styles: styles}
 	l := list.New([]list.Item{}, delegate, 0, 0)
 	l.SetShowTitle(false)
@@ -102,15 +104,17 @@ func NewBridgePanel(styles ui.Styles) *BridgePanel {
 	l.InfiniteScrolling = false
 
 	return &BridgePanel{
-		list:   l,
-		styles: styles,
+		list:       l,
+		styles:     styles,
+		panelKey:   panelKey,
+		panelTitle: "Bridges",
 	}
 }
 
 // SetBridges updates the bridge list.
 func (p *BridgePanel) SetBridges(bridges []*hue.Bridge, activeBridgeID string) {
 	p.activeBridge = activeBridgeID
-	
+
 	// Update delegate with active bridge
 	p.list.SetDelegate(BridgeDelegate{
 		Styles:       p.styles,
@@ -149,10 +153,10 @@ func (p *BridgePanel) SelectedBridge() *hue.Bridge {
 }
 
 // Update handles input for the bridge panel.
-func (p *BridgePanel) Update(msg tea.Msg) (*BridgePanel, tea.Cmd) {
+func (p *BridgePanel) Update(msg tea.Msg) tea.Cmd {
 	var cmd tea.Cmd
 	p.list, cmd = p.list.Update(msg)
-	return p, cmd
+	return cmd
 }
 
 // View renders the bridge panel.
@@ -163,7 +167,7 @@ func (p *BridgePanel) View(active bool) string {
 	}
 
 	cfg := ui.BorderConfig{
-		Title:       "[1] Bridges",
+		Title:       "[" + p.panelKey + "] " + p.panelTitle,
 		ItemIndex:   p.list.Index(),
 		ItemCount:   len(p.list.Items()),
 		ScrollPos:   p.list.Index(),
@@ -174,8 +178,22 @@ func (p *BridgePanel) View(active bool) string {
 	return ui.RenderBorderedPanel(content, p.width, p.height, active, p.styles, cfg)
 }
 
+// Key returns the keyboard shortcut key.
+func (p *BridgePanel) Key() string {
+	return p.panelKey
+}
+
+// Title returns the panel title.
+func (p *BridgePanel) Title() string {
+	return p.panelTitle
+}
+
+// SelectedEntity returns nil for bridge panel (bridges aren't entities).
+func (p *BridgePanel) SelectedEntity() (*EntityItem, bool) {
+	return nil, false
+}
+
 // HasBridges returns true if there are any bridges.
 func (p *BridgePanel) HasBridges() bool {
 	return len(p.list.Items()) > 0
 }
-

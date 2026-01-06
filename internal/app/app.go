@@ -11,20 +11,19 @@ import (
 	"github.com/kluzzebass/lazyhue/internal/config"
 	"github.com/kluzzebass/lazyhue/internal/hue"
 	"github.com/kluzzebass/lazyhue/internal/ui"
+	"github.com/kluzzebass/lazyhue/internal/ui/layout"
 	"github.com/kluzzebass/lazyhue/internal/ui/panels"
 )
 
-// FocusRegion identifies which panel has focus.
-type FocusRegion int
-
+// Panel IDs for layout tree
 const (
-	FocusDetail  FocusRegion = iota // 0
-	FocusBridges                    // 1
-	FocusGroups                     // 2
-	FocusLights                     // 3
-	FocusDevices                    // 4
-	FocusScenes                     // 5
-	focusCount                      // sentinel for cycling
+	PanelIDBridges = "bridges"
+	PanelIDScenes  = "scenes"
+	PanelIDGroups  = "groups"
+	PanelIDLights  = "lights"
+	PanelIDDevices = "devices"
+	PanelIDDetail  = "detail"
+	PanelIDStatus  = "status"
 )
 
 // Model is the main Bubble Tea model for the application.
@@ -36,17 +35,17 @@ type Model struct {
 	// Bridge management
 	manager *hue.Manager
 
-	// UI panels
-	focus        FocusRegion
-	bridgePanel  *panels.BridgePanel
-	groupsPanel  *panels.TabbedPanel // Rooms | Zones | Entertainment
-	lightsPanel  *panels.ListPanel
-	devicesPanel *panels.ListPanel
-	scenesPanel  *panels.ListPanel
-	detailPanel  *panels.DetailsPanel
-	statusBar    *panels.StatusBar
-	styles       ui.Styles
-	keys         ui.KeyMap
+	// UI panels indexed by ID
+	panelMap    map[string]panels.Panel
+	panelOrder  []string // Panel IDs in focus-cycle order
+	focusIndex  int      // Index into panelOrder, -1 for detail panel
+	detailPanel *panels.DetailsPanel
+	statusBar   *panels.StatusBar
+	styles      ui.Styles
+	keys        ui.KeyMap
+
+	// Layout tree
+	layoutTree *layout.Tree
 
 	// Current selection
 	selectedItem *panels.EntityItem
@@ -54,13 +53,6 @@ type Model struct {
 	// Window dimensions
 	width  int
 	height int
-
-	// Layout (calculated in updateLayout, used by mouse handling)
-	layout struct {
-		leftWidth     int
-		panelTops     [5]int // Y positions where each left panel starts
-		contentHeight int
-	}
 
 	// State
 	ready      bool
@@ -76,21 +68,98 @@ func New(cfg *config.Config, creds *config.CredentialStore) Model {
 	styles := ui.DefaultStyles()
 	keys := ui.DefaultKeyMap()
 
-	return Model{
-		config:       cfg,
-		credentials:  creds,
-		manager:      hue.NewManager(creds),
-		styles:       styles,
-		keys:         keys,
-		bridgePanel:  panels.NewBridgePanel(styles),
-		groupsPanel:  panels.NewTabbedPanel(styles, "Groups", "2", []string{"Rooms", "Zones", "Entertainment"}),
-		lightsPanel:  panels.NewListPanel(styles, "Lights", "3", "No lights", panels.EntityDelegate{Styles: styles}),
-		devicesPanel: panels.NewListPanel(styles, "Devices", "4", "No devices", panels.EntityDelegate{Styles: styles}),
-		scenesPanel:  panels.NewListPanel(styles, "Scenes", "5", "No scenes", panels.EntityDelegate{Styles: styles}),
-		detailPanel:  panels.NewDetailsPanel(styles),
-		statusBar:    panels.NewStatusBar(styles, keys),
-		focus:        FocusBridges,
+	// Create panels indexed by ID
+	panelMap := map[string]panels.Panel{
+		PanelIDBridges: panels.NewBridgePanel(styles, "1"),
+		PanelIDScenes:  panels.NewTreePanel(styles, "Scenes", "2"),
+		PanelIDGroups:  panels.NewTabbedPanel(styles, "Groups", "3", []string{"Rooms", "Zones", "Entertainment"}),
+		PanelIDLights:  panels.NewListPanel(styles, "Lights", "4", "No lights", panels.EntityDelegate{Styles: styles}),
+		PanelIDDevices: panels.NewListPanel(styles, "Devices", "5", "No devices", panels.EntityDelegate{Styles: styles}),
 	}
+
+	// Panel order for keyboard focus cycling (reorder here!)
+	panelOrder := []string{
+		PanelIDBridges,
+		PanelIDScenes,
+		PanelIDGroups,
+		PanelIDLights,
+		PanelIDDevices,
+	}
+
+	// Build layout tree - this defines visual structure
+	// To reorder visually, change the tree structure here
+	layoutTree := layout.NewTree(
+		layout.VSplit(
+			// Main content area
+			layout.Child{Size: layout.Flex(1), Node: layout.HSplit(
+				// Left column (40%)
+				layout.Child{Size: layout.Flex(0.4), Node: layout.VSplit(
+					layout.Child{Size: layout.Fixed(5), Node: layout.NewLeaf(PanelIDBridges)},
+					layout.Child{Size: layout.Flex(1), Node: layout.NewLeaf(PanelIDScenes)},
+					layout.Child{Size: layout.Flex(1), Node: layout.NewLeaf(PanelIDGroups)},
+					layout.Child{Size: layout.Flex(1), Node: layout.NewLeaf(PanelIDLights)},
+					layout.Child{Size: layout.Flex(1), Node: layout.NewLeaf(PanelIDDevices)},
+				)},
+				// Right column (60%)
+				layout.Child{Size: layout.Flex(0.6), Node: layout.NewLeaf(PanelIDDetail)},
+			)},
+			// Status bar at bottom
+			layout.Child{Size: layout.Fixed(1), Node: layout.NewLeaf(PanelIDStatus)},
+		),
+	)
+
+	return Model{
+		config:      cfg,
+		credentials: creds,
+		manager:     hue.NewManager(creds),
+		styles:      styles,
+		keys:        keys,
+		panelMap:    panelMap,
+		panelOrder:  panelOrder,
+		focusIndex:  0,
+		layoutTree:  layoutTree,
+		detailPanel: panels.NewDetailsPanel(styles),
+		statusBar:   panels.NewStatusBar(styles, keys),
+	}
+}
+
+// Panel accessors for type-specific operations
+func (m *Model) bridgePanel() *panels.BridgePanel {
+	return m.panelMap[PanelIDBridges].(*panels.BridgePanel)
+}
+
+func (m *Model) scenesPanel() *panels.TreePanel {
+	return m.panelMap[PanelIDScenes].(*panels.TreePanel)
+}
+
+func (m *Model) groupsPanel() *panels.TabbedPanel {
+	return m.panelMap[PanelIDGroups].(*panels.TabbedPanel)
+}
+
+func (m *Model) lightsPanel() *panels.ListPanel {
+	return m.panelMap[PanelIDLights].(*panels.ListPanel)
+}
+
+func (m *Model) devicesPanel() *panels.ListPanel {
+	return m.panelMap[PanelIDDevices].(*panels.ListPanel)
+}
+
+func (m *Model) focusedOnDetail() bool {
+	return m.focusIndex < 0
+}
+
+func (m *Model) focusedPanelID() string {
+	if m.focusIndex >= 0 && m.focusIndex < len(m.panelOrder) {
+		return m.panelOrder[m.focusIndex]
+	}
+	return PanelIDDetail
+}
+
+func (m *Model) focusedPanel() panels.Panel {
+	if m.focusIndex >= 0 && m.focusIndex < len(m.panelOrder) {
+		return m.panelMap[m.panelOrder[m.focusIndex]]
+	}
+	return nil
 }
 
 // Init initializes the application.
@@ -178,6 +247,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case LightsSyncedMsg:
 		m.refreshLightsPanel()
+		m.refreshGroupsPanel() // Room on/off status depends on lights
+		m.updateDetailPanel()  // Detail view might show light info
 
 	case StateSyncErrorMsg:
 		m.setStatus("Sync error: "+msg.Err.Error(), true)
@@ -185,7 +256,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case SyncTickMsg:
 		bridge := m.manager.GetActiveBridge()
 		if bridge != nil && bridge.IsConnected() {
-			cmds = append(cmds, syncLights(bridge))
+			cmds = append(cmds, syncLightsAndGroups(bridge))
 		}
 		cmds = append(cmds, startSyncTicker())
 
@@ -222,45 +293,23 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m *Model) updateFocusedPanel(msg tea.Msg) tea.Cmd {
-	var cmd tea.Cmd
-
-	switch m.focus {
-	case FocusBridges:
-		m.bridgePanel, cmd = m.bridgePanel.Update(msg)
-
-	case FocusGroups:
-		m.groupsPanel, cmd = m.groupsPanel.Update(msg)
-		if item, ok := m.groupsPanel.SelectedItem(); ok {
-			m.selectedItem = &item
-			m.updateDetailPanel()
-		}
-
-	case FocusLights:
-		m.lightsPanel, cmd = m.lightsPanel.Update(msg)
-		if item, ok := m.lightsPanel.SelectedEntityItem(); ok {
-			m.selectedItem = &item
-			m.updateDetailPanel()
-		}
-
-	case FocusDevices:
-		m.devicesPanel, cmd = m.devicesPanel.Update(msg)
-		if item, ok := m.devicesPanel.SelectedEntityItem(); ok {
-			m.selectedItem = &item
-			m.updateDetailPanel()
-		}
-
-	case FocusScenes:
-		m.scenesPanel, cmd = m.scenesPanel.Update(msg)
-		if item, ok := m.scenesPanel.SelectedEntityItem(); ok {
-			m.selectedItem = &item
-			m.updateDetailPanel()
-		}
-
-	case FocusDetail:
+	if m.focusedOnDetail() {
+		var cmd tea.Cmd
 		m.detailPanel, cmd = m.detailPanel.Update(msg)
+		return cmd
 	}
 
-	return cmd
+	if panel := m.focusedPanel(); panel != nil {
+		cmd := panel.Update(msg)
+		// Update selection for detail panel
+		if item, ok := panel.SelectedEntity(); ok {
+			m.selectedItem = item
+			m.updateDetailPanel()
+		}
+		return cmd
+	}
+
+	return nil
 }
 
 func (m *Model) handleKey(msg tea.KeyMsg) tea.Cmd {
@@ -269,29 +318,36 @@ func (m *Model) handleKey(msg tea.KeyMsg) tea.Cmd {
 		m.quitting = true
 		return tea.Quit
 
-	// Panel focus with number keys
+	// Panel focus with number keys - check each panel's key
 	case key.Matches(msg, m.keys.FocusDetail):
-		m.focus = FocusDetail
-	case key.Matches(msg, m.keys.FocusBridges):
-		m.focus = FocusBridges
-	case key.Matches(msg, m.keys.FocusGroups):
-		m.focus = FocusGroups
-		m.syncSelectionFromFocusedPanel()
-	case key.Matches(msg, m.keys.FocusLights):
-		m.focus = FocusLights
-		m.syncSelectionFromFocusedPanel()
-	case key.Matches(msg, m.keys.FocusDevices):
-		m.focus = FocusDevices
-		m.syncSelectionFromFocusedPanel()
-	case key.Matches(msg, m.keys.FocusScenes):
-		m.focus = FocusScenes
+		m.focusIndex = -1 // Detail panel
+	default:
+		// Check if key matches any panel's shortcut
+		for i, id := range m.panelOrder {
+			if panel := m.panelMap[id]; panel != nil {
+				if msg.String() == panel.Key() {
+					m.focusIndex = i
+					m.syncSelectionFromFocusedPanel()
+					return nil
+				}
+			}
+		}
+	}
+
+	switch {
+	case key.Matches(msg, m.keys.NextPane):
+		// Cycle: detail (-1) -> panels (0..n-1) -> detail
+		m.focusIndex++
+		if m.focusIndex >= len(m.panelOrder) {
+			m.focusIndex = -1
+		}
 		m.syncSelectionFromFocusedPanel()
 
-	case key.Matches(msg, m.keys.NextPane):
-		m.focus = (m.focus + 1) % focusCount
-		m.syncSelectionFromFocusedPanel()
 	case key.Matches(msg, m.keys.PrevPane):
-		m.focus = (m.focus + focusCount - 1) % focusCount
+		m.focusIndex--
+		if m.focusIndex < -1 {
+			m.focusIndex = len(m.panelOrder) - 1
+		}
 		m.syncSelectionFromFocusedPanel()
 
 	case key.Matches(msg, m.keys.Select):
@@ -337,21 +393,34 @@ func (m *Model) handleKey(msg tea.KeyMsg) tea.Cmd {
 }
 
 func (m *Model) handleSelect() tea.Cmd {
-	switch m.focus {
-	case FocusBridges:
-		if bridge := m.bridgePanel.SelectedBridge(); bridge != nil {
+	// Bridge panel: select bridge
+	if m.focusedPanelID() == PanelIDBridges {
+		if bridge := m.bridgePanel().SelectedBridge(); bridge != nil {
 			m.manager.SetActiveBridge(bridge.Info.ID)
 			m.updateBridgePanel()
 			m.refreshAllPanels()
-			m.focus = FocusGroups
-		}
-	case FocusScenes:
-		// Activate the selected scene
-		if m.selectedItem != nil && m.selectedItem.Type == panels.EntityScene {
-			bridge := m.manager.GetActiveBridge()
-			if bridge != nil {
-				return recallScene(bridge, m.selectedItem.ID)
+			// Move to next panel in order
+			if m.focusIndex < len(m.panelOrder)-1 {
+				m.focusIndex++
 			}
+		}
+		return nil
+	}
+
+	// Scene panel: toggle group or activate scene
+	if m.focusedPanelID() == PanelIDScenes {
+		sp := m.scenesPanel()
+		if sp.IsGroupSelected() {
+			sp.ToggleSelected()
+			return nil
+		}
+	}
+
+	// Activate scene if one is selected
+	if m.selectedItem != nil && m.selectedItem.Type == panels.EntityScene {
+		bridge := m.manager.GetActiveBridge()
+		if bridge != nil {
+			return recallScene(bridge, m.selectedItem.ID)
 		}
 	}
 	return nil
@@ -362,24 +431,20 @@ func (m *Model) handleMouse(msg tea.MouseMsg) tea.Cmd {
 		return nil
 	}
 
-	if msg.X < m.layout.leftWidth {
-		// Left column - determine which panel based on Y position
-		y := msg.Y
-		switch {
-		case y < m.layout.panelTops[1]:
-			m.focus = FocusBridges
-		case y < m.layout.panelTops[2]:
-			m.focus = FocusGroups
-		case y < m.layout.panelTops[3]:
-			m.focus = FocusLights
-		case y < m.layout.panelTops[4]:
-			m.focus = FocusDevices
-		default:
-			m.focus = FocusScenes
+	// Use layout tree to find clicked panel
+	if leaf := m.layoutTree.At(msg.X, msg.Y); leaf != nil {
+		if leaf.ID == PanelIDDetail {
+			m.focusIndex = -1
+		} else {
+			// Find index in panelOrder
+			for i, id := range m.panelOrder {
+				if id == leaf.ID {
+					m.focusIndex = i
+					break
+				}
+			}
 		}
 		m.syncSelectionFromFocusedPanel()
-	} else {
-		m.focus = FocusDetail
 	}
 	return nil
 }
@@ -519,47 +584,22 @@ func (m *Model) adjustBrightness(delta float64) tea.Cmd {
 }
 
 func (m *Model) updateLayout() {
-	// Left column gets 40% of width, right column gets the rest
-	leftWidth := m.width * 4 / 10
-	if leftWidth < 25 {
-		leftWidth = 25
-	}
-	rightWidth := m.width - leftWidth
-	contentHeight := m.height - 1 // status bar
+	// Calculate layout tree
+	m.layoutTree.Layout(m.width, m.height)
 
-	// Bridge panel: fixed height for ~3 items (5 rows including border)
-	bridgeHeight := 5
-	remainingHeight := contentHeight - bridgeHeight
-
-	// Divide remaining height among 4 panels
-	panelHeight := remainingHeight / 4
-	remainder := remainingHeight % 4
-
-	// Distribute remainder to make heights more even
-	heights := [4]int{}
-	for i := range heights {
-		heights[i] = panelHeight
-		if i < remainder {
-			heights[i]++
-		}
+	// Apply sizes to all panels from the tree
+	for id, panel := range m.panelMap {
+		bounds := m.layoutTree.Bounds(id)
+		panel.SetSize(bounds.Width, bounds.Height)
 	}
 
-	// Store layout for mouse handling
-	m.layout.leftWidth = leftWidth
-	m.layout.contentHeight = contentHeight
-	m.layout.panelTops[0] = 0                                                         // Bridges
-	m.layout.panelTops[1] = bridgeHeight                                              // Groups
-	m.layout.panelTops[2] = bridgeHeight + heights[0]                                 // Lights
-	m.layout.panelTops[3] = bridgeHeight + heights[0] + heights[1]                    // Devices
-	m.layout.panelTops[4] = bridgeHeight + heights[0] + heights[1] + heights[2]       // Scenes
+	// Size detail panel
+	bounds := m.layoutTree.Bounds(PanelIDDetail)
+	m.detailPanel.SetSize(bounds.Width, bounds.Height)
 
-	m.bridgePanel.SetSize(leftWidth, bridgeHeight)
-	m.groupsPanel.SetSize(leftWidth, heights[0])
-	m.lightsPanel.SetSize(leftWidth, heights[1])
-	m.devicesPanel.SetSize(leftWidth, heights[2])
-	m.scenesPanel.SetSize(leftWidth, heights[3])
-	m.detailPanel.SetSize(rightWidth, contentHeight)
-	m.statusBar.SetWidth(m.width)
+	// Size status bar
+	bounds = m.layoutTree.Bounds(PanelIDStatus)
+	m.statusBar.SetWidth(bounds.Width)
 }
 
 func (m *Model) refreshAllPanels() {
@@ -573,9 +613,9 @@ func (m *Model) refreshAllPanels() {
 func (m *Model) refreshGroupsPanel() {
 	bridge := m.manager.GetActiveBridge()
 	if bridge == nil {
-		m.groupsPanel.SetItemsByID("Rooms", nil)
-		m.groupsPanel.SetItemsByID("Zones", nil)
-		m.groupsPanel.SetItemsByID("Entertainment", nil)
+		m.groupsPanel().SetItemsByID("Rooms", nil)
+		m.groupsPanel().SetItemsByID("Zones", nil)
+		m.groupsPanel().SetItemsByID("Entertainment", nil)
 		return
 	}
 
@@ -585,52 +625,52 @@ func (m *Model) refreshGroupsPanel() {
 	}
 
 	// Rooms tab
-	m.groupsPanel.SetItemsByID("Rooms", panels.BuildRoomItems(state))
+	m.groupsPanel().SetItemsByID("Rooms", panels.BuildRoomItems(state))
 
 	// Zones tab
-	m.groupsPanel.SetItemsByID("Zones", panels.BuildZoneItems(state))
+	m.groupsPanel().SetItemsByID("Zones", panels.BuildZoneItems(state))
 
 	// Entertainment tab
-	m.groupsPanel.SetItemsByID("Entertainment", panels.BuildEntertainmentItems(state))
+	m.groupsPanel().SetItemsByID("Entertainment", panels.BuildEntertainmentItems(state))
 }
 
 func (m *Model) refreshLightsPanel() {
 	bridge := m.manager.GetActiveBridge()
 	if bridge == nil {
-		m.lightsPanel.SetItems(nil)
+		m.lightsPanel().SetItems(nil)
 		return
 	}
 	state := bridge.GetState()
 	if state == nil {
 		return
 	}
-	m.lightsPanel.SetItems(panels.BuildLightItems(state))
+	m.lightsPanel().SetItems(panels.BuildLightItems(state))
 }
 
 func (m *Model) refreshDevicesPanel() {
 	bridge := m.manager.GetActiveBridge()
 	if bridge == nil {
-		m.devicesPanel.SetItems(nil)
+		m.devicesPanel().SetItems(nil)
 		return
 	}
 	state := bridge.GetState()
 	if state == nil {
 		return
 	}
-	m.devicesPanel.SetItems(panels.BuildDeviceItems(state))
+	m.devicesPanel().SetItems(panels.BuildDeviceItems(state))
 }
 
 func (m *Model) refreshScenesPanel() {
 	bridge := m.manager.GetActiveBridge()
 	if bridge == nil {
-		m.scenesPanel.SetItems(nil)
+		m.scenesPanel().SetRoots(nil)
 		return
 	}
 	state := bridge.GetState()
 	if state == nil {
 		return
 	}
-	m.scenesPanel.SetItems(panels.BuildSceneItems(state))
+	m.scenesPanel().SetRoots(panels.BuildSceneTree(state))
 }
 
 func (m *Model) updateBridgePanel() {
@@ -638,7 +678,7 @@ func (m *Model) updateBridgePanel() {
 	sort.Slice(bridges, func(i, j int) bool {
 		return bridges[i].Info.Name < bridges[j].Info.Name
 	})
-	m.bridgePanel.SetBridges(bridges, m.manager.GetActiveBridgeID())
+	m.bridgePanel().SetBridges(bridges, m.manager.GetActiveBridgeID())
 }
 
 func (m *Model) updateDetailPanel() {
@@ -649,25 +689,9 @@ func (m *Model) updateDetailPanel() {
 }
 
 func (m *Model) syncSelectionFromFocusedPanel() {
-	switch m.focus {
-	case FocusGroups:
-		if item, ok := m.groupsPanel.SelectedItem(); ok {
-			m.selectedItem = &item
-			m.updateDetailPanel()
-		}
-	case FocusLights:
-		if item, ok := m.lightsPanel.SelectedEntityItem(); ok {
-			m.selectedItem = &item
-			m.updateDetailPanel()
-		}
-	case FocusDevices:
-		if item, ok := m.devicesPanel.SelectedEntityItem(); ok {
-			m.selectedItem = &item
-			m.updateDetailPanel()
-		}
-	case FocusScenes:
-		if item, ok := m.scenesPanel.SelectedEntityItem(); ok {
-			m.selectedItem = &item
+	if panel := m.focusedPanel(); panel != nil {
+		if item, ok := panel.SelectedEntity(); ok {
+			m.selectedItem = item
 			m.updateDetailPanel()
 		}
 	}
@@ -680,8 +704,8 @@ func (m *Model) startBridgePairing() tea.Cmd {
 	}
 
 	var bridgeInfo hue.BridgeInfo
-	if m.focus == FocusBridges {
-		if selected := m.bridgePanel.SelectedBridge(); selected != nil {
+	if m.focusedPanelID() == PanelIDBridges {
+		if selected := m.bridgePanel().SelectedBridge(); selected != nil {
 			if selected.IsConnected() {
 				m.setStatus("Bridge already connected", false)
 				return nil
@@ -737,17 +761,20 @@ func (m Model) View() string {
 		return "Goodbye!\n"
 	}
 
-	// Left column: stacked panels
-	leftColumn := lipgloss.JoinVertical(lipgloss.Left,
-		m.bridgePanel.View(m.focus == FocusBridges),
-		m.groupsPanel.View(m.focus == FocusGroups),
-		m.lightsPanel.View(m.focus == FocusLights),
-		m.devicesPanel.View(m.focus == FocusDevices),
-		m.scenesPanel.View(m.focus == FocusScenes),
-	)
+	// Render left column panels in layout order
+	// The layout tree defines the visual order via the VSplit children
+	leftPanelIDs := []string{PanelIDBridges, PanelIDScenes, PanelIDGroups, PanelIDLights, PanelIDDevices}
+	panelViews := make([]string, 0, len(leftPanelIDs))
+	for _, id := range leftPanelIDs {
+		if panel := m.panelMap[id]; panel != nil {
+			isActive := m.focusedPanelID() == id
+			panelViews = append(panelViews, panel.View(isActive))
+		}
+	}
+	leftColumn := lipgloss.JoinVertical(lipgloss.Left, panelViews...)
 
 	// Right column: detail panel
-	rightColumn := m.detailPanel.View(m.focus == FocusDetail)
+	rightColumn := m.detailPanel.View(m.focusedOnDetail())
 
 	// Combine columns - constrain to actual dimensions
 	content := lipgloss.JoinHorizontal(lipgloss.Top, leftColumn, rightColumn)
@@ -795,6 +822,19 @@ func syncLights(bridge *hue.Bridge) tea.Cmd {
 	return func() tea.Msg {
 		ctx := context.Background()
 		if err := bridge.SyncLights(ctx); err != nil {
+			return StateSyncErrorMsg{BridgeID: bridge.Info.ID, Err: err}
+		}
+		return LightsSyncedMsg{BridgeID: bridge.Info.ID}
+	}
+}
+
+func syncLightsAndGroups(bridge *hue.Bridge) tea.Cmd {
+	return func() tea.Msg {
+		ctx := context.Background()
+		if err := bridge.SyncLights(ctx); err != nil {
+			return StateSyncErrorMsg{BridgeID: bridge.Info.ID, Err: err}
+		}
+		if err := bridge.SyncGroupedLights(ctx); err != nil {
 			return StateSyncErrorMsg{BridgeID: bridge.Info.ID, Err: err}
 		}
 		return LightsSyncedMsg{BridgeID: bridge.Info.ID}
