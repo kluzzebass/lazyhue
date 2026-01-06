@@ -70,6 +70,8 @@ func (m *Model) handleSelect() tea.Cmd {
 	if m.focusedPanelID() == PanelIDBridges {
 		if bridge := m.bridgePanel().SelectedBridge(); bridge != nil {
 			if !bridge.IsConnected() {
+				// Clear hierarchy when selecting a disconnected bridge
+				m.hierarchyPanel().SetRoots(nil)
 				// Trigger pairing for unconnected bridge
 				return m.startBridgePairing()
 			}
@@ -304,6 +306,40 @@ func pairingTick() tea.Cmd {
 	return tea.Tick(time.Second, func(t time.Time) tea.Msg {
 		return PairingTickMsg{}
 	})
+}
+
+// forgetSelectedBridge removes the credentials for the selected bridge.
+func (m *Model) forgetSelectedBridge() tea.Cmd {
+	bridge := m.bridgePanel().SelectedBridge()
+	if bridge == nil {
+		return nil
+	}
+
+	// Only connected bridges can be forgotten (they have saved credentials)
+	if !bridge.IsConnected() {
+		m.setStatus("Bridge is not connected", false)
+		return nil
+	}
+
+	bridgeID := bridge.Info.ID
+	bridgeName := bridge.Info.Name
+
+	// Remove from credential store
+	m.credentials.Delete(bridgeID)
+	if err := m.credentials.Save(); err != nil {
+		m.setStatus("Failed to save credentials: "+err.Error(), true)
+		return nil
+	}
+
+	// Disconnect the bridge
+	bridge.Disconnect()
+
+	// Clear the hierarchy (this bridge's data is no longer valid)
+	m.hierarchyPanel().SetRoots(nil)
+
+	m.updateBridgePanel()
+	m.setStatus("Forgot bridge: "+bridgeName, false)
+	return nil
 }
 
 

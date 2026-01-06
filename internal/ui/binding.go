@@ -21,9 +21,9 @@ const (
 	ActionFocusDetail Action = "focus_detail"
 
 	// Bridge
-	ActionNextBridge Action = "next_bridge"
-	ActionPrevBridge Action = "prev_bridge"
-	ActionPairBridge Action = "pair_bridge"
+	ActionNextBridge   Action = "next_bridge"
+	ActionPrevBridge   Action = "prev_bridge"
+	ActionForgetBridge Action = "forget_bridge"
 
 	// Entity actions
 	ActionSelect         Action = "select"

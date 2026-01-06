@@ -3,6 +3,7 @@ package hue
 import (
 	"context"
 	"errors"
+	"os"
 	"strings"
 	"time"
 
@@ -34,7 +35,13 @@ type Authenticator struct {
 
 // NewAuthenticator creates an authenticator for the given bridge IP.
 func NewAuthenticator(bridgeIP string) (*Authenticator, error) {
-	auth, err := openhue.NewAuthenticator(bridgeIP)
+	// Build device type as "lazyhue#hostname" (Hue convention)
+	deviceType := "lazyhue"
+	if hostname, err := os.Hostname(); err == nil && hostname != "" {
+		deviceType = "lazyhue#" + hostname
+	}
+
+	auth, err := openhue.NewAuthenticator(bridgeIP, openhue.WithDeviceType(deviceType))
 	if err != nil {
 		return nil, err
 	}

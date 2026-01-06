@@ -11,6 +11,7 @@ func (m *Model) initBindings() {
 	m.panelBindings = map[string][]ui.Binding{
 		PanelIDBridges: {
 			{Keys: []string{"enter"}, Display: "<enter>", Desc: "Connect", Action: ui.ActionSelect, Priority: 100},
+			{Keys: []string{"x"}, Display: "x", Desc: "Forget bridge", Action: ui.ActionForgetBridge, Priority: 90},
 		},
 		PanelIDHierarchy: {
 			{Keys: []string{"enter"}, Display: "<enter>", Desc: "Select/Activate", Action: ui.ActionSelect, Priority: 100},

@@ -41,8 +41,8 @@ func (m *Model) dispatch(action ui.Action) tea.Cmd {
 		m.manager.PrevBridge()
 		m.updateBridgePanel()
 		m.refreshAllPanels()
-	case ui.ActionPairBridge:
-		return m.startBridgePairing()
+	case ui.ActionForgetBridge:
+		return m.forgetSelectedBridge()
 
 	// Entity actions
 	case ui.ActionSelect:
