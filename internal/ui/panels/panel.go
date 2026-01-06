@@ -30,4 +30,3 @@ type PanelConfig struct {
 	Key   string // Keyboard shortcut (e.g., "1", "2")
 	Title string
 }
-

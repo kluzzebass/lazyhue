@@ -1,0 +1,58 @@
+package app
+
+import (
+	"github.com/kluzzebass/lazyhue/internal/ui"
+)
+
+// initBindings sets up all keybindings.
+// Bindings use Action identifiers - handlers are in dispatch.go
+func (m *Model) initBindings() {
+	// Panel-specific bindings
+	m.panelBindings = map[string][]ui.Binding{
+		PanelIDBridges: {
+			{Keys: []string{"enter"}, Display: "<enter>", Desc: "Select", Action: ui.ActionSelect, Priority: 100},
+			{Keys: []string{"P"}, Display: "P", Desc: "Pair bridge", Action: ui.ActionPairBridge, Priority: 90},
+		},
+		PanelIDScenes: {
+			{Keys: []string{"enter"}, Display: "<enter>", Desc: "Activate", Action: ui.ActionSelect, Priority: 100},
+			{Keys: []string{" "}, Display: "<space>", Desc: "Expand/Collapse", Action: ui.ActionExpandCollapse, Priority: 90},
+		},
+		PanelIDGroups: {
+			{Keys: []string{" "}, Display: "<space>", Desc: "Toggle", Action: ui.ActionToggle, Priority: 100},
+			{Keys: []string{"+", "="}, Display: "+", Desc: "Brighter", Action: ui.ActionBrightnessUp, Priority: 80},
+			{Keys: []string{"-"}, Display: "-", Desc: "Dimmer", Action: ui.ActionBrightnessDown, Priority: 80},
+			{Keys: []string{"left", "h"}, Display: "←/h", Desc: "Prev tab", Action: ui.ActionPrevTab, Priority: 70},
+			{Keys: []string{"right", "l"}, Display: "→/l", Desc: "Next tab", Action: ui.ActionNextTab, Priority: 70},
+		},
+		PanelIDLights: {
+			{Keys: []string{" "}, Display: "<space>", Desc: "Toggle", Action: ui.ActionToggle, Priority: 100},
+			{Keys: []string{"o"}, Display: "o", Desc: "Turn on", Action: ui.ActionTurnOn, Priority: 90},
+			{Keys: []string{"O"}, Display: "O", Desc: "Turn off", Action: ui.ActionTurnOff, Priority: 90},
+			{Keys: []string{"+", "="}, Display: "+", Desc: "Brighter", Action: ui.ActionBrightnessUp, Priority: 80},
+			{Keys: []string{"-"}, Display: "-", Desc: "Dimmer", Action: ui.ActionBrightnessDown, Priority: 80},
+		},
+		PanelIDDevices: {
+			{Keys: []string{"enter"}, Display: "<enter>", Desc: "Select", Action: ui.ActionSelect, Priority: 100},
+		},
+		PanelIDDetail: {
+			{Keys: []string{"esc"}, Display: "<esc>", Desc: "Back", Action: ui.ActionBack, Priority: 100},
+		},
+	}
+
+	// Global bindings - work in any context
+	m.globalBindings = []ui.Binding{
+		{Keys: []string{"up", "k"}, Display: "↑/k", Desc: "Up", Action: ui.ActionUp},
+		{Keys: []string{"down", "j"}, Display: "↓/j", Desc: "Down", Action: ui.ActionDown},
+		{Keys: []string{"g"}, Display: "g", Desc: "Top", Action: ui.ActionTop},
+		{Keys: []string{"G"}, Display: "G", Desc: "Bottom", Action: ui.ActionBottom},
+		{Keys: []string{"pgup"}, Display: "PgUp", Desc: "Page up", Action: ui.ActionPageUp},
+		{Keys: []string{"pgdown"}, Display: "PgDn", Desc: "Page down", Action: ui.ActionPageDown},
+		{Keys: []string{"tab"}, Display: "Tab", Desc: "Next panel", Action: ui.ActionNextPanel},
+		{Keys: []string{"shift+tab"}, Display: "S-Tab", Desc: "Prev panel", Action: ui.ActionPrevPanel},
+		{Keys: []string{"]"}, Display: "]", Desc: "Next bridge", Action: ui.ActionNextBridge},
+		{Keys: []string{"["}, Display: "[", Desc: "Prev bridge", Action: ui.ActionPrevBridge},
+		{Keys: []string{"R"}, Display: "R", Desc: "Refresh", Action: ui.ActionRefresh},
+		{Keys: []string{"?"}, Display: "?", Desc: "Help", Action: ui.ActionHelp, Priority: 10},
+		{Keys: []string{"q", "ctrl+c"}, Display: "q", Desc: "Quit", Action: ui.ActionQuit, Priority: 5},
+	}
+}
