@@ -4,6 +4,7 @@ package panels
 import (
 	"fmt"
 	"io"
+	"sort"
 
 	"github.com/charmbracelet/bubbles/list"
 	tea "github.com/charmbracelet/bubbletea"
@@ -210,6 +211,12 @@ func BuildLightItems(state *hue.BridgeState) []list.Item {
 			RawPtr: light,
 		})
 	}
+
+	// Sort by the actual display name (from device, not light metadata)
+	sort.Slice(items, func(i, j int) bool {
+		return items[i].(EntityItem).Name < items[j].(EntityItem).Name
+	})
+
 	return items
 }
 

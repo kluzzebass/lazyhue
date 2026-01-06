@@ -226,7 +226,8 @@ func (p *TreePanel) View(active bool) string {
 	content := lipgloss.JoinVertical(lipgloss.Left, lines...)
 
 	cfg := ui.BorderConfig{
-		Title:       "[" + p.panelKey + "] " + p.panelTitle,
+		PanelKey:    p.panelKey,
+		Title:       p.panelTitle,
 		ItemIndex:   p.cursor,
 		ItemCount:   len(p.flatList),
 		ScrollPos:   p.offset,
@@ -239,12 +240,6 @@ func (p *TreePanel) View(active bool) string {
 
 // renderNode renders a single node line.
 func (p *TreePanel) renderNode(node *TreeNode, selected, active bool) string {
-	// Selection indicator
-	selector := "  "
-	if selected {
-		selector = "> "
-	}
-
 	// Find depth
 	depth := p.nodeDepth(node)
 
@@ -266,18 +261,22 @@ func (p *TreePanel) renderNode(node *TreeNode, selected, active bool) string {
 
 	label := node.Label
 
+	line := prefix + indicator + label
+
 	// Style based on selection and whether it's a group
+	// Use full panel width for background highlight
+	lineWidth := max(1, p.width-2)
 	var style lipgloss.Style
 	if selected && active {
-		style = p.styles.SelectedItem
+		style = p.styles.SelectedItem.Width(lineWidth)
 	} else if node.Item == nil {
 		// Group header
-		style = p.styles.Muted.Bold(true)
+		style = p.styles.Muted.Bold(true).Width(lineWidth)
 	} else {
-		style = p.styles.ListItem
+		style = p.styles.ListItem.Width(lineWidth)
 	}
 
-	return style.Render(selector + prefix + indicator + label)
+	return style.Render(line)
 }
 
 // nodeDepth finds the depth of a node.

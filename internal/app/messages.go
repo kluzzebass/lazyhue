@@ -68,6 +68,12 @@ type LightsSyncedMsg struct {
 // SyncTickMsg triggers periodic state sync.
 type SyncTickMsg struct{}
 
+// DiscoveryTickMsg triggers periodic bridge discovery.
+type DiscoveryTickMsg struct{}
+
+// indicatorRefreshMsg triggers a redraw to update activity indicators.
+type indicatorRefreshMsg struct{}
+
 // Action result messages
 
 // LightToggledMsg is sent after toggling a light.

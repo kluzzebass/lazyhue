@@ -178,7 +178,8 @@ func (p *ListPanel) View(active bool) string {
 	content := lipgloss.JoinVertical(lipgloss.Left, lines...)
 
 	cfg := ui.BorderConfig{
-		Title:       "[" + p.panelKey + "] " + p.panelTitle,
+		PanelKey:    p.panelKey,
+		Title:       p.panelTitle,
 		ItemIndex:   p.cursor,
 		ItemCount:   len(p.items),
 		ScrollPos:   p.offset,
@@ -196,12 +197,6 @@ func (p *ListPanel) renderItem(item list.Item, selected, active bool, width int)
 		return ""
 	}
 
-	// Selection indicator
-	selector := "  "
-	if selected {
-		selector = "> "
-	}
-
 	// Status indicator
 	indicator := "○"
 	if ei.IsOn {
@@ -209,25 +204,19 @@ func (p *ListPanel) renderItem(item list.Item, selected, active bool, width int)
 	}
 
 	name := ei.Name
-	line := selector + indicator + " " + name
+	line := indicator + " " + name
 
 	// Truncate if needed
 	if lipgloss.Width(line) > width {
 		line = line[:width-1] + "…"
 	}
 
-	// Style
+	// Style with full-width background
 	var style lipgloss.Style
 	if selected && active {
-		style = p.styles.SelectedItem
+		style = p.styles.SelectedItem.Width(width)
 	} else {
-		style = p.styles.ListItem
-	}
-
-	// Pad to full width for selection highlight
-	padding := width - lipgloss.Width(line)
-	if padding > 0 {
-		line = line + lipgloss.NewStyle().Render(string(make([]byte, padding)))
+		style = p.styles.ListItem.Width(width)
 	}
 
 	return style.Render(line)

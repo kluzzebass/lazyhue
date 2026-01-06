@@ -4,33 +4,48 @@ overview: A comprehensive technical plan for building lazyhue, a terminal-based 
 todos:
   - id: bridge-discovery
     content: Implement bridge discovery and authentication flow
-    status: pending
+    status: completed
   - id: credential-storage
     content: Build secure credential storage layer
-    status: pending
+    status: completed
   - id: entity-models
     content: Define domain models and relationship mapping from openhue-go types
-    status: pending
+    status: completed
   - id: bridge-manager
     content: Create multi-bridge manager with connection state tracking
-    status: pending
+    status: completed
   - id: state-poller
     content: Implement background polling with optimistic updates
-    status: pending
+    status: completed
   - id: tui-layout
     content: Build panel layout with entity list and detail view
-    status: pending
+    status: completed
   - id: keybindings
     content: Implement keybinding system with context-aware actions
-    status: pending
+    status: completed
   - id: light-controls
     content: Add light/group toggle, brightness, and color controls
-    status: pending
+    status: in-progress
   - id: scene-activation
     content: Implement scene browsing and activation
-    status: pending
+    status: in-progress
   - id: help-overlay
     content: Build help overlay with full keybinding reference
+    status: pending
+  - id: color-picker
+    content: Implement color picker for color-capable lights
+    status: pending
+  - id: color-temp-picker
+    content: Implement color temperature picker for CT-capable lights
+    status: pending
+  - id: visual-mode
+    content: Implement visual/multi-select mode for bulk operations
+    status: pending
+  - id: zones-support
+    content: Implement zones listing and control (currently placeholder)
+    status: pending
+  - id: entertainment-support
+    content: Implement entertainment areas listing and control (currently placeholder)
     status: pending
 ---
 

@@ -8,9 +8,9 @@ import (
 
 // BorderConfig holds configuration for custom border rendering.
 type BorderConfig struct {
-	Title       string   // Title to embed in top border
+	PanelKey    string   // Panel key number (e.g., "1")
+	Title       string   // Title to embed in top border (e.g., "Bridges")
 	Tabs        []string // Tab names for tabbed panels
-	TabPrefix   string   // Prefix before tabs (e.g., "[2]")
 	ActiveTab   int      // Which tab is active
 	ItemIndex   int      // Current item index (0-based)
 	ItemCount   int      // Total item count
@@ -101,45 +101,63 @@ func buildTopBorder(border lipgloss.Border, width int, borderColor lipgloss.Colo
 
 func buildTitledTopBorder(border lipgloss.Border, width int, borderColor lipgloss.Color, styles Styles, cfg BorderConfig) string {
 	bs := lipgloss.NewStyle().Foreground(borderColor)
-	title := cfg.Title
 
-	// Truncate title if too long
-	maxTitleLen := width - 4 // leave room for corners and some border
-	if len(title) > maxTitleLen {
-		title = title[:maxTitleLen-2] + ".."
+	// Build key prefix (e.g., "[1]")
+	keyRendered := ""
+	keyWidth := 0
+	if cfg.PanelKey != "" {
+		keyRendered = styles.PanelTitle.Render("[" + cfg.PanelKey + "]")
+		keyWidth = lipgloss.Width(keyRendered)
 	}
 
+	// Build title
+	title := cfg.Title
+	maxTitleLen := width - keyWidth - 6 // leave room for corners and border segments
+	if len(title) > maxTitleLen && maxTitleLen > 2 {
+		title = title[:maxTitleLen-2] + ".."
+	}
 	titleRendered := styles.PanelTitle.Render(title)
 	titleWidth := lipgloss.Width(titleRendered)
 
-	// Calculate remaining border width
-	remainingWidth := width - titleWidth
+	// Calculate border segments
+	// Layout: TopLeft + border + [key] + border + title + border... + TopRight
 	leftPadding := 1
-	rightPadding := remainingWidth - leftPadding
+	middlePadding := 1 // between key and title
+	rightPadding := width - keyWidth - titleWidth - leftPadding - middlePadding
 
-	if rightPadding < 0 {
-		rightPadding = 0
+	if rightPadding < 1 {
+		rightPadding = 1
+	}
+
+	if keyRendered != "" {
+		return bs.Render(border.TopLeft) +
+			bs.Render(strings.Repeat(border.Top, leftPadding)) +
+			keyRendered +
+			bs.Render(strings.Repeat(border.Top, middlePadding)) +
+			titleRendered +
+			bs.Render(strings.Repeat(border.Top, rightPadding)) +
+			bs.Render(border.TopRight)
 	}
 
 	return bs.Render(border.TopLeft) +
 		bs.Render(strings.Repeat(border.Top, leftPadding)) +
 		titleRendered +
-		bs.Render(strings.Repeat(border.Top, rightPadding)) +
+		bs.Render(strings.Repeat(border.Top, rightPadding+middlePadding)) +
 		bs.Render(border.TopRight)
 }
 
 func buildTabbedTopBorder(border lipgloss.Border, width int, borderColor lipgloss.Color, styles Styles, cfg BorderConfig) string {
 	bs := lipgloss.NewStyle().Foreground(borderColor)
 
-	// Build prefix if present (e.g., "[2] ")
-	prefix := ""
-	prefixWidth := 0
-	if cfg.TabPrefix != "" {
-		prefix = styles.PanelTitle.Render(cfg.TabPrefix) + " "
-		prefixWidth = lipgloss.Width(prefix)
+	// Build key prefix (e.g., "[3]")
+	keyRendered := ""
+	keyWidth := 0
+	if cfg.PanelKey != "" {
+		keyRendered = styles.PanelTitle.Render("[" + cfg.PanelKey + "]")
+		keyWidth = lipgloss.Width(keyRendered)
 	}
 
-	// Build tab string
+	// Build tab string with separators
 	var tabParts []string
 	for i, tab := range cfg.Tabs {
 		style := styles.Muted
@@ -148,26 +166,36 @@ func buildTabbedTopBorder(border lipgloss.Border, width int, borderColor lipglos
 		}
 		tabParts = append(tabParts, style.Render(tab))
 		if i < len(cfg.Tabs)-1 {
-			tabParts = append(tabParts, bs.Render("─"))
+			tabParts = append(tabParts, bs.Render(border.Top))
 		}
 	}
 	tabString := strings.Join(tabParts, "")
 	tabWidth := lipgloss.Width(tabString)
 
-	// Calculate remaining border width
-	remainingWidth := width - prefixWidth - tabWidth
-	leftPadding := 1
-	rightPadding := remainingWidth - leftPadding
+	// Calculate border segments
+	// Layout: TopLeft + border + [key] + border + tabs + border... + TopRight
+	leftPadding := 1   // after TopLeft
+	middlePadding := 1 // between key and tabs
+	remainingWidth := width - keyWidth - tabWidth - leftPadding - middlePadding
 
-	if rightPadding < 0 {
-		rightPadding = 0
+	if remainingWidth < 0 {
+		remainingWidth = 0
+	}
+
+	if keyRendered != "" {
+		return bs.Render(border.TopLeft) +
+			bs.Render(strings.Repeat(border.Top, leftPadding)) +
+			keyRendered +
+			bs.Render(strings.Repeat(border.Top, middlePadding)) +
+			tabString +
+			bs.Render(strings.Repeat(border.Top, remainingWidth)) +
+			bs.Render(border.TopRight)
 	}
 
 	return bs.Render(border.TopLeft) +
 		bs.Render(strings.Repeat(border.Top, leftPadding)) +
-		prefix +
 		tabString +
-		bs.Render(strings.Repeat(border.Top, rightPadding)) +
+		bs.Render(strings.Repeat(border.Top, remainingWidth+middlePadding)) +
 		bs.Render(border.TopRight)
 }
 

@@ -300,6 +300,26 @@ func (s *BridgeState) IsRoomOn(room openhue.RoomGet) bool {
 	return false
 }
 
+// BridgeName returns the name of the bridge device, if found.
+func (s *BridgeState) BridgeName() string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	for _, device := range s.Devices {
+		if device.Services == nil {
+			continue
+		}
+		for _, svc := range *device.Services {
+			if svc.Rtype != nil && *svc.Rtype == openhue.ResourceIdentifierRtypeBridge {
+				if device.Metadata != nil && device.Metadata.Name != nil {
+					return *device.Metadata.Name
+				}
+			}
+		}
+	}
+	return ""
+}
+
 // RoomBrightness returns the grouped light brightness for a room.
 func (s *BridgeState) RoomBrightness(room openhue.RoomGet) float64 {
 	if gl, ok := s.RoomGroupedLight(room); ok {
@@ -308,5 +328,75 @@ func (s *BridgeState) RoomBrightness(room openhue.RoomGet) float64 {
 		}
 	}
 	return 0
+}
+
+// SetLight updates a single light in the cache.
+func (s *BridgeState) SetLight(id string, light openhue.LightGet) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.Lights[id] = light
+}
+
+// SetGroupedLight updates a single grouped light in the cache.
+func (s *BridgeState) SetGroupedLight(id string, gl openhue.GroupedLightGet) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.GroupedLights[id] = gl
+}
+
+// SetLightBrightness optimistically updates a light's brightness in the cache.
+func (s *BridgeState) SetLightBrightness(id string, brightness float64) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if light, ok := s.Lights[id]; ok {
+		if light.Dimming != nil {
+			br := openhue.Brightness(brightness)
+			light.Dimming.Brightness = &br
+			s.Lights[id] = light
+		}
+	}
+}
+
+// SetGroupedLightBrightness optimistically updates a grouped light's brightness in the cache.
+func (s *BridgeState) SetGroupedLightBrightness(id string, brightness float64) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if gl, ok := s.GroupedLights[id]; ok {
+		if gl.Dimming != nil {
+			br := openhue.Brightness(brightness)
+			gl.Dimming.Brightness = &br
+			s.GroupedLights[id] = gl
+		}
+	}
+}
+
+// SetLightOn optimistically updates a light's on state in the cache.
+func (s *BridgeState) SetLightOn(id string, on bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if light, ok := s.Lights[id]; ok {
+		if light.On == nil {
+			light.On = &openhue.On{}
+		}
+		light.On.On = &on
+		s.Lights[id] = light
+	}
+}
+
+// SetGroupedLightOn optimistically updates a grouped light's on state in the cache.
+func (s *BridgeState) SetGroupedLightOn(id string, on bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if gl, ok := s.GroupedLights[id]; ok {
+		if gl.On == nil {
+			gl.On = &openhue.On{}
+		}
+		gl.On.On = &on
+		s.GroupedLights[id] = gl
+	}
 }
 

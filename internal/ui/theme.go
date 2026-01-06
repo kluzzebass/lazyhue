@@ -52,10 +52,10 @@ type Styles struct {
 	ActivePanel lipgloss.Style
 
 	// List items
-	ListItem         lipgloss.Style
-	SelectedItem     lipgloss.Style
-	ListItemTitle    lipgloss.Style
-	ListItemDesc     lipgloss.Style
+	ListItem      lipgloss.Style
+	SelectedItem  lipgloss.Style
+	ListItemTitle lipgloss.Style
+	ListItemDesc  lipgloss.Style
 
 	// Status indicators
 	OnIndicator  lipgloss.Style
@@ -64,12 +64,12 @@ type Styles struct {
 	Disconnected lipgloss.Style
 
 	// Text
-	Title     lipgloss.Style
-	Subtitle  lipgloss.Style
-	Muted     lipgloss.Style
-	Error     lipgloss.Style
-	Success   lipgloss.Style
-	KeyHelp   lipgloss.Style
+	Title    lipgloss.Style
+	Subtitle lipgloss.Style
+	Muted    lipgloss.Style
+	Error    lipgloss.Style
+	Success  lipgloss.Style
+	KeyHelp  lipgloss.Style
 }
 
 // DefaultStyles returns the default UI styles.
@@ -116,7 +116,8 @@ func DefaultStyles() Styles {
 
 		SelectedItem: lipgloss.NewStyle().
 			Bold(true).
-			Foreground(theme.Accent),
+			Foreground(theme.Foreground).
+			Background(theme.Primary),
 
 		ListItemTitle: lipgloss.NewStyle().
 			Foreground(theme.Foreground),
@@ -166,4 +167,3 @@ func (s Styles) OnOffIndicator(on bool) string {
 	}
 	return s.OffIndicator.String()
 }
-

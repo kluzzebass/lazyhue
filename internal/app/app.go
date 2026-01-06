@@ -36,13 +36,14 @@ type Model struct {
 	manager *hue.Manager
 
 	// UI panels indexed by ID
-	panelMap    map[string]panels.Panel
-	panelOrder  []string // Panel IDs in focus-cycle order
-	focusIndex  int      // Index into panelOrder, -1 for detail panel
-	detailPanel *panels.DetailsPanel
-	statusBar   *panels.StatusBar
-	styles      ui.Styles
-	keys        ui.KeyMap
+	panelMap       map[string]panels.Panel
+	panelOrder     []string // Panel IDs in focus-cycle order
+	focusIndex     int      // Index into panelOrder, -1 for detail panel
+	lastFocusIndex int      // Previous focus index (for returning from detail)
+	detailPanel    *panels.DetailsPanel
+	statusBar      *panels.StatusBar
+	styles         ui.Styles
+	keys           ui.KeyMap
 
 	// Layout tree
 	layoutTree *layout.Tree
@@ -173,8 +174,13 @@ func (m Model) Init() tea.Cmd {
 		cmds = append(cmds, m.connectFromStoredCredentials())
 	}
 
-	// Also run discovery in background to find new/unknown bridges
-	cmds = append(cmds, discoverBridges())
+	// Run discovery immediately (via tick with 0 delay)
+	cmds = append(cmds, tea.Tick(0, func(t time.Time) tea.Msg {
+		return DiscoveryTickMsg{}
+	}))
+
+	// Start sync ticker (will poll when a bridge is connected)
+	cmds = append(cmds, startSyncTicker())
 
 	return tea.Batch(cmds...)
 }
@@ -247,6 +253,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 	case StateSyncedMsg:
+		// Update stored bridge name if it changed
+		if bridge := m.manager.GetBridge(msg.BridgeID); bridge != nil {
+			if cred, ok := m.credentials.Get(msg.BridgeID); ok {
+				if cred.BridgeName != bridge.Info.Name && bridge.Info.Name != "" {
+					cred.BridgeName = bridge.Info.Name
+					m.credentials.Set(cred)
+					_ = m.credentials.Save()
+				}
+			}
+		}
 		m.refreshAllPanels()
 		m.syncSelectionFromFocusedPanel()
 		m.clearStatus()
@@ -262,9 +278,25 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case SyncTickMsg:
 		bridge := m.manager.GetActiveBridge()
 		if bridge != nil && bridge.IsConnected() {
+			m.statusBar.SetPolling(true)
 			cmds = append(cmds, syncLightsAndGroups(bridge))
+			// Schedule a redraw after indicator duration to turn it off
+			cmds = append(cmds, tea.Tick(300*time.Millisecond, func(t time.Time) tea.Msg {
+				return indicatorRefreshMsg{}
+			}))
 		}
 		cmds = append(cmds, startSyncTicker())
+
+	case DiscoveryTickMsg:
+		m.statusBar.SetDiscovering(true)
+		cmds = append(cmds, discoverBridges(), startDiscoveryTicker())
+		// Schedule a redraw after indicator duration to turn it off
+		cmds = append(cmds, tea.Tick(300*time.Millisecond, func(t time.Time) tea.Msg {
+			return indicatorRefreshMsg{}
+		}))
+
+	case indicatorRefreshMsg:
+		// Just triggers a redraw to update indicator visibility
 
 	case PairingSuccessMsg:
 		m.pairing = false
@@ -326,6 +358,9 @@ func (m *Model) handleKey(msg tea.KeyMsg) tea.Cmd {
 
 	// Panel focus with number keys - check each panel's key
 	case key.Matches(msg, m.keys.FocusDetail):
+		if m.focusIndex >= 0 {
+			m.lastFocusIndex = m.focusIndex
+		}
 		m.focusIndex = -1 // Detail panel
 	default:
 		// Check if key matches any panel's shortcut
@@ -342,19 +377,38 @@ func (m *Model) handleKey(msg tea.KeyMsg) tea.Cmd {
 
 	switch {
 	case key.Matches(msg, m.keys.NextPane):
-		// Cycle: detail (-1) -> panels (0..n-1) -> detail
-		m.focusIndex++
-		if m.focusIndex >= len(m.panelOrder) {
-			m.focusIndex = -1
+		// Cycle only through left panels (skip detail)
+		if m.focusIndex < 0 {
+			m.focusIndex = 0
+		} else {
+			m.focusIndex++
+			if m.focusIndex >= len(m.panelOrder) {
+				m.focusIndex = 0
+			}
 		}
 		m.syncSelectionFromFocusedPanel()
 
 	case key.Matches(msg, m.keys.PrevPane):
-		m.focusIndex--
-		if m.focusIndex < -1 {
+		// Cycle only through left panels (skip detail)
+		if m.focusIndex < 0 {
 			m.focusIndex = len(m.panelOrder) - 1
+		} else {
+			m.focusIndex--
+			if m.focusIndex < 0 {
+				m.focusIndex = len(m.panelOrder) - 1
+			}
 		}
 		m.syncSelectionFromFocusedPanel()
+
+	case key.Matches(msg, key.NewBinding(key.WithKeys("esc"))):
+		// Escape from detail panel goes back to previous panel
+		if m.focusIndex < 0 {
+			m.focusIndex = m.lastFocusIndex
+			if m.focusIndex < 0 || m.focusIndex >= len(m.panelOrder) {
+				m.focusIndex = 0
+			}
+			m.syncSelectionFromFocusedPanel()
+		}
 
 	case key.Matches(msg, m.keys.Select):
 		return m.handleSelect()
@@ -440,6 +494,9 @@ func (m *Model) handleMouse(msg tea.MouseMsg) tea.Cmd {
 	// Use layout tree to find clicked panel
 	if leaf := m.layoutTree.At(msg.X, msg.Y); leaf != nil {
 		if leaf.ID == PanelIDDetail {
+			if m.focusIndex >= 0 {
+				m.lastFocusIndex = m.focusIndex
+			}
 			m.focusIndex = -1
 		} else {
 			// Find index in panelOrder
@@ -853,6 +910,12 @@ func startSyncTicker() tea.Cmd {
 	})
 }
 
+func startDiscoveryTicker() tea.Cmd {
+	return tea.Tick(30*time.Second, func(t time.Time) tea.Msg {
+		return DiscoveryTickMsg{}
+	})
+}
+
 func startPairing(info hue.BridgeInfo) tea.Cmd {
 	return func() tea.Msg {
 		auth, err := hue.NewAuthenticator(info.IPAddress)
@@ -874,7 +937,7 @@ func toggleLight(bridge *hue.Bridge, lightID string) tea.Cmd {
 		if err := bridge.ToggleLight(lightID); err != nil {
 			return ActionErrorMsg{Action: "toggle light", Err: err}
 		}
-		return nil
+		return LightsSyncedMsg{BridgeID: bridge.Info.ID}
 	}
 }
 
@@ -883,7 +946,7 @@ func toggleGroupedLight(bridge *hue.Bridge, groupID string) tea.Cmd {
 		if err := bridge.ToggleGroupedLight(groupID); err != nil {
 			return ActionErrorMsg{Action: "toggle group", Err: err}
 		}
-		return nil
+		return LightsSyncedMsg{BridgeID: bridge.Info.ID}
 	}
 }
 
@@ -892,7 +955,7 @@ func setLightOn(bridge *hue.Bridge, lightID string, on bool) tea.Cmd {
 		if err := bridge.SetLightOn(lightID, on); err != nil {
 			return ActionErrorMsg{Action: "set light", Err: err}
 		}
-		return nil
+		return LightsSyncedMsg{BridgeID: bridge.Info.ID}
 	}
 }
 
@@ -901,7 +964,7 @@ func setGroupedLightOn(bridge *hue.Bridge, groupID string, on bool) tea.Cmd {
 		if err := bridge.SetGroupedLightOn(groupID, on); err != nil {
 			return ActionErrorMsg{Action: "set group", Err: err}
 		}
-		return nil
+		return LightsSyncedMsg{BridgeID: bridge.Info.ID}
 	}
 }
 
@@ -910,7 +973,7 @@ func setLightBrightness(bridge *hue.Bridge, lightID string, brightness float64) 
 		if err := bridge.SetLightBrightness(lightID, brightness); err != nil {
 			return ActionErrorMsg{Action: "set brightness", Err: err}
 		}
-		return nil
+		return LightsSyncedMsg{BridgeID: bridge.Info.ID}
 	}
 }
 
@@ -919,7 +982,7 @@ func setGroupedLightBrightness(bridge *hue.Bridge, groupID string, brightness fl
 		if err := bridge.SetGroupedLightBrightness(groupID, brightness); err != nil {
 			return ActionErrorMsg{Action: "set brightness", Err: err}
 		}
-		return nil
+		return LightsSyncedMsg{BridgeID: bridge.Info.ID}
 	}
 }
 
@@ -928,8 +991,7 @@ func recallScene(bridge *hue.Bridge, sceneID string) tea.Cmd {
 		if err := bridge.RecallScene(sceneID); err != nil {
 			return ActionErrorMsg{Action: "recall scene", Err: err}
 		}
-		m := StatusMsg{Message: "Scene activated", IsError: false}
-		return m
+		return LightsSyncedMsg{BridgeID: bridge.Info.ID}
 	}
 }
 

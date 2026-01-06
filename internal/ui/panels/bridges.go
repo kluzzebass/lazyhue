@@ -164,7 +164,8 @@ func (p *BridgePanel) View(active bool) string {
 	content := lipgloss.JoinVertical(lipgloss.Left, lines...)
 
 	cfg := ui.BorderConfig{
-		Title:       "[" + p.panelKey + "] " + p.panelTitle,
+		PanelKey:    p.panelKey,
+		Title:       p.panelTitle,
 		ItemIndex:   p.cursor,
 		ItemCount:   len(p.bridges),
 		ScrollPos:   p.offset,
@@ -177,27 +178,21 @@ func (p *BridgePanel) View(active bool) string {
 
 // renderBridge renders a single bridge item.
 func (p *BridgePanel) renderBridge(bridge *hue.Bridge, selected, active bool, width int) string {
-	// Active indicator
-	activeMarker := " "
-	if bridge.Info.ID == p.activeBridge {
-		activeMarker = ">"
-	}
-
-	// Status indicator
+	// Status indicator (character only, styling applied to whole line)
 	var status string
 	switch bridge.Status {
 	case hue.StatusConnected:
-		status = p.styles.Connected.Render("●")
+		status = "●"
 	case hue.StatusConnecting:
-		status = p.styles.Muted.Render("○")
+		status = "○"
 	case hue.StatusPairing:
-		status = p.styles.Muted.Render("◐")
+		status = "◐"
 	case hue.StatusDisconnected:
-		status = p.styles.Disconnected.Render("○")
+		status = "○"
 	case hue.StatusError:
-		status = p.styles.Error.Render("✕")
+		status = "✕"
 	default:
-		status = p.styles.Muted.Render("?")
+		status = "?"
 	}
 
 	name := bridge.Info.Name
@@ -206,19 +201,19 @@ func (p *BridgePanel) renderBridge(bridge *hue.Bridge, selected, active bool, wi
 	}
 
 	// Build line
-	line := activeMarker + " " + status + " " + name
+	line := status + " " + name
 
 	// Truncate if needed
 	if lipgloss.Width(line) > width {
 		line = line[:width-1] + "…"
 	}
 
-	// Style
+	// Style with full-width background
 	var style lipgloss.Style
 	if selected && active {
-		style = p.styles.SelectedItem
+		style = p.styles.SelectedItem.Width(width)
 	} else {
-		style = p.styles.ListItem
+		style = p.styles.ListItem.Width(width)
 	}
 
 	return style.Render(line)

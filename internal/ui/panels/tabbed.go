@@ -288,7 +288,7 @@ func (p *TabbedPanel) View(active bool) string {
 	}
 
 	cfg := ui.BorderConfig{
-		TabPrefix:   "[" + p.panelKey + "]",
+		PanelKey:    p.panelKey,
 		Tabs:        tabTitles,
 		ActiveTab:   p.activeTab,
 		ItemIndex:   itemIndex,
@@ -308,12 +308,6 @@ func (p *TabbedPanel) renderItem(item list.Item, selected, active bool, width in
 		return ""
 	}
 
-	// Selection indicator
-	selector := "  "
-	if selected {
-		selector = "> "
-	}
-
 	// Status indicator
 	indicator := "○"
 	if ei.IsOn {
@@ -321,19 +315,19 @@ func (p *TabbedPanel) renderItem(item list.Item, selected, active bool, width in
 	}
 
 	name := ei.Name
-	line := selector + indicator + " " + name
+	line := indicator + " " + name
 
 	// Truncate if needed
 	if lipgloss.Width(line) > width {
 		line = line[:width-1] + "…"
 	}
 
-	// Style
+	// Style with full-width background
 	var style lipgloss.Style
 	if selected && active {
-		style = p.styles.SelectedItem
+		style = p.styles.SelectedItem.Width(width)
 	} else {
-		style = p.styles.ListItem
+		style = p.styles.ListItem.Width(width)
 	}
 
 	return style.Render(line)

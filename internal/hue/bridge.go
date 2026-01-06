@@ -124,6 +124,14 @@ func (b *Bridge) SyncAll(ctx context.Context) error {
 	if err := b.SyncDevices(ctx); err != nil {
 		return err
 	}
+
+	// Update bridge name from device metadata
+	if name := b.state.BridgeName(); name != "" {
+		b.mu.Lock()
+		b.Info.Name = name
+		b.mu.Unlock()
+	}
+
 	b.mu.Lock()
 	b.LastSync = time.Now()
 	b.mu.Unlock()
