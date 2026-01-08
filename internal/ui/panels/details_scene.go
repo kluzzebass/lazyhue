@@ -3,13 +3,13 @@ package panels
 import (
 	"fmt"
 
+	"github.com/kluzzebass/lazyhue/internal/hueclient"
 	"github.com/kluzzebass/lazyhue/internal/ui/panels/details"
-	"github.com/openhue/openhue-go"
 )
 
 // buildSceneView creates a details view for a scene entity.
 func (p *DetailsPanel) buildSceneView(sceneAny interface{}) *details.View {
-	scene, ok := sceneAny.(openhue.SceneGet)
+	scene, ok := sceneAny.(hueclient.SceneGet)
 	if !ok {
 		return details.NewView(p.styles)
 	}
@@ -109,7 +109,7 @@ func (p *DetailsPanel) buildSceneView(sceneAny interface{}) *details.View {
 			paletteDetails := details.NewFields()
 			if scene.Palette.Color != nil && len(*scene.Palette.Color) > 0 {
 				for i, c := range *scene.Palette.Color {
-					if c.Color != nil && c.Color.Xy != nil {
+					if c.Color != nil && c.Color.Xy != nil && c.Color.Xy.X != nil && c.Color.Xy.Y != nil {
 						paletteDetails.AddSub(fmt.Sprintf("Color %d", i+1), fmt.Sprintf("XY(%.4f, %.4f)", *c.Color.Xy.X, *c.Color.Xy.Y))
 					}
 				}
@@ -175,7 +175,7 @@ func (p *DetailsPanel) buildSceneView(sceneAny interface{}) *details.View {
 				if action.Action.ColorTemperature != nil && action.Action.ColorTemperature.Mirek != nil {
 					actionFields.AddSub("Color temp", fmt.Sprintf("%d mirek", *action.Action.ColorTemperature.Mirek))
 				}
-				if action.Action.Color != nil && action.Action.Color.Xy != nil {
+				if action.Action.Color != nil && action.Action.Color.Xy != nil && action.Action.Color.Xy.X != nil && action.Action.Color.Xy.Y != nil {
 					actionFields.AddSub("Color XY", fmt.Sprintf("(%.4f, %.4f)", *action.Action.Color.Xy.X, *action.Action.Color.Xy.Y))
 				}
 				if action.Action.Effects != nil && action.Action.Effects.Effect != nil {

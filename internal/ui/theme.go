@@ -20,6 +20,13 @@ type Theme struct {
 	OffColor lipgloss.Color
 }
 
+// Color constants for use outside of styles (e.g., in entity builders).
+const (
+	ColorOn    = "#FCD34D" // yellow-300 (light on, motion detected)
+	ColorOff   = "#6B7280" // gray-500 (light off, motion clear)
+	ColorMuted = "#6B7280" // gray-500
+)
+
 // DefaultTheme returns the default color theme.
 func DefaultTheme() Theme {
 	return Theme{
@@ -28,13 +35,13 @@ func DefaultTheme() Theme {
 		Accent:     lipgloss.Color("#F59E0B"), // amber
 		Background: lipgloss.Color("#1F2937"), // gray-800
 		Foreground: lipgloss.Color("#F9FAFB"), // gray-50
-		Muted:      lipgloss.Color("#6B7280"), // gray-500
+		Muted:      lipgloss.Color(ColorMuted),
 		Error:      lipgloss.Color("#EF4444"), // red
 		Success:    lipgloss.Color("#10B981"), // emerald
 		Warning:    lipgloss.Color("#F59E0B"), // amber
 
-		OnColor:  lipgloss.Color("#FCD34D"), // yellow-300 (light on)
-		OffColor: lipgloss.Color("#6B7280"), // gray-500 (light off)
+		OnColor:  lipgloss.Color(ColorOn),
+		OffColor: lipgloss.Color(ColorOff),
 	}
 }
 

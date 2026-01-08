@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"fmt"
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
@@ -220,7 +221,24 @@ func buildTabbedTopBorder(border lipgloss.Border, width int, borderColor lipglos
 
 func buildBottomBorder(border lipgloss.Border, width int, borderColor lipgloss.Color, styles Styles, cfg BorderConfig) string {
 	bs := lipgloss.NewStyle().Foreground(borderColor)
-	// Plain bottom border
+
+	// Build "X of Y" indicator if we have items
+	if cfg.ItemCount > 0 {
+		indicator := fmt.Sprintf(" %d of %d ", cfg.ItemIndex+1, cfg.ItemCount)
+		indicatorLen := len(indicator)
+
+		if indicatorLen < width {
+			// Right-align the indicator in the bottom border
+			leftLen := width - indicatorLen
+
+			return bs.Render(border.BottomLeft) +
+				bs.Render(strings.Repeat(border.Bottom, leftLen)) +
+				styles.Muted.Render(indicator) +
+				bs.Render(border.BottomRight)
+		}
+	}
+
+	// Plain bottom border (no items or too narrow)
 	return bs.Render(border.BottomLeft + strings.Repeat(border.Bottom, width) + border.BottomRight)
 }
 

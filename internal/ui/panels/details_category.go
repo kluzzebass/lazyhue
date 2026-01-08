@@ -6,8 +6,8 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/kluzzebass/lazyhue/internal/hueclient"
 	"github.com/kluzzebass/lazyhue/internal/ui/panels/details"
-	"github.com/openhue/openhue-go"
 )
 
 // buildLightsCategoryView creates a details view for a lights category aggregate.
@@ -45,7 +45,7 @@ func (p *DetailsPanel) buildLightsCategoryView(data LightsCategoryData) *details
 	totalBrightness := 0.0
 	brightnessCount := 0
 	for _, light := range data.Lights {
-		if light.IsOn() {
+		if IsLightOn(light) {
 			onCount++
 			if light.Dimming != nil && light.Dimming.Brightness != nil {
 				totalBrightness += float64(*light.Dimming.Brightness)
@@ -71,7 +71,7 @@ func (p *DetailsPanel) buildLightsCategoryView(data LightsCategoryData) *details
 		indicator := RenderLightIndicatorFromLight(light, p.styles)
 
 		var detailParts []string
-		if light.IsOn() {
+		if IsLightOn(light) {
 			if light.Dimming != nil && light.Dimming.Brightness != nil {
 				detailParts = append(detailParts, fmt.Sprintf("%.0f%%", float64(*light.Dimming.Brightness)))
 			}
@@ -79,7 +79,7 @@ func (p *DetailsPanel) buildLightsCategoryView(data LightsCategoryData) *details
 				kelvin := 1000000 / *light.ColorTemperature.Mirek
 				detailParts = append(detailParts, fmt.Sprintf("%dK", kelvin))
 			}
-			if light.Color != nil && light.Color.Xy != nil {
+			if light.Color != nil && light.Color.Xy != nil && light.Color.Xy.X != nil && light.Color.Xy.Y != nil {
 				if light.ColorTemperature == nil || light.ColorTemperature.Mirek == nil {
 					detailParts = append(detailParts, fmt.Sprintf("xy(%.2f,%.2f)", *light.Color.Xy.X, *light.Color.Xy.Y))
 				}
@@ -221,10 +221,10 @@ func (p *DetailsPanel) buildScenesCategoryView(data ScenesCategoryData) *details
 		statusStr := ""
 		if scene.Status != nil && scene.Status.Active != nil {
 			status := *scene.Status.Active
-			if status == openhue.SceneGetStatusActiveStatic {
+			if status == hueclient.SceneGetStatusActiveStatic {
 				isActive = true
 				statusStr = "static"
-			} else if status == openhue.SceneGetStatusActiveDynamicPalette {
+			} else if status == hueclient.SceneGetStatusActiveDynamicPalette {
 				isActive = true
 				statusStr = "dynamic"
 			}
@@ -235,7 +235,7 @@ func (p *DetailsPanel) buildScenesCategoryView(data ScenesCategoryData) *details
 			var avgColor lipgloss.Color = p.styles.Theme.OnColor
 
 			if p.state != nil && scene.Group != nil && scene.Group.Rid != nil {
-				var lights []openhue.LightGet
+				var lights []hueclient.LightGet
 				if room, ok := p.state.GetRoom(*scene.Group.Rid); ok {
 					lights = p.state.RoomLights(room)
 				} else if zone, ok := p.state.GetZone(*scene.Group.Rid); ok {
@@ -245,7 +245,7 @@ func (p *DetailsPanel) buildScenesCategoryView(data ScenesCategoryData) *details
 				var totalBrightness, totalR, totalG, totalB float64
 				var onCount int
 				for _, light := range lights {
-					if light.IsOn() {
+					if IsLightOn(light) {
 						onCount++
 						if light.Dimming != nil && light.Dimming.Brightness != nil {
 							totalBrightness += float64(*light.Dimming.Brightness)

@@ -82,7 +82,10 @@ type DiscoveryTickMsg struct{}
 
 // BridgeEventMsg is sent when an SSE event is received from a bridge.
 type BridgeEventMsg struct {
-	BridgeID string
+	BridgeID     string
+	ResourceType string // e.g., "light", "scene", "motion"
+	ResourceID   string
+	EventType    string // e.g., "update", "add", "delete"
 }
 
 // indicatorRefreshMsg triggers a redraw to update activity indicators.

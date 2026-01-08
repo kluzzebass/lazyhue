@@ -3,6 +3,7 @@ package app
 import (
 	"sort"
 
+	"github.com/kluzzebass/lazyhue/internal/hue"
 	"github.com/kluzzebass/lazyhue/internal/ui"
 	"github.com/kluzzebass/lazyhue/internal/ui/panels"
 )
@@ -18,14 +19,25 @@ func (m *Model) hierarchyPanel() *panels.HomeTabbedPanel {
 }
 
 func (m *Model) focusedOnDetail() bool {
-	return m.focusIndex < 0
+	return m.focusIndex == -1
+}
+
+func (m *Model) focusedOnLog() bool {
+	return m.focusIndex == -2
 }
 
 func (m *Model) focusedPanelID() string {
-	if m.focusIndex >= 0 && m.focusIndex < len(m.panelOrder) {
-		return m.panelOrder[m.focusIndex]
+	switch m.focusIndex {
+	case -1:
+		return PanelIDDetail
+	case -2:
+		return PanelIDLog
+	default:
+		if m.focusIndex >= 0 && m.focusIndex < len(m.panelOrder) {
+			return m.panelOrder[m.focusIndex]
+		}
+		return PanelIDDetail
 	}
-	return PanelIDDetail
 }
 
 func (m *Model) focusedPanel() panels.Panel {
@@ -50,6 +62,10 @@ func (m *Model) updateLayout() {
 	// Size detail panel
 	bounds := m.layoutTree.Bounds(PanelIDDetail)
 	m.detailPanel.SetSize(bounds.Width, bounds.Height)
+
+	// Size log panel
+	bounds = m.layoutTree.Bounds(PanelIDLog)
+	m.logPanel.SetSize(bounds.Width, bounds.Height)
 
 	// Size status bar
 	bounds = m.layoutTree.Bounds(PanelIDStatus)
@@ -79,9 +95,6 @@ func (m *Model) refreshHierarchyPanel() {
 	}
 
 	state := bridge.GetState()
-	if state == nil {
-		return
-	}
 
 	// Update Home tab (tree)
 	tree := panels.BuildHierarchyTree(state)
@@ -134,11 +147,64 @@ func (m *Model) updateDetailPanel() {
 		return
 	}
 
-	// For other entities, use the active bridge's state
+	// For other entities, refresh the RawPtr from current state
 	bridge := m.manager.GetActiveBridge()
 	if bridge != nil {
-		m.detailPanel.SetItem(m.selectedItem, bridge.GetState())
+		state := bridge.GetState()
+		// Refresh RawPtr from live state to get latest data
+		if m.refreshSelectedItemFromState(state) {
+			m.detailPanel.SetItem(m.selectedItem, state)
+		}
 	}
+}
+
+// refreshSelectedItemFromState updates the selected item's RawPtr with fresh data from state.
+// Returns true if the data was successfully refreshed, false if the entity wasn't found.
+func (m *Model) refreshSelectedItemFromState(state *hue.BridgeState) bool {
+	if m.selectedItem == nil || state == nil {
+		return false
+	}
+
+	switch m.selectedItem.Type {
+	case panels.EntityLight:
+		if light, ok := state.GetLight(m.selectedItem.ID); ok {
+			m.selectedItem.RawPtr = light
+			m.selectedItem.IsOn = panels.IsLightOn(light)
+			return true
+		}
+	case panels.EntityRoom:
+		if room, ok := state.GetRoom(m.selectedItem.ID); ok {
+			m.selectedItem.RawPtr = room
+			m.selectedItem.IsOn = state.IsRoomOn(room)
+			return true
+		}
+	case panels.EntityZone:
+		if zone, ok := state.GetZone(m.selectedItem.ID); ok {
+			m.selectedItem.RawPtr = zone
+			m.selectedItem.IsOn = state.IsRoomOn(zone)
+			return true
+		}
+	case panels.EntityScene:
+		if scene, ok := state.GetScene(m.selectedItem.ID); ok {
+			m.selectedItem.RawPtr = scene
+			// Scene active status
+			if scene.Status != nil && scene.Status.Active != nil {
+				m.selectedItem.IsOn = string(*scene.Status.Active) == "static" || string(*scene.Status.Active) == "dynamic_palette"
+			}
+			return true
+		}
+	case panels.EntityDevice:
+		if device, ok := state.GetDevice(m.selectedItem.ID); ok {
+			m.selectedItem.RawPtr = device
+			return true
+		}
+	case panels.EntityEntertainment:
+		if ent, ok := state.GetEntertainmentConfiguration(m.selectedItem.ID); ok {
+			m.selectedItem.RawPtr = ent
+			return true
+		}
+	}
+	return false
 }
 
 func (m *Model) syncSelectionFromFocusedPanel() {
@@ -155,13 +221,14 @@ func (m *Model) syncSelectionFromFocusedPanel() {
 			if bridge.IsConnected() {
 				currentID := m.manager.GetActiveBridgeID()
 
-				// If clicking the same bridge, do nothing
-				if currentID == bridge.Info.ID {
+				// Skip if same bridge AND hierarchy is already showing it
+				// (displayedBridgeID might be empty if we just viewed a disconnected bridge)
+				if currentID == bridge.Info.ID && m.displayedBridgeID == bridge.Info.ID {
 					return
 				}
 
 				// Save current bridge's expanded state before switching
-				if currentID != "" {
+				if currentID != "" && currentID != bridge.Info.ID {
 					m.saveExpandedState(currentID)
 				}
 
@@ -176,6 +243,7 @@ func (m *Model) syncSelectionFromFocusedPanel() {
 			} else {
 				// Clear hierarchy for disconnected bridges
 				m.hierarchyPanel().Clear()
+				m.displayedBridgeID = ""
 			}
 		}
 	}

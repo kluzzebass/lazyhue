@@ -145,7 +145,7 @@ func (p *DetailsPanel) buildBridgeView(data BridgeData) *details.View {
 		// Count lights that are on
 		lightsOn := 0
 		for _, light := range lights {
-			if light.IsOn() {
+			if IsLightOn(light) {
 				lightsOn++
 			}
 		}

@@ -2,13 +2,15 @@
 package hue
 
 import (
+	"context"
 	"crypto/tls"
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"sync"
 	"time"
 
-	"github.com/openhue/openhue-go"
+	"github.com/grandcat/zeroconf"
 )
 
 // BridgeInfo contains discovered bridge details.
@@ -34,31 +36,66 @@ func NewDiscoveryService(timeout time.Duration) *DiscoveryService {
 	return &DiscoveryService{timeout: timeout}
 }
 
-// Discover finds Hue bridges on the local network.
+// Discover finds Hue bridges on the local network using mDNS.
 func (d *DiscoveryService) Discover() ([]BridgeInfo, error) {
-	discovery := openhue.NewBridgeDiscovery(openhue.WithTimeout(d.timeout))
+	ctx, cancel := context.WithTimeout(context.Background(), d.timeout)
+	defer cancel()
 
-	bridge, err := discovery.Discover()
+	// Hue bridges advertise as _hue._tcp
+	resolver, err := zeroconf.NewResolver(nil)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to create mDNS resolver: %w", err)
 	}
 
-	// Get the real bridge ID and name from the unauthenticated config endpoint
-	config, err := fetchBridgeConfig(bridge.IpAddress)
+	entries := make(chan *zeroconf.ServiceEntry, 10)
+	var bridges []BridgeInfo
+	var mu sync.Mutex
+	var wg sync.WaitGroup
+
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for entry := range entries {
+			if len(entry.AddrIPv4) == 0 {
+				continue
+			}
+			ipAddr := entry.AddrIPv4[0].String()
+
+			// Get the real bridge ID and name from the unauthenticated config endpoint
+			config, err := fetchBridgeConfig(ipAddr)
+			if err != nil {
+				// Fallback if config fetch fails
+				mu.Lock()
+				bridges = append(bridges, BridgeInfo{
+					ID:        ipAddr, // Use IP as fallback ID
+					Name:      entry.Instance,
+					IPAddress: ipAddr,
+				})
+				mu.Unlock()
+				continue
+			}
+
+			mu.Lock()
+			bridges = append(bridges, BridgeInfo{
+				ID:        config.BridgeID,
+				Name:      config.Name,
+				IPAddress: ipAddr,
+			})
+			mu.Unlock()
+		}
+	}()
+
+	// Browse starts the mDNS lookup. It closes the entries channel when ctx is done.
+	err = resolver.Browse(ctx, "_hue._tcp", "local.", entries)
 	if err != nil {
-		// Fallback if config fetch fails
-		return []BridgeInfo{{
-			ID:        bridge.IpAddress, // Use IP as fallback ID
-			Name:      bridge.IpAddress,
-			IPAddress: bridge.IpAddress,
-		}}, nil
+		return nil, fmt.Errorf("mDNS browse failed: %w", err)
 	}
 
-	return []BridgeInfo{{
-		ID:        config.BridgeID,
-		Name:      config.Name,
-		IPAddress: bridge.IpAddress,
-	}}, nil
+	// Wait for context timeout - zeroconf will close the entries channel
+	<-ctx.Done()
+	wg.Wait()
+
+	return bridges, nil
 }
 
 // fetchBridgeConfig gets bridge info from the unauthenticated config endpoint.

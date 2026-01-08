@@ -5,13 +5,13 @@ import (
 	"math"
 	"strings"
 
+	"github.com/kluzzebass/lazyhue/internal/hueclient"
 	"github.com/kluzzebass/lazyhue/internal/ui/panels/details"
-	"github.com/openhue/openhue-go"
 )
 
 // buildRoomView creates a details view for a room or zone entity.
 func (p *DetailsPanel) buildRoomView(roomAny interface{}, isZone bool) *details.View {
-	room, ok := roomAny.(openhue.RoomGet)
+	room, ok := roomAny.(hueclient.RoomGet)
 	if !ok || p.state == nil {
 		return details.NewView(p.styles)
 	}
@@ -41,7 +41,7 @@ func (p *DetailsPanel) buildRoomView(roomAny interface{}, isZone bool) *details.
 	lights := p.state.RoomLights(room)
 	onCount := 0
 	for _, l := range lights {
-		if l.IsOn() {
+		if IsLightOn(l) {
 			onCount++
 		}
 	}
@@ -64,7 +64,7 @@ func (p *DetailsPanel) buildRoomView(roomAny interface{}, isZone bool) *details.
 			indicator := RenderLightIndicatorFromLight(light, p.styles)
 
 			var detailParts []string
-			if light.IsOn() {
+			if IsLightOn(light) {
 				if light.Dimming != nil && light.Dimming.Brightness != nil {
 					detailParts = append(detailParts, fmt.Sprintf("%.0f%%", float64(*light.Dimming.Brightness)))
 				}
@@ -73,7 +73,7 @@ func (p *DetailsPanel) buildRoomView(roomAny interface{}, isZone bool) *details.
 					kelvin := 1000000 / mirek
 					detailParts = append(detailParts, fmt.Sprintf("%dK", kelvin))
 				}
-				if light.Color != nil && light.Color.Xy != nil {
+				if light.Color != nil && light.Color.Xy != nil && light.Color.Xy.X != nil && light.Color.Xy.Y != nil {
 					if light.ColorTemperature == nil || light.ColorTemperature.Mirek == nil {
 						detailParts = append(detailParts, fmt.Sprintf("xy(%.2f,%.2f)", *light.Color.Xy.X, *light.Color.Xy.Y))
 					}
@@ -99,7 +99,7 @@ func (p *DetailsPanel) buildRoomView(roomAny interface{}, isZone bool) *details.
 	if room.Children != nil && len(*room.Children) > 0 {
 		var nonLightDevices []string
 		for _, child := range *room.Children {
-			if child.Rid == nil || child.Rtype == nil || *child.Rtype != openhue.ResourceIdentifierRtypeDevice {
+			if child.Rid == nil || child.Rtype == nil || *child.Rtype != hueclient.ResourceIdentifierRtypeDevice {
 				continue
 			}
 			device, ok := p.state.GetDevice(*child.Rid)
@@ -110,7 +110,7 @@ func (p *DetailsPanel) buildRoomView(roomAny interface{}, isZone bool) *details.
 			isLight := false
 			if device.Services != nil {
 				for _, svc := range *device.Services {
-					if svc.Rtype != nil && *svc.Rtype == openhue.ResourceIdentifierRtypeLight {
+					if svc.Rtype != nil && *svc.Rtype == hueclient.ResourceIdentifierRtypeLight {
 						isLight = true
 						break
 					}
@@ -169,7 +169,7 @@ func (p *DetailsPanel) buildRoomView(roomAny interface{}, isZone bool) *details.
 			rtypeStr := string(rtype)
 
 			switch rtype {
-			case openhue.ResourceIdentifierRtypeGroupedLight:
+			case hueclient.ResourceIdentifierRtypeGroupedLight:
 				if gl, ok := p.state.GetGroupedLight(rid); ok {
 					state := "off"
 					if gl.On != nil && gl.On.On != nil && *gl.On.On {
@@ -183,7 +183,7 @@ func (p *DetailsPanel) buildRoomView(roomAny interface{}, isZone bool) *details.
 					servicesList.Add("Grouped Light")
 				}
 
-			case openhue.ResourceIdentifierRtypeLightLevel:
+			case hueclient.ResourceIdentifierRtypeLightLevel:
 				status := ""
 				if ll, ok := p.state.GetLightLevel(rid); ok && ll.Light != nil {
 					var level int
@@ -203,7 +203,7 @@ func (p *DetailsPanel) buildRoomView(roomAny interface{}, isZone bool) *details.
 					servicesList.Add("Light Level")
 				}
 
-			case openhue.ResourceIdentifierRtypeMotion:
+			case hueclient.ResourceIdentifierRtypeMotion:
 				status := ""
 				if m, ok := p.state.GetMotion(rid); ok && m.Motion != nil {
 					detected := false
@@ -229,7 +229,7 @@ func (p *DetailsPanel) buildRoomView(roomAny interface{}, isZone bool) *details.
 					status := "no sensors"
 					if room.Children != nil {
 						for _, child := range *room.Children {
-							if child.Rid == nil || child.Rtype == nil || *child.Rtype != openhue.ResourceIdentifierRtypeDevice {
+							if child.Rid == nil || child.Rtype == nil || *child.Rtype != hueclient.ResourceIdentifierRtypeDevice {
 								continue
 							}
 							if device, ok := p.state.GetDevice(*child.Rid); ok {
@@ -252,7 +252,7 @@ func (p *DetailsPanel) buildRoomView(roomAny interface{}, isZone bool) *details.
 					var count int
 					if room.Children != nil {
 						for _, child := range *room.Children {
-							if child.Rid == nil || child.Rtype == nil || *child.Rtype != openhue.ResourceIdentifierRtypeDevice {
+							if child.Rid == nil || child.Rtype == nil || *child.Rtype != hueclient.ResourceIdentifierRtypeDevice {
 								continue
 							}
 							if device, ok := p.state.GetDevice(*child.Rid); ok {

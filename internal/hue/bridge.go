@@ -2,11 +2,14 @@ package hue
 
 import (
 	"context"
+	"crypto/tls"
+	"encoding/json"
+	"net/http"
 	"sync"
 	"time"
 
 	"github.com/kluzzebass/lazyhue/internal/debug"
-	"github.com/openhue/openhue-go"
+	"github.com/kluzzebass/lazyhue/internal/hueclient"
 )
 
 // ConnectionStatus represents the state of a bridge connection.
@@ -44,12 +47,12 @@ type Bridge struct {
 	LastSync time.Time
 	LastErr  error
 
-	home        *openhue.Home
-	extended    *ExtendedClient
+	client   *hueclient.ClientWithResponses // Main API client
+	extended *ExtendedClient                // Custom APIs not in spec (auth apps, entertainment, wifi, zigbee)
 	state       *BridgeState
 	eventStream *EventStream
 	eventCancel context.CancelFunc
-	onEvent     func(bridgeID string) // Callback when events are received
+	onEvent func(bridgeID, resourceType, resourceID, eventType string) // Callback when events are received
 	mu          sync.RWMutex
 }
 
@@ -69,14 +72,28 @@ func (b *Bridge) Connect(apiKey string) error {
 
 	b.Status = StatusConnecting
 
-	home, err := openhue.NewHome(b.Info.IPAddress, apiKey)
+	// Create new generated client
+	httpClient := &http.Client{
+		Transport: &http.Transport{
+			TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+		},
+	}
+	client, err := hueclient.NewClientWithResponses(
+		"https://"+b.Info.IPAddress,
+		hueclient.WithHTTPClient(httpClient),
+		hueclient.WithRequestEditorFn(func(ctx context.Context, req *http.Request) error {
+			req.Header.Set("hue-application-key", apiKey)
+			return nil
+		}),
+	)
 	if err != nil {
 		b.Status = StatusError
 		b.LastErr = err
 		return err
 	}
+	b.client = client
 
-	// Create extended client for zones and other APIs not exposed by Home
+	// Create extended client for custom APIs not in the spec
 	extended, err := NewExtendedClient(b.Info.IPAddress, apiKey)
 	if err != nil {
 		b.Status = StatusError
@@ -84,7 +101,6 @@ func (b *Bridge) Connect(apiKey string) error {
 		return err
 	}
 
-	b.home = home
 	b.extended = extended
 	b.Status = StatusConnected
 	b.LastErr = nil
@@ -96,7 +112,8 @@ func (b *Bridge) Connect(apiKey string) error {
 }
 
 // OnEvent sets a callback for when the bridge receives SSE events.
-func (b *Bridge) OnEvent(fn func(bridgeID string)) {
+// The callback receives bridgeID, resourceType, resourceID, and eventType.
+func (b *Bridge) OnEvent(fn func(bridgeID, resourceType, resourceID, eventType string)) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	b.onEvent = fn
@@ -144,7 +161,9 @@ func (b *Bridge) handleEvents(container EventContainer) {
 		return
 	}
 
-	anyUpdated := false
+	b.mu.RLock()
+	callback := b.onEvent
+	b.mu.RUnlock()
 
 	for _, event := range container.Events {
 		updates, err := ParseResourceUpdates(event)
@@ -157,20 +176,11 @@ func (b *Bridge) handleEvents(container EventContainer) {
 
 			// Apply the update directly to our cached state
 			updated := b.applyResourceUpdate(update)
-			if updated {
-				anyUpdated = true
+
+			// Notify listener for each update
+			if updated && callback != nil {
+				callback(b.Info.ID, update.Type, update.ID, string(event.Type))
 			}
-		}
-	}
-
-	// Notify listener if anything was updated
-	if anyUpdated {
-		b.mu.RLock()
-		callback := b.onEvent
-		b.mu.RUnlock()
-
-		if callback != nil {
-			callback(b.Info.ID)
 		}
 	}
 }
@@ -184,15 +194,20 @@ func (b *Bridge) applyResourceUpdate(update ResourceUpdate) bool {
 
 	switch update.Type {
 	case "light":
-		var on *bool
-		var brightness *float64
+		lightUpdate := LightUpdate{}
 		if update.On != nil {
-			on = &update.On.On
+			lightUpdate.On = &update.On.On
 		}
 		if update.Dimming != nil {
-			brightness = &update.Dimming.Brightness
+			lightUpdate.Brightness = &update.Dimming.Brightness
 		}
-		return b.state.ApplyLightUpdate(update.ID, on, brightness)
+		if update.Color != nil {
+			lightUpdate.ColorXY = &[2]float64{update.Color.XY.X, update.Color.XY.Y}
+		}
+		if update.ColorTemperature != nil && update.ColorTemperature.Mirek != nil {
+			lightUpdate.Mirek = update.ColorTemperature.Mirek
+		}
+		return b.state.ApplyLightUpdate(update.ID, lightUpdate)
 
 	case "grouped_light":
 		var on *bool
@@ -212,8 +227,9 @@ func (b *Bridge) applyResourceUpdate(update ResourceUpdate) bool {
 		return false
 
 	case "scene":
-		if update.Status != "" {
-			return b.state.ApplySceneStatus(update.ID, update.Status)
+		if update.Status != nil && update.Status.Active != "" {
+			debug.Log("Scene %s status: %s", update.ID, update.Status.Active)
+			return b.state.ApplySceneStatus(update.ID, update.Status.Active)
 		}
 		return false
 
@@ -235,7 +251,8 @@ func (b *Bridge) Disconnect() {
 	}
 	b.eventStream = nil
 
-	b.home = nil
+	b.client = nil
+	b.extended = nil
 	b.Status = StatusDisconnected
 }
 
@@ -243,7 +260,7 @@ func (b *Bridge) Disconnect() {
 func (b *Bridge) IsConnected() bool {
 	b.mu.RLock()
 	defer b.mu.RUnlock()
-	return b.Status == StatusConnected && b.home != nil
+	return b.Status == StatusConnected && b.client != nil
 }
 
 // GetState returns the current cached state.
@@ -253,12 +270,6 @@ func (b *Bridge) GetState() *BridgeState {
 	return b.state
 }
 
-// Home returns the underlying openhue Home for direct API access.
-func (b *Bridge) Home() *openhue.Home {
-	b.mu.RLock()
-	defer b.mu.RUnlock()
-	return b.home
-}
 
 // SyncAll fetches all entity types from the bridge.
 func (b *Bridge) SyncAll(ctx context.Context) error {
@@ -302,19 +313,188 @@ func (b *Bridge) SyncAll(ctx context.Context) error {
 	return nil
 }
 
-// SyncLights fetches only lights from the bridge.
-func (b *Bridge) SyncLights(ctx context.Context) error {
+// SyncAllBulk fetches all resources in a single API call.
+// This is more efficient than SyncAll which makes 12+ separate calls.
+func (b *Bridge) SyncAllBulk(ctx context.Context) error {
 	b.mu.RLock()
-	home := b.home
+	client := b.client
+	extended := b.extended
 	b.mu.RUnlock()
 
-	if home == nil {
+	if client == nil {
 		return ErrAuthFailed
 	}
 
-	lights, err := home.GetLights()
+	resp, err := client.GetResourcesWithResponse(ctx)
 	if err != nil {
 		return err
+	}
+
+	if resp.StatusCode() != 200 || len(resp.Body) == 0 {
+		return ErrAuthFailed
+	}
+
+	// Parse the raw JSON to extract full objects by type
+	var envelope struct {
+		Data   []json.RawMessage `json:"data"`
+		Errors []struct {
+			Description string `json:"description"`
+		} `json:"errors"`
+	}
+	if err := json.Unmarshal(resp.Body, &envelope); err != nil {
+		return err
+	}
+
+	// Temporary maps for each resource type
+	lights := make(map[string]hueclient.LightGet)
+	rooms := make(map[string]hueclient.RoomGet)
+	zones := make(map[string]hueclient.RoomGet)
+	groupedLights := make(map[string]hueclient.GroupedLightGet)
+	scenes := make(map[string]hueclient.SceneGet)
+	devices := make(map[string]hueclient.DeviceGet)
+	motions := make(map[string]hueclient.MotionGet)
+	temperatures := make(map[string]hueclient.TemperatureGet)
+	lightLevels := make(map[string]hueclient.LightLevelGet)
+	devicePowers := make(map[string]hueclient.DevicePowerGet)
+	bridges := make(map[string]hueclient.BridgeGet)
+	bridgeHomes := make(map[string]hueclient.BridgeHomeGet)
+
+	// Parse each resource based on its type
+	for _, raw := range envelope.Data {
+		// First extract just the type
+		var typeOnly struct {
+			Type string `json:"type"`
+			ID   string `json:"id"`
+		}
+		if err := json.Unmarshal(raw, &typeOnly); err != nil {
+			continue
+		}
+
+		switch typeOnly.Type {
+		case "light":
+			var light hueclient.LightGet
+			if err := json.Unmarshal(raw, &light); err == nil && light.Id != nil {
+				lights[*light.Id] = light
+			}
+		case "room":
+			var room hueclient.RoomGet
+			if err := json.Unmarshal(raw, &room); err == nil && room.Id != nil {
+				rooms[*room.Id] = room
+			}
+		case "zone":
+			var zone hueclient.RoomGet
+			if err := json.Unmarshal(raw, &zone); err == nil && zone.Id != nil {
+				zones[*zone.Id] = zone
+			}
+		case "grouped_light":
+			var gl hueclient.GroupedLightGet
+			if err := json.Unmarshal(raw, &gl); err == nil && gl.Id != nil {
+				groupedLights[*gl.Id] = gl
+			}
+		case "scene":
+			var scene hueclient.SceneGet
+			if err := json.Unmarshal(raw, &scene); err == nil && scene.Id != nil {
+				scenes[*scene.Id] = scene
+			}
+		case "device":
+			var device hueclient.DeviceGet
+			if err := json.Unmarshal(raw, &device); err == nil && device.Id != nil {
+				devices[*device.Id] = device
+			}
+		case "motion":
+			var motion hueclient.MotionGet
+			if err := json.Unmarshal(raw, &motion); err == nil && motion.Id != nil {
+				motions[*motion.Id] = motion
+			}
+		case "temperature":
+			var temp hueclient.TemperatureGet
+			if err := json.Unmarshal(raw, &temp); err == nil && temp.Id != nil {
+				temperatures[*temp.Id] = temp
+			}
+		case "light_level":
+			var ll hueclient.LightLevelGet
+			if err := json.Unmarshal(raw, &ll); err == nil && ll.Id != nil {
+				lightLevels[*ll.Id] = ll
+			}
+		case "device_power":
+			var dp hueclient.DevicePowerGet
+			if err := json.Unmarshal(raw, &dp); err == nil && dp.Id != nil {
+				devicePowers[*dp.Id] = dp
+			}
+		case "bridge":
+			var br hueclient.BridgeGet
+			if err := json.Unmarshal(raw, &br); err == nil && br.Id != nil {
+				bridges[*br.Id] = br
+			}
+		case "bridge_home":
+			var bh hueclient.BridgeHomeGet
+			if err := json.Unmarshal(raw, &bh); err == nil && bh.Id != nil {
+				bridgeHomes[*bh.Id] = bh
+			}
+		}
+	}
+
+	// Update state with all collected resources
+	b.state.UpdateLights(lights)
+	b.state.UpdateRooms(rooms)
+	b.state.UpdateZones(zones)
+	b.state.UpdateGroupedLights(groupedLights)
+	b.state.UpdateScenes(scenes)
+	b.state.UpdateDevices(devices)
+	b.state.UpdateMotionSensors(motions)
+	b.state.UpdateTemperatures(temperatures)
+	b.state.UpdateLightLevels(lightLevels)
+	b.state.UpdateDevicePowers(devicePowers)
+
+	// Bridge and BridgeHome are single resources, extract first from map
+	for _, br := range bridges {
+		b.state.UpdateBridgeResource(&br)
+		break
+	}
+	for _, bh := range bridgeHomes {
+		b.state.UpdateBridgeHome(&bh)
+		break
+	}
+
+	// These still need separate calls (not in /resource endpoint)
+	if extended != nil {
+		_ = b.SyncEntertainmentConfigurations(ctx)
+		_ = b.SyncWifiConnectivity(ctx)
+		_ = b.SyncZigbeeConnectivity(ctx)
+		_ = b.SyncAuthApps(ctx)
+	}
+
+	b.mu.Lock()
+	b.LastSync = time.Now()
+	b.mu.Unlock()
+
+	return nil
+}
+
+// SyncLights fetches only lights from the bridge.
+func (b *Bridge) SyncLights(ctx context.Context) error {
+	b.mu.RLock()
+	client := b.client
+	b.mu.RUnlock()
+
+	if client == nil {
+		return ErrAuthFailed
+	}
+
+	resp, err := client.GetLightsWithResponse(ctx)
+	if err != nil {
+		return err
+	}
+
+	if resp.JSON200 == nil || resp.JSON200.Data == nil {
+		return nil
+	}
+
+	lights := make(map[string]hueclient.LightGet)
+	for _, light := range *resp.JSON200.Data {
+		if light.Id != nil {
+			lights[*light.Id] = light
+		}
 	}
 
 	b.state.UpdateLights(lights)
@@ -324,16 +504,27 @@ func (b *Bridge) SyncLights(ctx context.Context) error {
 // SyncRooms fetches only rooms from the bridge.
 func (b *Bridge) SyncRooms(ctx context.Context) error {
 	b.mu.RLock()
-	home := b.home
+	client := b.client
 	b.mu.RUnlock()
 
-	if home == nil {
+	if client == nil {
 		return ErrAuthFailed
 	}
 
-	rooms, err := home.GetRooms()
+	resp, err := client.GetRoomsWithResponse(ctx)
 	if err != nil {
 		return err
+	}
+
+	if resp.JSON200 == nil || resp.JSON200.Data == nil {
+		return nil
+	}
+
+	rooms := make(map[string]hueclient.RoomGet)
+	for _, room := range *resp.JSON200.Data {
+		if room.Id != nil {
+			rooms[*room.Id] = room
+		}
 	}
 
 	b.state.UpdateRooms(rooms)
@@ -343,16 +534,27 @@ func (b *Bridge) SyncRooms(ctx context.Context) error {
 // SyncZones fetches only zones from the bridge.
 func (b *Bridge) SyncZones(ctx context.Context) error {
 	b.mu.RLock()
-	extended := b.extended
+	client := b.client
 	b.mu.RUnlock()
 
-	if extended == nil {
+	if client == nil {
 		return ErrAuthFailed
 	}
 
-	zones, err := extended.GetZones(ctx)
+	resp, err := client.GetZonesWithResponse(ctx)
 	if err != nil {
 		return err
+	}
+
+	if resp.JSON200 == nil || resp.JSON200.Data == nil {
+		return nil
+	}
+
+	zones := make(map[string]hueclient.RoomGet)
+	for _, zone := range *resp.JSON200.Data {
+		if zone.Id != nil {
+			zones[*zone.Id] = zone
+		}
 	}
 
 	b.state.UpdateZones(zones)
@@ -362,16 +564,27 @@ func (b *Bridge) SyncZones(ctx context.Context) error {
 // SyncGroupedLights fetches only grouped lights from the bridge.
 func (b *Bridge) SyncGroupedLights(ctx context.Context) error {
 	b.mu.RLock()
-	home := b.home
+	client := b.client
 	b.mu.RUnlock()
 
-	if home == nil {
+	if client == nil {
 		return ErrAuthFailed
 	}
 
-	grouped, err := home.GetGroupedLights()
+	resp, err := client.GetGroupedLightsWithResponse(ctx)
 	if err != nil {
 		return err
+	}
+
+	if resp.JSON200 == nil || resp.JSON200.Data == nil {
+		return nil
+	}
+
+	grouped := make(map[string]hueclient.GroupedLightGet)
+	for _, gl := range *resp.JSON200.Data {
+		if gl.Id != nil {
+			grouped[*gl.Id] = gl
+		}
 	}
 
 	b.state.UpdateGroupedLights(grouped)
@@ -381,16 +594,27 @@ func (b *Bridge) SyncGroupedLights(ctx context.Context) error {
 // SyncScenes fetches only scenes from the bridge.
 func (b *Bridge) SyncScenes(ctx context.Context) error {
 	b.mu.RLock()
-	home := b.home
+	client := b.client
 	b.mu.RUnlock()
 
-	if home == nil {
+	if client == nil {
 		return ErrAuthFailed
 	}
 
-	scenes, err := home.GetScenes()
+	resp, err := client.GetScenesWithResponse(ctx)
 	if err != nil {
 		return err
+	}
+
+	if resp.JSON200 == nil || resp.JSON200.Data == nil {
+		return nil
+	}
+
+	scenes := make(map[string]hueclient.SceneGet)
+	for _, scene := range *resp.JSON200.Data {
+		if scene.Id != nil {
+			scenes[*scene.Id] = scene
+		}
 	}
 
 	b.state.UpdateScenes(scenes)
@@ -400,16 +624,27 @@ func (b *Bridge) SyncScenes(ctx context.Context) error {
 // SyncDevices fetches only devices from the bridge.
 func (b *Bridge) SyncDevices(ctx context.Context) error {
 	b.mu.RLock()
-	home := b.home
+	client := b.client
 	b.mu.RUnlock()
 
-	if home == nil {
+	if client == nil {
 		return ErrAuthFailed
 	}
 
-	devices, err := home.GetDevices()
+	resp, err := client.GetDevicesWithResponse(ctx)
 	if err != nil {
 		return err
+	}
+
+	if resp.JSON200 == nil || resp.JSON200.Data == nil {
+		return nil
+	}
+
+	devices := make(map[string]hueclient.DeviceGet)
+	for _, device := range *resp.JSON200.Data {
+		if device.Id != nil {
+			devices[*device.Id] = device
+		}
 	}
 
 	b.state.UpdateDevices(devices)
@@ -419,16 +654,27 @@ func (b *Bridge) SyncDevices(ctx context.Context) error {
 // SyncMotionSensors fetches only motion sensors from the bridge.
 func (b *Bridge) SyncMotionSensors(ctx context.Context) error {
 	b.mu.RLock()
-	extended := b.extended
+	client := b.client
 	b.mu.RUnlock()
 
-	if extended == nil {
+	if client == nil {
 		return ErrAuthFailed
 	}
 
-	sensors, err := extended.GetMotionSensors(ctx)
+	resp, err := client.GetMotionSensorsWithResponse(ctx)
 	if err != nil {
 		return err
+	}
+
+	if resp.JSON200 == nil || resp.JSON200.Data == nil {
+		return nil
+	}
+
+	sensors := make(map[string]hueclient.MotionGet)
+	for _, sensor := range *resp.JSON200.Data {
+		if sensor.Id != nil {
+			sensors[*sensor.Id] = sensor
+		}
 	}
 
 	b.state.UpdateMotionSensors(sensors)
@@ -438,16 +684,27 @@ func (b *Bridge) SyncMotionSensors(ctx context.Context) error {
 // SyncTemperatures fetches only temperature sensors from the bridge.
 func (b *Bridge) SyncTemperatures(ctx context.Context) error {
 	b.mu.RLock()
-	extended := b.extended
+	client := b.client
 	b.mu.RUnlock()
 
-	if extended == nil {
+	if client == nil {
 		return ErrAuthFailed
 	}
 
-	temps, err := extended.GetTemperatures(ctx)
+	resp, err := client.GetTemperaturesWithResponse(ctx)
 	if err != nil {
 		return err
+	}
+
+	if resp.JSON200 == nil || resp.JSON200.Data == nil {
+		return nil
+	}
+
+	temps := make(map[string]hueclient.TemperatureGet)
+	for _, temp := range *resp.JSON200.Data {
+		if temp.Id != nil {
+			temps[*temp.Id] = temp
+		}
 	}
 
 	b.state.UpdateTemperatures(temps)
@@ -457,16 +714,27 @@ func (b *Bridge) SyncTemperatures(ctx context.Context) error {
 // SyncLightLevels fetches only light level sensors from the bridge.
 func (b *Bridge) SyncLightLevels(ctx context.Context) error {
 	b.mu.RLock()
-	extended := b.extended
+	client := b.client
 	b.mu.RUnlock()
 
-	if extended == nil {
+	if client == nil {
 		return ErrAuthFailed
 	}
 
-	levels, err := extended.GetLightLevels(ctx)
+	resp, err := client.GetLightLevelsWithResponse(ctx)
 	if err != nil {
 		return err
+	}
+
+	if resp.JSON200 == nil || resp.JSON200.Data == nil {
+		return nil
+	}
+
+	levels := make(map[string]hueclient.LightLevelGet)
+	for _, level := range *resp.JSON200.Data {
+		if level.Id != nil {
+			levels[*level.Id] = level
+		}
 	}
 
 	b.state.UpdateLightLevels(levels)
@@ -476,16 +744,27 @@ func (b *Bridge) SyncLightLevels(ctx context.Context) error {
 // SyncDevicePowers fetches only device power (battery) statuses from the bridge.
 func (b *Bridge) SyncDevicePowers(ctx context.Context) error {
 	b.mu.RLock()
-	extended := b.extended
+	client := b.client
 	b.mu.RUnlock()
 
-	if extended == nil {
+	if client == nil {
 		return ErrAuthFailed
 	}
 
-	powers, err := extended.GetDevicePowers(ctx)
+	resp, err := client.GetDevicePowersWithResponse(ctx)
 	if err != nil {
 		return err
+	}
+
+	if resp.JSON200 == nil || resp.JSON200.Data == nil {
+		return nil
+	}
+
+	powers := make(map[string]hueclient.DevicePowerGet)
+	for _, power := range *resp.JSON200.Data {
+		if power.Id != nil {
+			powers[*power.Id] = power
+		}
 	}
 
 	b.state.UpdateDevicePowers(powers)
@@ -495,40 +774,48 @@ func (b *Bridge) SyncDevicePowers(ctx context.Context) error {
 // SyncBridgeResource fetches the bridge resource.
 func (b *Bridge) SyncBridgeResource(ctx context.Context) error {
 	b.mu.RLock()
-	extended := b.extended
+	client := b.client
 	b.mu.RUnlock()
 
-	if extended == nil {
+	if client == nil {
 		return ErrAuthFailed
 	}
 
-	bridges, err := extended.GetBridges(ctx)
+	resp, err := client.GetBridgesWithResponse(ctx)
 	if err != nil {
 		return err
 	}
 
-	if len(bridges) > 0 {
-		b.state.UpdateBridgeResource(&bridges[0])
+	if resp.JSON200 == nil || resp.JSON200.Data == nil || len(*resp.JSON200.Data) == 0 {
+		return nil
 	}
+
+	bridge := (*resp.JSON200.Data)[0]
+	b.state.UpdateBridgeResource(&bridge)
 	return nil
 }
 
 // SyncBridgeHome fetches the bridge home resource.
 func (b *Bridge) SyncBridgeHome(ctx context.Context) error {
 	b.mu.RLock()
-	extended := b.extended
+	client := b.client
 	b.mu.RUnlock()
 
-	if extended == nil {
+	if client == nil {
 		return ErrAuthFailed
 	}
 
-	home, err := extended.GetBridgeHome(ctx)
+	resp, err := client.GetBridgeHomesWithResponse(ctx)
 	if err != nil {
 		return err
 	}
 
-	b.state.UpdateBridgeHome(home)
+	if resp.JSON200 == nil || resp.JSON200.Data == nil || len(*resp.JSON200.Data) == 0 {
+		return nil
+	}
+
+	home := (*resp.JSON200.Data)[0]
+	b.state.UpdateBridgeHome(&home)
 	return nil
 }
 

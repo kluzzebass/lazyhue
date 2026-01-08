@@ -136,7 +136,7 @@ func (m *Manager) SyncAll(ctx context.Context) map[string]error {
 		wg.Add(1)
 		go func(b *Bridge) {
 			defer wg.Done()
-			if err := b.SyncAll(ctx); err != nil {
+			if err := b.SyncAllBulk(ctx); err != nil {
 				errMu.Lock()
 				errors[b.Info.ID] = err
 				errMu.Unlock()

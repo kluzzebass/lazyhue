@@ -35,7 +35,7 @@ func connectBridge(bridge *hue.Bridge, apiKey string) tea.Cmd {
 func syncBridgeState(bridge *hue.Bridge) tea.Cmd {
 	return func() tea.Msg {
 		ctx := context.Background()
-		if err := bridge.SyncAll(ctx); err != nil {
+		if err := bridge.SyncAllBulk(ctx); err != nil {
 			return StateSyncErrorMsg{BridgeID: bridge.Info.ID, Err: err}
 		}
 		return StateSyncedMsg{BridgeID: bridge.Info.ID}

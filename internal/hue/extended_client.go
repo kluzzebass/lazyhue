@@ -7,190 +7,51 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-
-	"github.com/openhue/openhue-go"
 )
 
-// ExtendedClient wraps the openhue client to add methods not exposed by Home.
+// ExtendedClient provides access to Hue APIs not covered by the generated client.
+// This includes V1 API endpoints and resources not in the OpenAPI spec.
 type ExtendedClient struct {
-	api      *openhue.ClientWithResponses
 	bridgeIP string
 	apiKey   string
+	client   *http.Client
 }
 
 // NewExtendedClient creates a client for extended API access.
 func NewExtendedClient(bridgeIP, apiKey string) (*ExtendedClient, error) {
-	authFn := func(ctx context.Context, req *http.Request) error {
-		req.Header.Set("hue-application-key", apiKey)
-		return nil
-	}
-
-	// Skip SSL verification (Hue bridge uses self-signed certs)
-	http.DefaultTransport.(*http.Transport).TLSClientConfig = &tls.Config{InsecureSkipVerify: true}
-
-	client, err := openhue.NewClientWithResponses("https://"+bridgeIP, openhue.WithRequestEditorFn(authFn))
-	if err != nil {
-		return nil, err
+	client := &http.Client{
+		Transport: &http.Transport{
+			TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+		},
 	}
 
 	return &ExtendedClient{
-		api:      client,
 		bridgeIP: bridgeIP,
 		apiKey:   apiKey,
+		client:   client,
 	}, nil
 }
 
-// GetZones fetches all zones from the bridge.
-// Zones use the same RoomGet type as rooms.
-func (c *ExtendedClient) GetZones(ctx context.Context) (map[string]openhue.RoomGet, error) {
-	resp, err := c.api.GetZonesWithResponse(ctx)
+// doRequest makes an authenticated request to the bridge.
+func (c *ExtendedClient) doRequest(ctx context.Context, method, path string) ([]byte, error) {
+	url := fmt.Sprintf("https://%s%s", c.bridgeIP, path)
+	req, err := http.NewRequestWithContext(ctx, method, url, nil)
 	if err != nil {
 		return nil, err
 	}
+	req.Header.Set("hue-application-key", c.apiKey)
 
-	if resp.HTTPResponse.StatusCode != http.StatusOK {
-		return nil, ErrAuthFailed
-	}
-
-	zones := make(map[string]openhue.RoomGet)
-	if resp.JSON200 != nil && resp.JSON200.Data != nil {
-		for _, zone := range *resp.JSON200.Data {
-			if zone.Id != nil {
-				zones[*zone.Id] = zone
-			}
-		}
-	}
-
-	return zones, nil
-}
-
-// GetMotionSensors fetches all motion sensors from the bridge.
-func (c *ExtendedClient) GetMotionSensors(ctx context.Context) (map[string]openhue.MotionGet, error) {
-	resp, err := c.api.GetMotionSensorsWithResponse(ctx)
+	resp, err := c.client.Do(req)
 	if err != nil {
 		return nil, err
 	}
+	defer resp.Body.Close()
 
-	if resp.HTTPResponse.StatusCode != http.StatusOK {
-		return nil, ErrAuthFailed
+	if resp.StatusCode != http.StatusOK {
+		return nil, nil // Return nil for non-OK responses (e.g., 404 for unsupported features)
 	}
 
-	sensors := make(map[string]openhue.MotionGet)
-	if resp.JSON200 != nil && resp.JSON200.Data != nil {
-		for _, sensor := range *resp.JSON200.Data {
-			if sensor.Id != nil {
-				sensors[*sensor.Id] = sensor
-			}
-		}
-	}
-
-	return sensors, nil
-}
-
-// GetTemperatures fetches all temperature sensors from the bridge.
-func (c *ExtendedClient) GetTemperatures(ctx context.Context) (map[string]openhue.TemperatureGet, error) {
-	resp, err := c.api.GetTemperaturesWithResponse(ctx)
-	if err != nil {
-		return nil, err
-	}
-
-	if resp.HTTPResponse.StatusCode != http.StatusOK {
-		return nil, ErrAuthFailed
-	}
-
-	temps := make(map[string]openhue.TemperatureGet)
-	if resp.JSON200 != nil && resp.JSON200.Data != nil {
-		for _, temp := range *resp.JSON200.Data {
-			if temp.Id != nil {
-				temps[*temp.Id] = temp
-			}
-		}
-	}
-
-	return temps, nil
-}
-
-// GetLightLevels fetches all light level sensors from the bridge.
-func (c *ExtendedClient) GetLightLevels(ctx context.Context) (map[string]openhue.LightLevelGet, error) {
-	resp, err := c.api.GetLightLevelsWithResponse(ctx)
-	if err != nil {
-		return nil, err
-	}
-
-	if resp.HTTPResponse.StatusCode != http.StatusOK {
-		return nil, ErrAuthFailed
-	}
-
-	levels := make(map[string]openhue.LightLevelGet)
-	if resp.JSON200 != nil && resp.JSON200.Data != nil {
-		for _, level := range *resp.JSON200.Data {
-			if level.Id != nil {
-				levels[*level.Id] = level
-			}
-		}
-	}
-
-	return levels, nil
-}
-
-// GetDevicePowers fetches all device power (battery) statuses from the bridge.
-func (c *ExtendedClient) GetDevicePowers(ctx context.Context) (map[string]openhue.DevicePowerGet, error) {
-	resp, err := c.api.GetDevicePowersWithResponse(ctx)
-	if err != nil {
-		return nil, err
-	}
-
-	if resp.HTTPResponse.StatusCode != http.StatusOK {
-		return nil, ErrAuthFailed
-	}
-
-	powers := make(map[string]openhue.DevicePowerGet)
-	if resp.JSON200 != nil && resp.JSON200.Data != nil {
-		for _, power := range *resp.JSON200.Data {
-			if power.Id != nil {
-				powers[*power.Id] = power
-			}
-		}
-	}
-
-	return powers, nil
-}
-
-// GetBridges fetches all bridge resources from the bridge.
-func (c *ExtendedClient) GetBridges(ctx context.Context) ([]openhue.BridgeGet, error) {
-	resp, err := c.api.GetBridgesWithResponse(ctx)
-	if err != nil {
-		return nil, err
-	}
-
-	if resp.HTTPResponse.StatusCode != http.StatusOK {
-		return nil, ErrAuthFailed
-	}
-
-	var bridges []openhue.BridgeGet
-	if resp.JSON200 != nil && resp.JSON200.Data != nil {
-		bridges = *resp.JSON200.Data
-	}
-
-	return bridges, nil
-}
-
-// GetBridgeHome fetches the bridge home resource.
-func (c *ExtendedClient) GetBridgeHome(ctx context.Context) (*openhue.BridgeHomeGet, error) {
-	resp, err := c.api.GetBridgeHomesWithResponse(ctx)
-	if err != nil {
-		return nil, err
-	}
-
-	if resp.HTTPResponse.StatusCode != http.StatusOK {
-		return nil, ErrAuthFailed
-	}
-
-	if resp.JSON200 != nil && resp.JSON200.Data != nil && len(*resp.JSON200.Data) > 0 {
-		return &(*resp.JSON200.Data)[0], nil
-	}
-
-	return nil, nil
+	return io.ReadAll(resp.Body)
 }
 
 // AuthV1Entry represents an authenticated application from the V1 API whitelist.
@@ -223,7 +84,7 @@ func (c *ExtendedClient) GetAuthenticatedApps(ctx context.Context) ([]AuthV1Entr
 		return nil, err
 	}
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := c.client.Do(req)
 	if err != nil {
 		return nil, err
 	}
@@ -258,17 +119,17 @@ func (c *ExtendedClient) GetAuthenticatedApps(ctx context.Context) ([]AuthV1Entr
 
 // EntertainmentConfiguration represents an entertainment area configuration.
 type EntertainmentConfiguration struct {
-	ID             string                    `json:"id"`
-	Type           string                    `json:"type"`
-	Metadata       *EntertainmentMetadata    `json:"metadata,omitempty"`
-	Name           string                    `json:"name,omitempty"` // Some API versions use this
-	Status         string                    `json:"status,omitempty"` // inactive, active, streaming
-	ConfigurationType string                 `json:"configuration_type,omitempty"` // screen, monitor, music, 3dspace, other
-	Channels       []EntertainmentChannel    `json:"channels,omitempty"`
-	Lights         []EntertainmentLightEntry `json:"light_services,omitempty"`
-	Locations      *EntertainmentLocations   `json:"locations,omitempty"`
-	StreamProxy    *StreamProxy              `json:"stream_proxy,omitempty"`
-	ActiveStreamer *ResourceIdentifier       `json:"active_streamer,omitempty"`
+	ID                string                    `json:"id"`
+	Type              string                    `json:"type"`
+	Metadata          *EntertainmentMetadata    `json:"metadata,omitempty"`
+	Name              string                    `json:"name,omitempty"`           // Some API versions use this
+	Status            string                    `json:"status,omitempty"`         // inactive, active, streaming
+	ConfigurationType string                    `json:"configuration_type,omitempty"` // screen, monitor, music, 3dspace, other
+	Channels          []EntertainmentChannel    `json:"channels,omitempty"`
+	Lights            []EntertainmentLightEntry `json:"light_services,omitempty"`
+	Locations         *EntertainmentLocations   `json:"locations,omitempty"`
+	StreamProxy       *StreamProxy              `json:"stream_proxy,omitempty"`
+	ActiveStreamer    *ResourceIdentifier       `json:"active_streamer,omitempty"`
 }
 
 // EntertainmentMetadata holds metadata for an entertainment configuration.
@@ -283,8 +144,8 @@ type EntertainmentLocations struct {
 
 // ServiceLocation represents a light's position in the entertainment area.
 type ServiceLocation struct {
-	Service  *ResourceIdentifier      `json:"service,omitempty"`
-	Position *EntertainmentPosition   `json:"position,omitempty"`
+	Service   *ResourceIdentifier     `json:"service,omitempty"`
+	Position  *EntertainmentPosition  `json:"position,omitempty"`
 	Positions []EntertainmentPosition `json:"positions,omitempty"` // Some lights have multiple positions
 }
 
@@ -324,28 +185,12 @@ type EntertainmentLightEntry struct {
 
 // GetEntertainmentConfigurations fetches all entertainment configurations.
 func (c *ExtendedClient) GetEntertainmentConfigurations(ctx context.Context) (map[string]EntertainmentConfiguration, error) {
-	url := fmt.Sprintf("https://%s/clip/v2/resource/entertainment_configuration", c.bridgeIP)
-	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+	body, err := c.doRequest(ctx, http.MethodGet, "/clip/v2/resource/entertainment_configuration")
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("hue-application-key", c.apiKey)
-
-	client := &http.Client{
-		Transport: &http.Transport{
-			TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
-		},
-	}
-
-	resp, err := client.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, err
+	if body == nil {
+		return nil, nil
 	}
 
 	var result struct {
@@ -366,42 +211,20 @@ func (c *ExtendedClient) GetEntertainmentConfigurations(ctx context.Context) (ma
 type WifiConnectivity struct {
 	ID      string `json:"id"`
 	IDV1    string `json:"id_v1,omitempty"`
-	Status  string `json:"status"` // "connected" or "disconnected"
-	Type    string `json:"type"`   // "wifi_connectivity"
+	Status  string `json:"status"`  // "connected" or "disconnected"
+	Type    string `json:"type"`    // "wifi_connectivity"
 	HasSSID bool   `json:"has_ssid"`
 }
 
 // GetWifiConnectivity fetches WiFi connectivity status from the bridge.
 // This is only available on Bridge Pro models with WiFi support.
 func (c *ExtendedClient) GetWifiConnectivity(ctx context.Context) ([]WifiConnectivity, error) {
-	url := fmt.Sprintf("https://%s/clip/v2/resource/wifi_connectivity", c.bridgeIP)
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	body, err := c.doRequest(ctx, http.MethodGet, "/clip/v2/resource/wifi_connectivity")
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("hue-application-key", c.apiKey)
-
-	client := &http.Client{
-		Transport: &http.Transport{
-			TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
-		},
-	}
-
-	resp, err := client.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-
-	// 404 or other error means bridge doesn't support WiFi
-	if resp.StatusCode != http.StatusOK {
+	if body == nil {
 		return nil, nil
-	}
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, err
 	}
 
 	var result struct {
@@ -418,11 +241,11 @@ func (c *ExtendedClient) GetWifiConnectivity(ctx context.Context) ([]WifiConnect
 type ZigbeeConnectivity struct {
 	ID            string `json:"id"`
 	IDV1          string `json:"id_v1,omitempty"`
-	Type          string `json:"type"` // "zigbee_connectivity"
+	Type          string `json:"type"`   // "zigbee_connectivity"
 	Status        string `json:"status"` // "connected", "disconnected", "connectivity_issue", "unidirectional_incoming"
 	MacAddress    string `json:"mac_address,omitempty"`
 	ExtendedPanID string `json:"extended_pan_id,omitempty"`
-	Channel *struct {
+	Channel       *struct {
 		Value  string `json:"value,omitempty"`  // e.g., "channel_25"
 		Status string `json:"status,omitempty"` // "set", "changing"
 	} `json:"channel,omitempty"`
@@ -434,33 +257,12 @@ type ZigbeeConnectivity struct {
 
 // GetZigbeeConnectivity fetches all Zigbee connectivity resources from the bridge.
 func (c *ExtendedClient) GetZigbeeConnectivity(ctx context.Context) (map[string]ZigbeeConnectivity, error) {
-	url := fmt.Sprintf("https://%s/clip/v2/resource/zigbee_connectivity", c.bridgeIP)
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	body, err := c.doRequest(ctx, http.MethodGet, "/clip/v2/resource/zigbee_connectivity")
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("hue-application-key", c.apiKey)
-
-	client := &http.Client{
-		Transport: &http.Transport{
-			TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
-		},
-	}
-
-	resp, err := client.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
+	if body == nil {
 		return nil, nil
-	}
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, err
 	}
 
 	var result struct {
@@ -479,33 +281,12 @@ func (c *ExtendedClient) GetZigbeeConnectivity(ctx context.Context) (map[string]
 
 // GetZigbeeConnectivityByID fetches a specific Zigbee connectivity resource.
 func (c *ExtendedClient) GetZigbeeConnectivityByID(ctx context.Context, id string) (*ZigbeeConnectivity, error) {
-	url := fmt.Sprintf("https://%s/clip/v2/resource/zigbee_connectivity/%s", c.bridgeIP, id)
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	body, err := c.doRequest(ctx, http.MethodGet, "/clip/v2/resource/zigbee_connectivity/"+id)
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("hue-application-key", c.apiKey)
-
-	client := &http.Client{
-		Transport: &http.Transport{
-			TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
-		},
-	}
-
-	resp, err := client.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
+	if body == nil {
 		return nil, nil
-	}
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, err
 	}
 
 	var result struct {

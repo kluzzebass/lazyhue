@@ -5,13 +5,13 @@ import (
 	"math"
 	"strings"
 
+	"github.com/kluzzebass/lazyhue/internal/hueclient"
 	"github.com/kluzzebass/lazyhue/internal/ui/panels/details"
-	"github.com/openhue/openhue-go"
 )
 
 // buildDeviceView creates a details view for a device entity.
 func (p *DetailsPanel) buildDeviceView(deviceAny interface{}) *details.View {
-	device, ok := deviceAny.(openhue.DeviceGet)
+	device, ok := deviceAny.(hueclient.DeviceGet)
 	if !ok {
 		return details.NewView(p.styles)
 	}

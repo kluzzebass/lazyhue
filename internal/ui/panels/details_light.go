@@ -3,13 +3,16 @@ package panels
 import (
 	"fmt"
 
+	"github.com/kluzzebass/lazyhue/internal/hueclient"
 	"github.com/kluzzebass/lazyhue/internal/ui/panels/details"
-	"github.com/openhue/openhue-go"
 )
 
 // buildLightView creates a details view for a light entity.
 func (p *DetailsPanel) buildLightView(lightAny interface{}) *details.View {
-	light, ok := lightAny.(openhue.LightGet)
+	if lightAny == nil {
+		return details.NewView(p.styles)
+	}
+	light, ok := lightAny.(hueclient.LightGet)
 	if !ok {
 		return details.NewView(p.styles)
 	}
@@ -17,7 +20,7 @@ func (p *DetailsPanel) buildLightView(lightAny interface{}) *details.View {
 	view := details.NewView(p.styles)
 
 	// Get owning device info for product details
-	var device *openhue.DeviceGet
+	var device *hueclient.DeviceGet
 	if p.state != nil && light.Owner != nil && light.Owner.Rid != nil {
 		if d, ok := p.state.GetDevice(*light.Owner.Rid); ok {
 			device = &d
@@ -80,7 +83,7 @@ func (p *DetailsPanel) buildLightView(lightAny interface{}) *details.View {
 	view.Add(details.Header("State"))
 	indicator := RenderLightIndicatorFromLight(light, p.styles)
 	status := "off"
-	if light.IsOn() {
+	if IsLightOn(light) {
 		status = "on"
 	}
 	stateList := details.NewList()
@@ -98,7 +101,11 @@ func (p *DetailsPanel) buildLightView(lightAny interface{}) *details.View {
 	}
 
 	if light.Color != nil && light.Color.Xy != nil {
-		stateFields.Add("Color XY", fmt.Sprintf("(%.4f, %.4f)", *light.Color.Xy.X, *light.Color.Xy.Y))
+		xy := light.Color.Xy
+		if xy.X != nil && xy.Y != nil {
+			x, y := *xy.X, *xy.Y
+			stateFields.Add("Color XY", fmt.Sprintf("(%.4f, %.4f)", x, y))
+		}
 		if light.Color.GamutType != nil {
 			stateFields.Add("Gamut", string(*light.Color.GamutType))
 		}

@@ -18,6 +18,7 @@ const (
 	PanelIDBridges   = "bridges"
 	PanelIDHierarchy = "hierarchy"
 	PanelIDDetail    = "detail"
+	PanelIDLog       = "log"
 	PanelIDStatus    = "status"
 )
 
@@ -40,6 +41,7 @@ type Model struct {
 	helpPanel      *panels.HelpPanel
 	pairingPanel   *panels.PairingPanel
 	popupPanel     *panels.PopupPanel
+	logPanel       *panels.LogPanel
 	statusBar      *panels.StatusBar
 	styles         ui.Styles
 
@@ -97,8 +99,11 @@ func New(cfg *config.Config, creds *config.CredentialStore, uiState *config.UISt
 					layout.Child{Size: layout.Fixed(5), Node: layout.NewLeaf(PanelIDBridges)},
 					layout.Child{Size: layout.Flex(1), Node: layout.NewLeaf(PanelIDHierarchy)},
 				)},
-				// Right column (60%)
-				layout.Child{Size: layout.Flex(0.6), Node: layout.NewLeaf(PanelIDDetail)},
+				// Right column (60%) - split into detail (⅔) and log (⅓)
+				layout.Child{Size: layout.Flex(0.6), Node: layout.VSplit(
+					layout.Child{Size: layout.Flex(0.67), Node: layout.NewLeaf(PanelIDDetail)},
+					layout.Child{Size: layout.Flex(0.33), Node: layout.NewLeaf(PanelIDLog)},
+				)},
 			)},
 			// Status bar at bottom
 			layout.Child{Size: layout.Fixed(1), Node: layout.NewLeaf(PanelIDStatus)},
@@ -116,6 +121,7 @@ func New(cfg *config.Config, creds *config.CredentialStore, uiState *config.UISt
 		focusIndex:   0,
 		layoutTree:   layoutTree,
 		detailPanel:  panels.NewDetailsPanel(styles),
+		logPanel:     panels.NewLogPanel(styles),
 		helpPanel:    panels.NewHelpPanel(styles),
 		pairingPanel: panels.NewPairingPanel(styles),
 		popupPanel:   panels.NewPopupPanel(styles),
@@ -216,10 +222,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if cmd != nil {
 			cmds = append(cmds, cmd)
 		}
-		// Pass keys to detail panel for viewport scrolling (other panels use dispatch)
-		if !m.helpPanel.IsVisible() && m.focusedOnDetail() {
-			if panelCmd := m.updateFocusedPanel(msg); panelCmd != nil {
-				cmds = append(cmds, panelCmd)
+		// Pass keys to right column panels for scrolling
+		if !m.helpPanel.IsVisible() {
+			if m.focusedOnDetail() {
+				if panelCmd := m.updateFocusedPanel(msg); panelCmd != nil {
+					cmds = append(cmds, panelCmd)
+				}
+			} else if m.focusedOnLog() {
+				m.logPanel.Update(msg)
 			}
 		}
 		return m, tea.Batch(cmds...)
@@ -251,9 +261,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			bridge.Status = hue.StatusConnected
 			// Set up SSE event callback to notify the app when events arrive
 			eventChan := m.eventChan
-			bridge.OnEvent(func(bridgeID string) {
+			bridge.OnEvent(func(bridgeID, resourceType, resourceID, eventType string) {
 				select {
-				case eventChan <- BridgeEventMsg{BridgeID: bridgeID}:
+				case eventChan <- BridgeEventMsg{
+					BridgeID:     bridgeID,
+					ResourceType: resourceType,
+					ResourceID:   resourceID,
+					EventType:    eventType,
+				}:
 				default:
 					// Channel full, drop event (will catch up on next one)
 				}
@@ -273,8 +288,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case StateSyncedMsg:
 		m.updateBridgePanel()
-		// Only refresh hierarchy if this is the active bridge
-		if msg.BridgeID == m.manager.GetActiveBridgeID() {
+		// Check if the user has this bridge selected in the panel
+		selectedBridge := m.bridgePanel().SelectedBridge()
+		if selectedBridge != nil && selectedBridge.Info.ID == msg.BridgeID {
+			// User is looking at this bridge - switch to it if connected
+			if selectedBridge.IsConnected() {
+				m.manager.SetActiveBridge(msg.BridgeID)
+				m.refreshAllPanels()
+				m.restoreExpandedState(msg.BridgeID)
+			}
+		} else if msg.BridgeID == m.displayedBridgeID {
+			// Bridge being displayed got updated
 			m.refreshAllPanels()
 			m.restoreExpandedState(msg.BridgeID)
 		}
@@ -285,21 +309,25 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case LightsSyncedMsg:
 		m.bridgePanel().SetPolling("", false)
-		// Refresh hierarchy if this is the active bridge or if BridgeID is empty (batch sync)
-		if msg.BridgeID == "" || msg.BridgeID == m.manager.GetActiveBridgeID() {
+		// Refresh hierarchy only if this bridge is being displayed
+		// (or if BridgeID is empty for batch sync and we're displaying a connected bridge)
+		if msg.BridgeID == m.displayedBridgeID || (msg.BridgeID == "" && m.displayedBridgeID != "") {
 			m.refreshHierarchyPanel()
 			m.updateDetailPanel()
 		}
 
 	case BridgeEventMsg:
 		// SSE event received - state was already updated in-memory by the bridge
+		// Log the event
+		m.logPanel.AddEvent(msg.BridgeID, msg.ResourceType, msg.ResourceID)
 		// Just flash the indicator for THIS bridge and refresh the UI
 		m.bridgePanel().SetPolling(msg.BridgeID, true)
 		cmds = append(cmds, tea.Tick(300*time.Millisecond, func(t time.Time) tea.Msg {
 			return indicatorRefreshMsg{}
 		}))
-		// Refresh UI if this is the active bridge
-		if msg.BridgeID == m.manager.GetActiveBridgeID() {
+		// Refresh UI only if this bridge is actually being displayed
+		// (don't refresh if user is viewing a disconnected bridge)
+		if msg.BridgeID == m.displayedBridgeID {
 			m.refreshHierarchyPanel()
 			m.updateDetailPanel()
 		}

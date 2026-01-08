@@ -71,7 +71,10 @@ type ResourceUpdate struct {
 	LightLevel *struct {
 		LightLevel int `json:"light_level"`
 	} `json:"light_level,omitempty"`
-	Status string `json:"status,omitempty"` // For scenes, connectivity, etc.
+	// Scene status - can be a string or an object
+	Status *struct {
+		Active string `json:"active"` // "inactive", "static", "dynamic_palette"
+	} `json:"status,omitempty"`
 }
 
 // EventStream manages the SSE connection to a bridge.

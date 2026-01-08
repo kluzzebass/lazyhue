@@ -2,12 +2,13 @@ package hue
 
 import (
 	"context"
+	"crypto/tls"
 	"errors"
+	"net/http"
 	"os"
-	"strings"
 	"time"
 
-	"github.com/openhue/openhue-go"
+	"github.com/kluzzebass/lazyhue/internal/hueclient"
 )
 
 // ErrPairingCancelled indicates that pairing was cancelled by the user.
@@ -29,8 +30,8 @@ type AuthResult struct {
 
 // Authenticator handles the bridge pairing flow.
 type Authenticator struct {
-	bridgeIP string
-	auth     openhue.Authenticator
+	client     *hueclient.ClientWithResponses
+	deviceType string
 }
 
 // NewAuthenticator creates an authenticator for the given bridge IP.
@@ -41,40 +42,81 @@ func NewAuthenticator(bridgeIP string) (*Authenticator, error) {
 		deviceType = "lazyhue#" + hostname
 	}
 
-	auth, err := openhue.NewAuthenticator(bridgeIP, openhue.WithDeviceType(deviceType))
+	// Create HTTP client with TLS skip (bridge uses self-signed cert)
+	httpClient := &http.Client{
+		Timeout: 10 * time.Second,
+		Transport: &http.Transport{
+			TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+		},
+	}
+
+	client, err := hueclient.NewClientWithResponses(
+		"https://"+bridgeIP,
+		hueclient.WithHTTPClient(httpClient),
+	)
 	if err != nil {
 		return nil, err
 	}
+
 	return &Authenticator{
-		bridgeIP: bridgeIP,
-		auth:     auth,
+		client:     client,
+		deviceType: deviceType,
 	}, nil
 }
 
 // TryAuthenticate attempts to authenticate once.
 // Returns the API key on success, or an error indicating whether to retry.
 func (a *Authenticator) TryAuthenticate() AuthResult {
-	apiKey, retry, err := a.auth.Authenticate()
-	
-	if err == nil {
-		return AuthResult{ApiKey: apiKey, Retry: false, Err: nil}
+	generateClientKey := true
+	body := hueclient.AuthenticateJSONRequestBody{
+		Devicetype:        &a.deviceType,
+		Generateclientkey: &generateClientKey,
 	}
-	
-	// If openhue says to retry, or if it's a transient error, keep trying
-	// Most errors during pairing are transient (network, TLS, etc.)
-	if retry {
-		return AuthResult{Retry: true, Err: ErrLinkButtonNotPressed}
+
+	resp, err := a.client.AuthenticateWithResponse(context.Background(), body)
+	if err != nil {
+		// Network errors are retryable
+		return AuthResult{Retry: true, Err: err}
 	}
-	
-	// Check if error message indicates link button not pressed
-	errStr := err.Error()
-	if strings.Contains(errStr, "link button") || strings.Contains(errStr, "not pressed") {
-		return AuthResult{Retry: true, Err: ErrLinkButtonNotPressed}
+
+	// Check for HTTP-level errors
+	if resp.StatusCode() != http.StatusOK {
+		if resp.JSON401 != nil {
+			return AuthResult{Retry: false, Err: ErrAuthFailed}
+		}
+		return AuthResult{Retry: true, Err: errors.New("unexpected HTTP status: " + resp.Status())}
 	}
-	
-	// For other errors, still retry but pass the actual error
-	// Only stop on explicit auth failures
-	return AuthResult{Retry: true, Err: err}
+
+	// Parse the response
+	if resp.JSON200 == nil || len(*resp.JSON200) == 0 {
+		return AuthResult{Retry: true, Err: errors.New("empty response from bridge")}
+	}
+
+	response := (*resp.JSON200)[0]
+
+	// Check for success
+	if response.Success != nil && response.Success.Username != nil && *response.Success.Username != "" {
+		return AuthResult{ApiKey: *response.Success.Username, Retry: false, Err: nil}
+	}
+
+	// Check for error
+	if response.Error != nil {
+		// Error type 101 = link button not pressed
+		if response.Error.Type != nil && *response.Error.Type == 101 {
+			return AuthResult{Retry: true, Err: ErrLinkButtonNotPressed}
+		}
+		desc := "unknown error"
+		if response.Error.Description != nil {
+			desc = *response.Error.Description
+		}
+		errType := 0
+		if response.Error.Type != nil {
+			errType = *response.Error.Type
+		}
+		return AuthResult{Retry: true, Err: errors.New(desc + " (type " + string(rune(errType+'0')) + ")")}
+	}
+
+	return AuthResult{Retry: true, Err: errors.New("unexpected response format")}
 }
 
 // AuthenticateWithPolling polls for authentication until success or timeout.
@@ -113,4 +155,3 @@ func (a *Authenticator) AuthenticateWithContext(ctx context.Context, pollInterva
 		}
 	}
 }
-

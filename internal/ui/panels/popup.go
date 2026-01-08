@@ -403,12 +403,11 @@ func (p *PopupPanel) renderConfirmContent(width, height int) []string {
 
 	for i := 0; i < height; i++ {
 		if i == midY-1 {
-			lines[i] = p.padRight(p.confirmMsg, width)
+			// Center the confirm message
+			lines[i] = p.centerText(p.confirmMsg, width)
 		} else if i == midY+1 {
 			// Center buttons
-			buttonWidth := lipgloss.Width(buttons)
-			leftPad := (width - buttonWidth) / 2
-			lines[i] = strings.Repeat(" ", leftPad) + buttons + strings.Repeat(" ", width-leftPad-buttonWidth)
+			lines[i] = p.centerText(buttons, width)
 		} else {
 			lines[i] = strings.Repeat(" ", width)
 		}
@@ -456,3 +455,12 @@ func (p *PopupPanel) padRight(s string, width int) string {
 	return s + strings.Repeat(" ", width-sLen)
 }
 
+func (p *PopupPanel) centerText(s string, width int) string {
+	sLen := lipgloss.Width(s)
+	if sLen >= width {
+		return s[:min(len(s), width)]
+	}
+	leftPad := (width - sLen) / 2
+	rightPad := width - sLen - leftPad
+	return strings.Repeat(" ", leftPad) + s + strings.Repeat(" ", rightPad)
+}

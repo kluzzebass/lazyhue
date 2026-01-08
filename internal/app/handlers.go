@@ -35,6 +35,13 @@ func (m *Model) handleKey(msg tea.KeyMsg) tea.Cmd {
 		m.focusIndex = -1 // Detail panel
 		return nil
 	}
+	if keyStr == "3" {
+		if m.focusIndex >= 0 {
+			m.lastFocusIndex = m.focusIndex
+		}
+		m.focusIndex = -2 // Log panel
+		return nil
+	}
 	for i, id := range m.panelOrder {
 		if panel := m.panelMap[id]; panel != nil {
 			if keyStr == panel.Key() {
@@ -121,12 +128,18 @@ func (m *Model) handleMouse(msg tea.MouseMsg) tea.Cmd {
 
 	// Handle panel focus and item selection on click
 	if msg.Action == tea.MouseActionPress && msg.Button == tea.MouseButtonLeft {
-		if leaf.ID == PanelIDDetail {
+		switch leaf.ID {
+		case PanelIDDetail:
 			if m.focusIndex >= 0 {
 				m.lastFocusIndex = m.focusIndex
 			}
 			m.focusIndex = -1
-		} else {
+		case PanelIDLog:
+			if m.focusIndex >= 0 {
+				m.lastFocusIndex = m.focusIndex
+			}
+			m.focusIndex = -2
+		default:
 			for i, id := range m.panelOrder {
 				if id == leaf.ID {
 					m.focusIndex = i
@@ -151,6 +164,8 @@ func (m *Model) handleMouse(msg tea.MouseMsg) tea.Cmd {
 		switch leaf.ID {
 		case PanelIDDetail:
 			m.detailPanel.Update(msg)
+		case PanelIDLog:
+			m.logPanel.Update(msg)
 		case PanelIDBridges:
 			m.bridgePanel().Update(msg)
 			m.syncSelectionFromFocusedPanel()
