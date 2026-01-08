@@ -4,13 +4,41 @@ package main
 import (
 	"fmt"
 	"os"
+	"os/signal"
+	"syscall"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/kluzzebass/lazyhue/internal/app"
 	"github.com/kluzzebass/lazyhue/internal/config"
+	"github.com/kluzzebass/lazyhue/internal/debug"
+	"github.com/spf13/cobra"
 )
 
-func main() {
+var (
+	debugLog string
+)
+
+var rootCmd = &cobra.Command{
+	Use:   "lazyhue",
+	Short: "A TUI for controlling Philips Hue lights",
+	Long:  `LazyHue is a terminal user interface for discovering, configuring, and controlling Philips Hue bridges and lights.`,
+	Run:   run,
+}
+
+func init() {
+	rootCmd.Flags().StringVar(&debugLog, "debug-log", "", "Path to debug log file (enables debug output)")
+}
+
+func run(cmd *cobra.Command, args []string) {
+	// Initialize debug logging if requested
+	if debugLog != "" {
+		if err := debug.Init(debugLog); err != nil {
+			fmt.Fprintf(os.Stderr, "Error initializing debug log: %v\n", err)
+			os.Exit(1)
+		}
+		defer debug.Close()
+	}
+
 	// Load configuration
 	cfg, err := config.Load()
 	if err != nil {
@@ -42,8 +70,24 @@ func main() {
 		tea.WithMouseCellMotion(), // Enable mouse support
 	)
 
+	// Handle SIGTERM/SIGINT to save state before exiting
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, syscall.SIGTERM, syscall.SIGINT)
+	go func() {
+		<-sigChan
+		// Signal received - send quit message to save state and exit
+		p.Send(app.SignalQuitMsg{})
+	}()
+
 	// Run the program
 	if _, err := p.Run(); err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
+	}
+}
+
+func main() {
+	if err := rootCmd.Execute(); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
 	}

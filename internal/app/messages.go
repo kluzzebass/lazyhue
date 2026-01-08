@@ -71,8 +71,19 @@ type LightsSyncedMsg struct {
 // SyncTickMsg triggers periodic state sync.
 type SyncTickMsg struct{}
 
+// StateSaveTickMsg triggers periodic UI state save.
+type StateSaveTickMsg struct{}
+
+// SignalQuitMsg is sent when SIGTERM/SIGINT is received.
+type SignalQuitMsg struct{}
+
 // DiscoveryTickMsg triggers periodic bridge discovery.
 type DiscoveryTickMsg struct{}
+
+// BridgeEventMsg is sent when an SSE event is received from a bridge.
+type BridgeEventMsg struct {
+	BridgeID string
+}
 
 // indicatorRefreshMsg triggers a redraw to update activity indicators.
 type indicatorRefreshMsg struct{}

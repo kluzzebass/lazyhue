@@ -5,6 +5,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/kluzzebass/lazyhue/internal/debug"
 	"github.com/openhue/openhue-go"
 )
 
@@ -43,10 +44,13 @@ type Bridge struct {
 	LastSync time.Time
 	LastErr  error
 
-	home     *openhue.Home
-	extended *ExtendedClient
-	state    *BridgeState
-	mu       sync.RWMutex
+	home        *openhue.Home
+	extended    *ExtendedClient
+	state       *BridgeState
+	eventStream *EventStream
+	eventCancel context.CancelFunc
+	onEvent     func(bridgeID string) // Callback when events are received
+	mu          sync.RWMutex
 }
 
 // NewBridge creates a new bridge connection.
@@ -84,13 +88,152 @@ func (b *Bridge) Connect(apiKey string) error {
 	b.extended = extended
 	b.Status = StatusConnected
 	b.LastErr = nil
+
+	// Start event stream
+	b.startEventStream(apiKey)
+
 	return nil
+}
+
+// OnEvent sets a callback for when the bridge receives SSE events.
+func (b *Bridge) OnEvent(fn func(bridgeID string)) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.onEvent = fn
+}
+
+// IsEventStreamConnected returns whether the SSE connection is active.
+func (b *Bridge) IsEventStreamConnected() bool {
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+	return b.eventStream != nil && b.eventStream.IsConnected()
+}
+
+func (b *Bridge) startEventStream(apiKey string) {
+	// Stop any existing stream
+	if b.eventCancel != nil {
+		b.eventCancel()
+	}
+
+	es := NewEventStream(b.Info.IPAddress, apiKey)
+
+	es.OnEvent(func(container EventContainer) {
+		b.handleEvents(container)
+	})
+
+	es.OnConnect(func() {
+		// Event stream connected - we can reduce polling frequency
+	})
+
+	es.OnDisconnect(func(err error) {
+		// Event stream disconnected - might want to increase polling
+	})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	b.eventStream = es
+	b.eventCancel = cancel
+
+	// Start in background
+	go es.Start(ctx)
+}
+
+// handleEvents processes events from the SSE stream.
+// Applies partial updates directly to the in-memory state, avoiding API calls.
+func (b *Bridge) handleEvents(container EventContainer) {
+	if len(container.Events) == 0 {
+		return
+	}
+
+	anyUpdated := false
+
+	for _, event := range container.Events {
+		updates, err := ParseResourceUpdates(event)
+		if err != nil {
+			continue
+		}
+
+		for _, update := range updates {
+			debug.Log("SSE %s: %s %s", event.Type, update.Type, update.ID)
+
+			// Apply the update directly to our cached state
+			updated := b.applyResourceUpdate(update)
+			if updated {
+				anyUpdated = true
+			}
+		}
+	}
+
+	// Notify listener if anything was updated
+	if anyUpdated {
+		b.mu.RLock()
+		callback := b.onEvent
+		b.mu.RUnlock()
+
+		if callback != nil {
+			callback(b.Info.ID)
+		}
+	}
+}
+
+// applyResourceUpdate applies a single resource update to the bridge state.
+// Returns true if the update was applied successfully.
+func (b *Bridge) applyResourceUpdate(update ResourceUpdate) bool {
+	if b.state == nil {
+		return false
+	}
+
+	switch update.Type {
+	case "light":
+		var on *bool
+		var brightness *float64
+		if update.On != nil {
+			on = &update.On.On
+		}
+		if update.Dimming != nil {
+			brightness = &update.Dimming.Brightness
+		}
+		return b.state.ApplyLightUpdate(update.ID, on, brightness)
+
+	case "grouped_light":
+		var on *bool
+		var brightness *float64
+		if update.On != nil {
+			on = &update.On.On
+		}
+		if update.Dimming != nil {
+			brightness = &update.Dimming.Brightness
+		}
+		return b.state.ApplyGroupedLightUpdate(update.ID, on, brightness)
+
+	case "motion":
+		if update.Motion != nil {
+			return b.state.ApplyMotionUpdate(update.ID, update.Motion.Motion)
+		}
+		return false
+
+	case "scene":
+		if update.Status != "" {
+			return b.state.ApplySceneStatus(update.ID, update.Status)
+		}
+		return false
+
+	default:
+		// Unknown resource type - will be picked up by fallback polling
+		return false
+	}
 }
 
 // Disconnect closes the bridge connection.
 func (b *Bridge) Disconnect() {
 	b.mu.Lock()
 	defer b.mu.Unlock()
+
+	// Stop event stream
+	if b.eventCancel != nil {
+		b.eventCancel()
+		b.eventCancel = nil
+	}
+	b.eventStream = nil
 
 	b.home = nil
 	b.Status = StatusDisconnected
@@ -145,6 +288,8 @@ func (b *Bridge) SyncAll(ctx context.Context) error {
 
 	// Entertainment configurations (non-fatal)
 	_ = b.SyncEntertainmentConfigurations(ctx)
+	_ = b.SyncWifiConnectivity(ctx)
+	_ = b.SyncZigbeeConnectivity(ctx)
 
 	// Bridge resource, home, and auth apps (non-fatal)
 	_ = b.SyncBridgeResource(ctx)
@@ -425,3 +570,40 @@ func (b *Bridge) SyncEntertainmentConfigurations(ctx context.Context) error {
 	return nil
 }
 
+// SyncWifiConnectivity fetches WiFi connectivity status (Bridge Pro only).
+func (b *Bridge) SyncWifiConnectivity(ctx context.Context) error {
+	b.mu.RLock()
+	extended := b.extended
+	b.mu.RUnlock()
+
+	if extended == nil {
+		return ErrAuthFailed
+	}
+
+	wifi, err := extended.GetWifiConnectivity(ctx)
+	if err != nil {
+		return err
+	}
+
+	b.state.UpdateWifiConnectivity(wifi)
+	return nil
+}
+
+// SyncZigbeeConnectivity fetches Zigbee connectivity status for all devices.
+func (b *Bridge) SyncZigbeeConnectivity(ctx context.Context) error {
+	b.mu.RLock()
+	extended := b.extended
+	b.mu.RUnlock()
+
+	if extended == nil {
+		return ErrAuthFailed
+	}
+
+	zigbee, err := extended.GetZigbeeConnectivity(ctx)
+	if err != nil {
+		return err
+	}
+
+	b.state.UpdateZigbeeConnectivity(zigbee)
+	return nil
+}

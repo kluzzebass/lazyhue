@@ -23,6 +23,8 @@ type BridgeState struct {
 	LightLevels                 map[string]openhue.LightLevelGet
 	DevicePowers                map[string]openhue.DevicePowerGet
 	EntertainmentConfigurations map[string]EntertainmentConfiguration
+	WifiConnectivity   []WifiConnectivity            // WiFi status (Bridge Pro only)
+	ZigbeeConnectivity map[string]ZigbeeConnectivity // Zigbee connectivity per device
 
 	// Bridge-specific resources
 	BridgeResource *openhue.BridgeGet     // The bridge resource itself
@@ -44,6 +46,7 @@ func NewBridgeState() *BridgeState {
 		LightLevels:                 make(map[string]openhue.LightLevelGet),
 		DevicePowers:                make(map[string]openhue.DevicePowerGet),
 		EntertainmentConfigurations: make(map[string]EntertainmentConfiguration),
+		ZigbeeConnectivity:          make(map[string]ZigbeeConnectivity),
 	}
 }
 
@@ -364,19 +367,41 @@ func (s *BridgeState) GetMotionSensor(id string) (openhue.MotionGet, bool) {
 
 // GetDeviceMotionState returns true if the device has a motion sensor service that detects motion.
 func (s *BridgeState) GetDeviceMotionState(device openhue.DeviceGet) (hasMotion bool, isDetecting bool) {
-	if device.Services == nil {
-		return false, false
-	}
-
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	for _, svc := range *device.Services {
-		if svc.Rtype != nil && *svc.Rtype == openhue.ResourceIdentifierRtypeMotion && svc.Rid != nil {
-			// Found motion service, check its state
-			if motion, ok := s.MotionSensors[*svc.Rid]; ok {
+	deviceID := ""
+	if device.Id != nil {
+		deviceID = *device.Id
+	}
+
+	// First, try to find via device services
+	if device.Services != nil {
+		for _, svc := range *device.Services {
+			if svc.Rtype != nil && *svc.Rtype == openhue.ResourceIdentifierRtypeMotion && svc.Rid != nil {
+				// Found motion service, check its state
+				if motion, ok := s.MotionSensors[*svc.Rid]; ok {
+					if motion.Motion != nil {
+						// Check motion_report first (newer API), then fallback to motion
+						if motion.Motion.MotionReport != nil && motion.Motion.MotionReport.Motion != nil {
+							return true, *motion.Motion.MotionReport.Motion
+						}
+						if motion.Motion.Motion != nil {
+							return true, *motion.Motion.Motion
+						}
+					}
+					return true, false
+				}
+				return true, false
+			}
+		}
+	}
+
+	// Fallback: check if any motion sensor is owned by this device
+	if deviceID != "" {
+		for _, motion := range s.MotionSensors {
+			if motion.Owner != nil && motion.Owner.Rid != nil && *motion.Owner.Rid == deviceID {
 				if motion.Motion != nil {
-					// Check motion_report first (newer API), then fallback to motion
 					if motion.Motion.MotionReport != nil && motion.Motion.MotionReport.Motion != nil {
 						return true, *motion.Motion.MotionReport.Motion
 					}
@@ -386,24 +411,46 @@ func (s *BridgeState) GetDeviceMotionState(device openhue.DeviceGet) (hasMotion 
 				}
 				return true, false
 			}
-			return true, false
 		}
 	}
+
 	return false, false
 }
 
 // GetDeviceTemperature returns the temperature reading for a device if it has a temperature service.
 func (s *BridgeState) GetDeviceTemperature(device openhue.DeviceGet) (hasTemp bool, tempC float32) {
-	if device.Services == nil {
-		return false, 0
-	}
-
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	for _, svc := range *device.Services {
-		if svc.Rtype != nil && *svc.Rtype == openhue.ResourceIdentifierRtypeTemperature && svc.Rid != nil {
-			if temp, ok := s.Temperatures[*svc.Rid]; ok {
+	deviceID := ""
+	if device.Id != nil {
+		deviceID = *device.Id
+	}
+
+	// First, try to find via device services
+	if device.Services != nil {
+		for _, svc := range *device.Services {
+			if svc.Rtype != nil && *svc.Rtype == openhue.ResourceIdentifierRtypeTemperature && svc.Rid != nil {
+				if temp, ok := s.Temperatures[*svc.Rid]; ok {
+					if temp.Temperature != nil {
+						if temp.Temperature.TemperatureReport != nil && temp.Temperature.TemperatureReport.Temperature != nil {
+							return true, *temp.Temperature.TemperatureReport.Temperature
+						}
+						if temp.Temperature.Temperature != nil {
+							return true, *temp.Temperature.Temperature
+						}
+					}
+					return true, 0
+				}
+				return true, 0
+			}
+		}
+	}
+
+	// Fallback: check if any temperature sensor is owned by this device
+	if deviceID != "" {
+		for _, temp := range s.Temperatures {
+			if temp.Owner != nil && temp.Owner.Rid != nil && *temp.Owner.Rid == deviceID {
 				if temp.Temperature != nil {
 					if temp.Temperature.TemperatureReport != nil && temp.Temperature.TemperatureReport.Temperature != nil {
 						return true, *temp.Temperature.TemperatureReport.Temperature
@@ -414,24 +461,46 @@ func (s *BridgeState) GetDeviceTemperature(device openhue.DeviceGet) (hasTemp bo
 				}
 				return true, 0
 			}
-			return true, 0
 		}
 	}
+
 	return false, 0
 }
 
 // GetDeviceLightLevel returns the light level reading for a device if it has a light_level service.
 func (s *BridgeState) GetDeviceLightLevel(device openhue.DeviceGet) (hasLevel bool, level int) {
-	if device.Services == nil {
-		return false, 0
-	}
-
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	for _, svc := range *device.Services {
-		if svc.Rtype != nil && *svc.Rtype == openhue.ResourceIdentifierRtypeLightLevel && svc.Rid != nil {
-			if ll, ok := s.LightLevels[*svc.Rid]; ok {
+	deviceID := ""
+	if device.Id != nil {
+		deviceID = *device.Id
+	}
+
+	// First, try to find via device services
+	if device.Services != nil {
+		for _, svc := range *device.Services {
+			if svc.Rtype != nil && *svc.Rtype == openhue.ResourceIdentifierRtypeLightLevel && svc.Rid != nil {
+				if ll, ok := s.LightLevels[*svc.Rid]; ok {
+					if ll.Light != nil {
+						if ll.Light.LightLevelReport != nil && ll.Light.LightLevelReport.LightLevel != nil {
+							return true, *ll.Light.LightLevelReport.LightLevel
+						}
+						if ll.Light.LightLevel != nil {
+							return true, *ll.Light.LightLevel
+						}
+					}
+					return true, 0
+				}
+				return true, 0
+			}
+		}
+	}
+
+	// Fallback: check if any light level sensor is owned by this device
+	if deviceID != "" {
+		for _, ll := range s.LightLevels {
+			if ll.Owner != nil && ll.Owner.Rid != nil && *ll.Owner.Rid == deviceID {
 				if ll.Light != nil {
 					if ll.Light.LightLevelReport != nil && ll.Light.LightLevelReport.LightLevel != nil {
 						return true, *ll.Light.LightLevelReport.LightLevel
@@ -442,9 +511,9 @@ func (s *BridgeState) GetDeviceLightLevel(device openhue.DeviceGet) (hasLevel bo
 				}
 				return true, 0
 			}
-			return true, 0
 		}
 	}
+
 	return false, 0
 }
 
@@ -493,6 +562,22 @@ func (s *BridgeState) UpdateLightLevels(levels map[string]openhue.LightLevelGet)
 	s.LightLevels = levels
 }
 
+// GetLightLevel returns a light level sensor reading by its service ID.
+func (s *BridgeState) GetLightLevel(id string) (openhue.LightLevelGet, bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	ll, ok := s.LightLevels[id]
+	return ll, ok
+}
+
+// GetMotion returns a motion sensor reading by its service ID.
+func (s *BridgeState) GetMotion(id string) (openhue.MotionGet, bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	m, ok := s.MotionSensors[id]
+	return m, ok
+}
+
 // UpdateDevicePowers replaces the device powers cache.
 func (s *BridgeState) UpdateDevicePowers(powers map[string]openhue.DevicePowerGet) {
 	s.mu.Lock()
@@ -505,6 +590,68 @@ func (s *BridgeState) UpdateEntertainmentConfigurations(configs map[string]Enter
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.EntertainmentConfigurations = configs
+}
+
+// UpdateWifiConnectivity replaces WiFi connectivity data.
+func (s *BridgeState) UpdateWifiConnectivity(wifi []WifiConnectivity) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.WifiConnectivity = wifi
+}
+
+// GetWifiConnectivity returns WiFi connectivity status (empty if not supported).
+func (s *BridgeState) GetWifiConnectivity() []WifiConnectivity {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.WifiConnectivity
+}
+
+// UpdateZigbeeConnectivity replaces Zigbee connectivity data.
+func (s *BridgeState) UpdateZigbeeConnectivity(zigbee map[string]ZigbeeConnectivity) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.ZigbeeConnectivity = zigbee
+}
+
+// GetZigbeeConnectivity returns a Zigbee connectivity resource by ID.
+func (s *BridgeState) GetZigbeeConnectivity(id string) (ZigbeeConnectivity, bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	zc, ok := s.ZigbeeConnectivity[id]
+	return zc, ok
+}
+
+// GetDeviceZigbeeConnectivity returns the Zigbee connectivity for a device.
+func (s *BridgeState) GetDeviceZigbeeConnectivity(device openhue.DeviceGet) (ZigbeeConnectivity, bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	deviceID := ""
+	if device.Id != nil {
+		deviceID = *device.Id
+	}
+
+	// First, try to find via device services
+	if device.Services != nil {
+		for _, svc := range *device.Services {
+			if svc.Rtype != nil && string(*svc.Rtype) == "zigbee_connectivity" && svc.Rid != nil {
+				if zc, ok := s.ZigbeeConnectivity[*svc.Rid]; ok {
+					return zc, true
+				}
+			}
+		}
+	}
+
+	// Fallback: check if any zigbee connectivity is owned by this device
+	if deviceID != "" {
+		for _, zc := range s.ZigbeeConnectivity {
+			if zc.Owner != nil && zc.Owner.Rid == deviceID {
+				return zc, true
+			}
+		}
+	}
+
+	return ZigbeeConnectivity{}, false
 }
 
 // UpdateBridgeResource sets the bridge resource.
@@ -729,4 +876,112 @@ func (s *BridgeState) SetGroupedLightOn(id string, on bool) {
 		s.GroupedLights[id] = gl
 	}
 }
+// ApplyLightUpdate applies a partial update from an SSE event to a light.
+// Returns true if the light was found and updated.
+func (s *BridgeState) ApplyLightUpdate(id string, on *bool, brightness *float64) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 
+	light, ok := s.Lights[id]
+	if !ok {
+		return false
+	}
+
+	updated := false
+
+	if on != nil {
+		if light.On == nil {
+			light.On = &openhue.On{}
+		}
+		light.On.On = on
+		updated = true
+	}
+
+	if brightness != nil && light.Dimming != nil {
+		b := openhue.Brightness(*brightness)
+		light.Dimming.Brightness = &b
+		updated = true
+	}
+
+	if updated {
+		s.Lights[id] = light
+	}
+	return updated
+}
+
+// ApplyGroupedLightUpdate applies a partial update from an SSE event to a grouped light.
+func (s *BridgeState) ApplyGroupedLightUpdate(id string, on *bool, brightness *float64) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	gl, ok := s.GroupedLights[id]
+	if !ok {
+		return false
+	}
+
+	updated := false
+
+	if on != nil {
+		if gl.On == nil {
+			gl.On = &openhue.On{}
+		}
+		gl.On.On = on
+		updated = true
+	}
+
+	if brightness != nil && gl.Dimming != nil {
+		b := openhue.Brightness(*brightness)
+		gl.Dimming.Brightness = &b
+		updated = true
+	}
+
+	if updated {
+		s.GroupedLights[id] = gl
+		return true
+	}
+
+	return false
+}
+
+// ApplySceneStatus applies a status update from an SSE event to a scene.
+func (s *BridgeState) ApplySceneStatus(id string, status string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	scene, ok := s.Scenes[id]
+	if !ok {
+		return false
+	}
+
+	if scene.Status != nil {
+		active := openhue.SceneGetStatusActive(status)
+		scene.Status.Active = &active
+		s.Scenes[id] = scene
+		return true
+	}
+
+	return false
+}
+
+// ApplyMotionUpdate applies a partial update from an SSE event to a motion sensor.
+func (s *BridgeState) ApplyMotionUpdate(id string, motion bool) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	m, ok := s.MotionSensors[id]
+	if !ok {
+		return false
+	}
+
+	// Update both Motion.Motion and Motion.MotionReport.Motion
+	// since GetDeviceMotionState checks MotionReport first
+	if m.Motion != nil {
+		m.Motion.Motion = &motion
+		if m.Motion.MotionReport != nil {
+			m.Motion.MotionReport.Motion = &motion
+		}
+	}
+
+	s.MotionSensors[id] = m
+	return true
+}

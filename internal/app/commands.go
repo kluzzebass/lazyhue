@@ -9,6 +9,10 @@ import (
 	"github.com/kluzzebass/lazyhue/internal/hue"
 )
 
+// syncPoolSize controls how many API calls run concurrently per bridge.
+// Adjust this to balance speed vs. bridge load.
+const syncPoolSize = 4
+
 // Bridge discovery and connection commands
 
 func discoverBridges() tea.Cmd {
@@ -66,36 +70,74 @@ func syncLightsAndGroups(bridge *hue.Bridge) tea.Cmd {
 	}
 }
 
+// syncTask represents a single sync operation to be executed by the worker pool.
+type syncTask func()
+
+// runWithWorkerPool executes tasks using a fixed-size worker pool.
+func runWithWorkerPool(tasks []syncTask, poolSize int) {
+	if len(tasks) == 0 {
+		return
+	}
+
+	taskChan := make(chan syncTask, len(tasks))
+	var wg sync.WaitGroup
+
+	// Start workers
+	for i := 0; i < poolSize; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for task := range taskChan {
+				task()
+			}
+		}()
+	}
+
+	// Send tasks
+	for _, task := range tasks {
+		taskChan <- task
+	}
+	close(taskChan)
+
+	// Wait for all workers to finish
+	wg.Wait()
+}
+
 func syncAllConnectedBridges(bridges []*hue.Bridge) tea.Cmd {
 	return func() tea.Msg {
 		ctx := context.Background()
-		var wg sync.WaitGroup
+		var bridgeWg sync.WaitGroup
 
 		for _, bridge := range bridges {
 			if !bridge.IsConnected() {
 				continue
 			}
-			wg.Add(1)
+			bridgeWg.Add(1)
 			go func(b *hue.Bridge) {
-				defer wg.Done()
-				// Sync all entity types
-				_ = b.SyncLights(ctx)
-				_ = b.SyncRooms(ctx)
-				_ = b.SyncZones(ctx)
-				_ = b.SyncGroupedLights(ctx)
-				_ = b.SyncScenes(ctx)
-				_ = b.SyncDevices(ctx)
-				// Sync sensor services (non-fatal)
-				_ = b.SyncMotionSensors(ctx)
-				_ = b.SyncTemperatures(ctx)
-				_ = b.SyncLightLevels(ctx)
-				_ = b.SyncDevicePowers(ctx)
-				// Entertainment configurations
-				_ = b.SyncEntertainmentConfigurations(ctx)
+				defer bridgeWg.Done()
+
+				// Define all sync tasks for this bridge
+				tasks := []syncTask{
+					func() { _ = b.SyncLights(ctx) },
+					func() { _ = b.SyncRooms(ctx) },
+					func() { _ = b.SyncZones(ctx) },
+					func() { _ = b.SyncGroupedLights(ctx) },
+					func() { _ = b.SyncScenes(ctx) },
+					func() { _ = b.SyncDevices(ctx) },
+					func() { _ = b.SyncMotionSensors(ctx) },
+					func() { _ = b.SyncTemperatures(ctx) },
+					func() { _ = b.SyncLightLevels(ctx) },
+					func() { _ = b.SyncDevicePowers(ctx) },
+					func() { _ = b.SyncZigbeeConnectivity(ctx) },
+					func() { _ = b.SyncEntertainmentConfigurations(ctx) },
+				}
+
+				// Run tasks with worker pool
+				runWithWorkerPool(tasks, syncPoolSize)
 			}(bridge)
 		}
 
-		wg.Wait()
+		bridgeWg.Wait()
 		return LightsSyncedMsg{} // No specific bridge ID - all were synced
 	}
 }
@@ -103,7 +145,9 @@ func syncAllConnectedBridges(bridges []*hue.Bridge) tea.Cmd {
 // Ticker commands
 
 func startSyncTicker() tea.Cmd {
-	return tea.Tick(2*time.Second, func(t time.Time) tea.Msg {
+	// With SSE for real-time updates, polling is just a fallback
+	// Reduced from 2s to 30s to minimize unnecessary traffic
+	return tea.Tick(30*time.Second, func(t time.Time) tea.Msg {
 		return SyncTickMsg{}
 	})
 }
@@ -112,6 +156,25 @@ func startDiscoveryTicker() tea.Cmd {
 	return tea.Tick(10*time.Second, func(t time.Time) tea.Msg {
 		return DiscoveryTickMsg{}
 	})
+}
+
+func startStateSaveTicker() tea.Cmd {
+	// Save UI state every 5 seconds to handle abrupt termination
+	return tea.Tick(5*time.Second, func(t time.Time) tea.Msg {
+		return StateSaveTickMsg{}
+	})
+}
+
+// listenForBridgeEvents listens for SSE events on the channel and returns them as messages.
+func listenForBridgeEvents(eventChan <-chan BridgeEventMsg) tea.Cmd {
+	return func() tea.Msg {
+		// Block until we receive an event
+		event, ok := <-eventChan
+		if !ok {
+			return nil // Channel closed
+		}
+		return event
+	}
 }
 
 // Pairing command

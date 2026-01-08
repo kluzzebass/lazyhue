@@ -25,12 +25,10 @@ type BridgePanel struct {
 	cursor       int
 	offset       int
 	selectedID   string // Track selection by bridge ID for stability across list changes
-	// Polling indicator: visible for max(operation_duration, minIndicatorVisible)
-	pollingActive bool
-	pollingUntil  time.Time
-	// Discovery indicator: visible for max(operation_duration, minIndicatorVisible)
-	discoveringActive bool
-	discoveringUntil  time.Time
+	// Polling indicator: brief flash for minIndicatorVisible
+	pollingUntil time.Time
+	// Discovery indicator: brief flash for minIndicatorVisible
+	discoveringUntil time.Time
 }
 
 // NewBridgePanel creates a new bridge panel.
@@ -81,38 +79,28 @@ func (p *BridgePanel) SetBridges(bridges []*hue.Bridge, activeBridgeID string) {
 	p.ensureCursorVisible()
 }
 
-// SetPolling sets whether the active bridge is being polled.
+// SetPolling triggers a brief polling indicator flash.
 func (p *BridgePanel) SetPolling(polling bool) {
 	if polling {
-		// Starting: set active and minimum visible time
-		p.pollingActive = true
 		p.pollingUntil = time.Now().Add(minIndicatorVisible)
-	} else {
-		// Ending: clear active flag (but indicator stays until pollingUntil)
-		p.pollingActive = false
 	}
 }
 
-// SetDiscovering sets whether we're scanning for bridges.
+// SetDiscovering triggers a brief discovery indicator flash.
 func (p *BridgePanel) SetDiscovering(discovering bool) {
 	if discovering {
-		// Starting: set active and minimum visible time
-		p.discoveringActive = true
 		p.discoveringUntil = time.Now().Add(minIndicatorVisible)
-	} else {
-		// Ending: clear active flag (but indicator stays until discoveringUntil)
-		p.discoveringActive = false
 	}
 }
 
-// isPollingVisible returns true if polling indicator should show.
+// isPollingVisible returns true if polling indicator should show (brief flash).
 func (p *BridgePanel) isPollingVisible() bool {
-	return p.pollingActive || time.Now().Before(p.pollingUntil)
+	return time.Now().Before(p.pollingUntil)
 }
 
-// isDiscoveringVisible returns true if discovery indicator should show.
+// isDiscoveringVisible returns true if discovery indicator should show (brief flash).
 func (p *BridgePanel) isDiscoveringVisible() bool {
-	return p.discoveringActive || time.Now().Before(p.discoveringUntil)
+	return time.Now().Before(p.discoveringUntil)
 }
 
 // SetSize updates the panel dimensions.
@@ -301,6 +289,17 @@ func (p *BridgePanel) renderBridge(bridge *hue.Bridge, selected, active bool, wi
 		name = bridge.Info.IPAddress
 	}
 
+	// Check for WiFi connectivity (Bridge Pro)
+	wifiMarker := ""
+	if wifi := bridge.GetState().GetWifiConnectivity(); len(wifi) > 0 {
+		for _, w := range wifi {
+			if w.Status == "connected" {
+				wifiMarker = " [WiFi]"
+				break
+			}
+		}
+	}
+
 	// Add check mark for active bridge
 	activeMarker := ""
 	if bridge.Info.ID == p.activeBridge {
@@ -308,7 +307,7 @@ func (p *BridgePanel) renderBridge(bridge *hue.Bridge, selected, active bool, wi
 	}
 
 	// Calculate padding for full-width background
-	plainLine := indicator + " " + name + activeMarker
+	plainLine := indicator + " " + name + wifiMarker + activeMarker
 	visibleWidth := lipgloss.Width(plainLine)
 	padding := ""
 	if visibleWidth < width {
@@ -330,7 +329,7 @@ func (p *BridgePanel) renderBridge(bridge *hue.Bridge, selected, active bool, wi
 	}
 
 	coloredIndicator := indicatorStyle.Render(indicator)
-	styledRest := style.Render(" " + name + activeMarker + padding)
+	styledRest := style.Render(" " + name + wifiMarker + activeMarker + padding)
 
 	return coloredIndicator + styledRest
 }

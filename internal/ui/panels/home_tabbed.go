@@ -12,10 +12,10 @@ import (
 
 // HomeTabbedPanel is the second column panel with Home (tree), Lights, Devices, and Scenes tabs.
 type HomeTabbedPanel struct {
-	styles     ui.Styles
-	width      int
-	height     int
-	panelKey   string
+	styles   ui.Styles
+	width    int
+	height   int
+	panelKey string
 
 	// Tabs
 	activeTab int // 0=Home, 1=Lights, 2=Devices, 3=Scenes
@@ -154,6 +154,13 @@ func (p *HomeTabbedPanel) ensureScenesVisible() {
 // ActiveTabIndex returns the active tab index.
 func (p *HomeTabbedPanel) ActiveTabIndex() int {
 	return p.activeTab
+}
+
+// SetActiveTab sets the active tab index.
+func (p *HomeTabbedPanel) SetActiveTab(tab int) {
+	if tab >= 0 && tab < len(p.tabTitles) {
+		p.activeTab = tab
+	}
 }
 
 // NextTab switches to the next tab.
@@ -331,6 +338,44 @@ func (p *HomeTabbedPanel) SelectedEntity() (*EntityItem, bool) {
 		}
 	}
 	return nil, false
+}
+
+// SelectByID finds and selects an entity by its ID.
+// Returns true if the entity was found and selected.
+func (p *HomeTabbedPanel) SelectByID(id string) bool {
+	if id == "" {
+		return false
+	}
+
+	switch p.activeTab {
+	case 0: // Home (tree)
+		return p.treePanel.SelectByID(id)
+	case 1: // Lights
+		for i, item := range p.lights {
+			if ei, ok := item.(EntityItem); ok && ei.ID == id {
+				p.lightsCursor = i
+				p.ensureLightsVisible()
+				return true
+			}
+		}
+	case 2: // Devices
+		for i, item := range p.devices {
+			if ei, ok := item.(EntityItem); ok && ei.ID == id {
+				p.devicesCursor = i
+				p.ensureDevicesVisible()
+				return true
+			}
+		}
+	case 3: // Scenes
+		for i, item := range p.scenes {
+			if ei, ok := item.(EntityItem); ok && ei.ID == id {
+				p.scenesCursor = i
+				p.ensureScenesVisible()
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // Key returns the keyboard shortcut key.

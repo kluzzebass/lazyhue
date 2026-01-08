@@ -361,3 +361,162 @@ func (c *ExtendedClient) GetEntertainmentConfigurations(ctx context.Context) (ma
 	}
 	return configs, nil
 }
+
+// WifiConnectivity represents a WiFi connectivity resource (Bridge Pro).
+type WifiConnectivity struct {
+	ID      string `json:"id"`
+	IDV1    string `json:"id_v1,omitempty"`
+	Status  string `json:"status"` // "connected" or "disconnected"
+	Type    string `json:"type"`   // "wifi_connectivity"
+	HasSSID bool   `json:"has_ssid"`
+}
+
+// GetWifiConnectivity fetches WiFi connectivity status from the bridge.
+// This is only available on Bridge Pro models with WiFi support.
+func (c *ExtendedClient) GetWifiConnectivity(ctx context.Context) ([]WifiConnectivity, error) {
+	url := fmt.Sprintf("https://%s/clip/v2/resource/wifi_connectivity", c.bridgeIP)
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("hue-application-key", c.apiKey)
+
+	client := &http.Client{
+		Transport: &http.Transport{
+			TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+		},
+	}
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	// 404 or other error means bridge doesn't support WiFi
+	if resp.StatusCode != http.StatusOK {
+		return nil, nil
+	}
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+
+	var result struct {
+		Data []WifiConnectivity `json:"data"`
+	}
+	if err := json.Unmarshal(body, &result); err != nil {
+		return nil, err
+	}
+
+	return result.Data, nil
+}
+
+// ZigbeeConnectivity represents a Zigbee connectivity resource.
+type ZigbeeConnectivity struct {
+	ID            string `json:"id"`
+	IDV1          string `json:"id_v1,omitempty"`
+	Type          string `json:"type"` // "zigbee_connectivity"
+	Status        string `json:"status"` // "connected", "disconnected", "connectivity_issue", "unidirectional_incoming"
+	MacAddress    string `json:"mac_address,omitempty"`
+	ExtendedPanID string `json:"extended_pan_id,omitempty"`
+	Channel *struct {
+		Value  string `json:"value,omitempty"`  // e.g., "channel_25"
+		Status string `json:"status,omitempty"` // "set", "changing"
+	} `json:"channel,omitempty"`
+	Owner *struct {
+		Rid   string `json:"rid,omitempty"`
+		Rtype string `json:"rtype,omitempty"`
+	} `json:"owner,omitempty"`
+}
+
+// GetZigbeeConnectivity fetches all Zigbee connectivity resources from the bridge.
+func (c *ExtendedClient) GetZigbeeConnectivity(ctx context.Context) (map[string]ZigbeeConnectivity, error) {
+	url := fmt.Sprintf("https://%s/clip/v2/resource/zigbee_connectivity", c.bridgeIP)
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("hue-application-key", c.apiKey)
+
+	client := &http.Client{
+		Transport: &http.Transport{
+			TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+		},
+	}
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, nil
+	}
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+
+	var result struct {
+		Data []ZigbeeConnectivity `json:"data"`
+	}
+	if err := json.Unmarshal(body, &result); err != nil {
+		return nil, err
+	}
+
+	zigbees := make(map[string]ZigbeeConnectivity)
+	for _, zc := range result.Data {
+		zigbees[zc.ID] = zc
+	}
+	return zigbees, nil
+}
+
+// GetZigbeeConnectivityByID fetches a specific Zigbee connectivity resource.
+func (c *ExtendedClient) GetZigbeeConnectivityByID(ctx context.Context, id string) (*ZigbeeConnectivity, error) {
+	url := fmt.Sprintf("https://%s/clip/v2/resource/zigbee_connectivity/%s", c.bridgeIP, id)
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("hue-application-key", c.apiKey)
+
+	client := &http.Client{
+		Transport: &http.Transport{
+			TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+		},
+	}
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, nil
+	}
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+
+	var result struct {
+		Data []ZigbeeConnectivity `json:"data"`
+	}
+	if err := json.Unmarshal(body, &result); err != nil {
+		return nil, err
+	}
+
+	if len(result.Data) == 0 {
+		return nil, nil
+	}
+	return &result.Data[0], nil
+}

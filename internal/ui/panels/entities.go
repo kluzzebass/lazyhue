@@ -544,11 +544,15 @@ func BuildDeviceItems(state *hue.BridgeState) []list.Item {
 			name = *device.Metadata.Name
 		}
 
+		// Check if device has motion sensor and its state
+		hasMotion, isDetecting := state.GetDeviceMotionState(device)
+		isOn := hasMotion && isDetecting
+
 		items = append(items, EntityItem{
 			ID:     id,
 			Name:   name,
 			Type:   EntityDevice,
-			IsOn:   false, // Devices don't have a direct on/off
+			IsOn:   isOn,
 			RawPtr: device,
 		})
 	}

@@ -183,16 +183,44 @@ func (m *Model) syncSelectionFromFocusedPanel() {
 
 // saveExpandedState saves the current hierarchy's expanded state for a bridge.
 func (m *Model) saveExpandedState(bridgeID string) {
+	// Save node expanded states
 	states := m.hierarchyPanel().GetNodeStates()
 	m.uiState.SetNodeStates(bridgeID, states)
+
+	// Save active tab
+	m.uiState.SetActiveTab(bridgeID, m.hierarchyPanel().ActiveTabIndex())
+
+	// Save selected entity ID
+	if m.selectedItem != nil {
+		m.uiState.SetSelectedEntityID(bridgeID, m.selectedItem.ID)
+	}
+
+	// Save focused panel index
+	m.uiState.FocusedPanelIndex = m.focusIndex
+
 	_ = m.uiState.Save() // Best effort save
 }
 
 // restoreExpandedState restores the expanded state for a bridge.
 func (m *Model) restoreExpandedState(bridgeID string) {
+	// Restore node expanded states
 	states := m.uiState.GetNodeStates(bridgeID)
 	if len(states) > 0 {
 		m.hierarchyPanel().SetNodeStates(states)
+	}
+
+	// Restore active tab
+	m.hierarchyPanel().SetActiveTab(m.uiState.GetActiveTab(bridgeID))
+
+	// Restore selected entity
+	if entityID := m.uiState.GetSelectedEntityID(bridgeID); entityID != "" {
+		if m.hierarchyPanel().SelectByID(entityID) {
+			// Update selected item and detail panel
+			if entity, ok := m.hierarchyPanel().SelectedEntity(); ok {
+				m.selectedItem = entity
+				m.updateDetailPanel()
+			}
+		}
 	}
 }
 

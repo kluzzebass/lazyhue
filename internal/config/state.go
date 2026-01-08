@@ -11,13 +11,16 @@ const stateFileName = "state.json"
 // BridgeUIState stores UI state for a single bridge.
 type BridgeUIState struct {
 	// NodeStates maps node paths to their expanded state (true = expanded, false = collapsed)
-	NodeStates map[string]bool `json:"node_states"`
+	NodeStates       map[string]bool `json:"node_states"`
+	ActiveTab        int             `json:"active_tab"`         // Which tab is selected (0=Home, 1=Lights, etc.)
+	SelectedEntityID string          `json:"selected_entity_id"` // ID of selected entity
 }
 
 // UIStateStore manages UI state for multiple bridges.
 type UIStateStore struct {
 	Bridges              map[string]BridgeUIState `json:"bridges"`
 	LastSelectedBridgeID string                   `json:"last_selected_bridge_id,omitempty"`
+	FocusedPanelIndex    int                      `json:"focused_panel_index"` // Which panel is focused
 }
 
 // NewUIStateStore creates an empty UI state store.
@@ -80,7 +83,39 @@ func (s *UIStateStore) GetNodeStates(bridgeID string) map[string]bool {
 
 // SetNodeStates stores the node states for a bridge.
 func (s *UIStateStore) SetNodeStates(bridgeID string, states map[string]bool) {
-	s.Bridges[bridgeID] = BridgeUIState{NodeStates: states}
+	existing := s.Bridges[bridgeID]
+	existing.NodeStates = states
+	s.Bridges[bridgeID] = existing
+}
+
+// GetActiveTab returns the active tab for a bridge.
+func (s *UIStateStore) GetActiveTab(bridgeID string) int {
+	if state, ok := s.Bridges[bridgeID]; ok {
+		return state.ActiveTab
+	}
+	return 0
+}
+
+// SetActiveTab stores the active tab for a bridge.
+func (s *UIStateStore) SetActiveTab(bridgeID string, tab int) {
+	existing := s.Bridges[bridgeID]
+	existing.ActiveTab = tab
+	s.Bridges[bridgeID] = existing
+}
+
+// GetSelectedEntityID returns the selected entity ID for a bridge.
+func (s *UIStateStore) GetSelectedEntityID(bridgeID string) string {
+	if state, ok := s.Bridges[bridgeID]; ok {
+		return state.SelectedEntityID
+	}
+	return ""
+}
+
+// SetSelectedEntityID stores the selected entity ID for a bridge.
+func (s *UIStateStore) SetSelectedEntityID(bridgeID string, entityID string) {
+	existing := s.Bridges[bridgeID]
+	existing.SelectedEntityID = entityID
+	s.Bridges[bridgeID] = existing
 }
 
 // Delete removes state for a bridge.

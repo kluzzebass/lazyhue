@@ -1,12 +1,14 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-if [ "$#" -ne 1 ]; then
-  echo "usage: $0 <binary>"
+if [ "$#" -lt 1 ]; then
+  echo "usage: $0 <binary> [args...]"
   exit 1
 fi
 
 bin="$1"
+shift
+args=("$@")
 
 if [ ! -x "$bin" ]; then
   echo "error: '$bin' is not executable"
@@ -16,7 +18,7 @@ fi
 pid=
 
 start() {
-  "$bin" &
+  "$bin" "${args[@]}" &
   pid=$!
 }
 

@@ -66,6 +66,9 @@ type Model struct {
 	pairingCancel context.CancelFunc
 	statusMsg     string
 	isError       bool
+
+	// SSE event channel for receiving bridge events from goroutines
+	eventChan chan BridgeEventMsg
 }
 
 // New creates a new application model.
@@ -117,6 +120,7 @@ func New(cfg *config.Config, creds *config.CredentialStore, uiState *config.UISt
 		pairingPanel: panels.NewPairingPanel(styles),
 		popupPanel:   panels.NewPopupPanel(styles),
 		statusBar:    panels.NewStatusBar(styles),
+		eventChan:    make(chan BridgeEventMsg, 100), // Buffered channel for SSE events
 	}
 
 	// Initialize keybindings - handlers are defined here, right next to keys
@@ -126,6 +130,11 @@ func New(cfg *config.Config, creds *config.CredentialStore, uiState *config.UISt
 	// Active bridge will be set after bridges are loaded in connectFromStoredCredentials
 	if uiState.LastSelectedBridgeID != "" {
 		m.bridgePanel().SetInitialSelection(uiState.LastSelectedBridgeID)
+	}
+
+	// Restore focused panel (-1 = detail panel, 0+ = main panels)
+	if uiState.FocusedPanelIndex == -1 || (uiState.FocusedPanelIndex >= 0 && uiState.FocusedPanelIndex < len(m.panelOrder)) {
+		m.focusIndex = uiState.FocusedPanelIndex
 	}
 
 	return m
@@ -139,6 +148,8 @@ func (m Model) Init() tea.Cmd {
 		discoverBridges(),
 		startSyncTicker(),
 		startDiscoveryTicker(),
+		startStateSaveTicker(),             // Periodic state saves for crash recovery
+		listenForBridgeEvents(m.eventChan), // Start listening for SSE events
 	}
 	return tea.Batch(cmds...)
 }
@@ -238,6 +249,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		bridge := m.manager.GetBridge(msg.BridgeID)
 		if bridge != nil {
 			bridge.Status = hue.StatusConnected
+			// Set up SSE event callback to notify the app when events arrive
+			eventChan := m.eventChan
+			bridge.OnEvent(func(bridgeID string) {
+				select {
+				case eventChan <- BridgeEventMsg{BridgeID: bridgeID}:
+				default:
+					// Channel full, drop event (will catch up on next one)
+				}
+			})
 			m.setStatus("Connected to "+bridge.Info.Name, false)
 			m.updateBridgePanel() // This will set active bridge if none is set
 			cmds = append(cmds, syncBridgeState(bridge))
@@ -271,6 +291,21 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.updateDetailPanel()
 		}
 
+	case BridgeEventMsg:
+		// SSE event received - state was already updated in-memory by the bridge
+		// Just flash the indicator and refresh the UI
+		m.bridgePanel().SetPolling(true)
+		cmds = append(cmds, tea.Tick(300*time.Millisecond, func(t time.Time) tea.Msg {
+			return indicatorRefreshMsg{}
+		}))
+		// Refresh UI if this is the active bridge
+		if msg.BridgeID == m.manager.GetActiveBridgeID() {
+			m.refreshHierarchyPanel()
+			m.updateDetailPanel()
+		}
+		// Re-listen for more events
+		cmds = append(cmds, listenForBridgeEvents(m.eventChan))
+
 	case SyncTickMsg:
 		connectedBridges := m.manager.ConnectedBridges()
 		if len(connectedBridges) > 0 {
@@ -289,6 +324,25 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		cmds = append(cmds, tea.Tick(300*time.Millisecond, func(t time.Time) tea.Msg {
 			return indicatorRefreshMsg{}
 		}))
+
+	case StateSaveTickMsg:
+		// Periodically save UI state to handle abrupt termination
+		if bridgeID := m.manager.GetActiveBridgeID(); bridgeID != "" {
+			m.saveExpandedState(bridgeID)
+			m.uiState.LastSelectedBridgeID = bridgeID
+			_ = m.uiState.Save()
+		}
+		cmds = append(cmds, startStateSaveTicker())
+
+	case SignalQuitMsg:
+		// SIGTERM/SIGINT received - save state and quit
+		m.quitting = true
+		if bridgeID := m.manager.GetActiveBridgeID(); bridgeID != "" {
+			m.saveExpandedState(bridgeID)
+			m.uiState.LastSelectedBridgeID = bridgeID
+			_ = m.uiState.Save()
+		}
+		return m, tea.Quit
 
 	case indicatorRefreshMsg:
 		// Just triggers a redraw to update indicator visibility

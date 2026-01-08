@@ -476,6 +476,22 @@ func (p *TreePanel) SelectedNode() *TreeNode {
 	return nil
 }
 
+// SelectByID finds and selects a node by its entity ID.
+// Returns true if the entity was found and selected.
+func (p *TreePanel) SelectByID(id string) bool {
+	if id == "" {
+		return false
+	}
+	for i, node := range p.flatList {
+		if node.Item != nil && node.Item.ID == id {
+			p.cursor = i
+			p.ensureCursorVisible()
+			return true
+		}
+	}
+	return false
+}
+
 // HandleClick handles a mouse click at relative coordinates within the panel.
 func (p *TreePanel) HandleClick(relX, relY int) {
 	// Content starts at y=1 (after top border), x=1 (after left border)
