@@ -25,8 +25,8 @@ type BridgePanel struct {
 	cursor       int
 	offset       int
 	selectedID   string // Track selection by bridge ID for stability across list changes
-	// Polling indicator: brief flash for minIndicatorVisible
-	pollingUntil time.Time
+	// Polling indicator per bridge: brief flash for minIndicatorVisible
+	pollingUntil map[string]time.Time
 	// Discovery indicator: brief flash for minIndicatorVisible
 	discoveringUntil time.Time
 }
@@ -34,9 +34,10 @@ type BridgePanel struct {
 // NewBridgePanel creates a new bridge panel.
 func NewBridgePanel(styles ui.Styles, panelKey string) *BridgePanel {
 	return &BridgePanel{
-		styles:     styles,
-		panelKey:   panelKey,
-		panelTitle: "Bridges",
+		styles:       styles,
+		panelKey:     panelKey,
+		panelTitle:   "Bridges",
+		pollingUntil: make(map[string]time.Time),
 	}
 }
 
@@ -79,10 +80,20 @@ func (p *BridgePanel) SetBridges(bridges []*hue.Bridge, activeBridgeID string) {
 	p.ensureCursorVisible()
 }
 
-// SetPolling triggers a brief polling indicator flash.
-func (p *BridgePanel) SetPolling(polling bool) {
+// SetPolling triggers a brief polling indicator flash for a specific bridge.
+// If bridgeID is empty, flashes all connected bridges.
+func (p *BridgePanel) SetPolling(bridgeID string, polling bool) {
 	if polling {
-		p.pollingUntil = time.Now().Add(minIndicatorVisible)
+		if bridgeID == "" {
+			// Flash all connected bridges
+			for _, b := range p.bridges {
+				if b.Status == hue.StatusConnected {
+					p.pollingUntil[b.Info.ID] = time.Now().Add(minIndicatorVisible)
+				}
+			}
+		} else {
+			p.pollingUntil[bridgeID] = time.Now().Add(minIndicatorVisible)
+		}
 	}
 }
 
@@ -93,9 +104,12 @@ func (p *BridgePanel) SetDiscovering(discovering bool) {
 	}
 }
 
-// isPollingVisible returns true if polling indicator should show (brief flash).
-func (p *BridgePanel) isPollingVisible() bool {
-	return time.Now().Before(p.pollingUntil)
+// isPollingVisible returns true if polling indicator should show for a specific bridge.
+func (p *BridgePanel) isPollingVisible(bridgeID string) bool {
+	if until, ok := p.pollingUntil[bridgeID]; ok {
+		return time.Now().Before(until)
+	}
+	return false
 }
 
 // isDiscoveringVisible returns true if discovery indicator should show (brief flash).
@@ -260,7 +274,7 @@ func (p *BridgePanel) renderBridge(bridge *hue.Bridge, selected, active bool, wi
 	switch bridge.Status {
 	case hue.StatusConnected:
 		// Show hollow circle when polling, filled when idle
-		if p.isPollingVisible() {
+		if p.isPollingVisible(bridge.Info.ID) {
 			indicator = IndicatorOff
 		} else {
 			indicator = IndicatorOn

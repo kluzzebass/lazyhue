@@ -23,8 +23,8 @@ type BridgeState struct {
 	LightLevels                 map[string]openhue.LightLevelGet
 	DevicePowers                map[string]openhue.DevicePowerGet
 	EntertainmentConfigurations map[string]EntertainmentConfiguration
-	WifiConnectivity   []WifiConnectivity            // WiFi status (Bridge Pro only)
-	ZigbeeConnectivity map[string]ZigbeeConnectivity // Zigbee connectivity per device
+	WifiConnectivity            []WifiConnectivity            // WiFi status (Bridge Pro only)
+	ZigbeeConnectivity          map[string]ZigbeeConnectivity // Zigbee connectivity per device
 
 	// Bridge-specific resources
 	BridgeResource *openhue.BridgeGet     // The bridge resource itself
@@ -141,12 +141,12 @@ func (s *BridgeState) RoomLights(room openhue.RoomGet) []openhue.LightGet {
 			}
 		}
 	}
-	
+
 	// Sort by name for stable ordering (using device name, not deprecated light metadata)
 	sort.Slice(lights, func(i, j int) bool {
 		return s.GetLightName(lights[i]) < s.GetLightName(lights[j])
 	})
-	
+
 	return lights
 }
 
@@ -171,7 +171,7 @@ func (s *BridgeState) RoomScenes(roomID string) []openhue.SceneGet {
 			scenes = append(scenes, scene)
 		}
 	}
-	
+
 	// Sort by name for stable ordering
 	sort.Slice(scenes, func(i, j int) bool {
 		nameI := ""
@@ -184,7 +184,7 @@ func (s *BridgeState) RoomScenes(roomID string) []openhue.SceneGet {
 		}
 		return nameI < nameJ
 	})
-	
+
 	return scenes
 }
 
@@ -221,7 +221,7 @@ func (s *BridgeState) AllRooms() []openhue.RoomGet {
 	for _, r := range s.Rooms {
 		rooms = append(rooms, r)
 	}
-	
+
 	// Sort by name for stable ordering
 	sort.Slice(rooms, func(i, j int) bool {
 		nameI := ""
@@ -234,7 +234,7 @@ func (s *BridgeState) AllRooms() []openhue.RoomGet {
 		}
 		return nameI < nameJ
 	})
-	
+
 	return rooms
 }
 
@@ -247,7 +247,7 @@ func (s *BridgeState) AllZones() []openhue.RoomGet {
 	for _, z := range s.Zones {
 		zones = append(zones, z)
 	}
-	
+
 	// Sort by name for stable ordering
 	sort.Slice(zones, func(i, j int) bool {
 		nameI := ""
@@ -260,7 +260,7 @@ func (s *BridgeState) AllZones() []openhue.RoomGet {
 		}
 		return nameI < nameJ
 	})
-	
+
 	return zones
 }
 
@@ -273,12 +273,12 @@ func (s *BridgeState) AllLights() []openhue.LightGet {
 	for _, l := range s.Lights {
 		lights = append(lights, l)
 	}
-	
+
 	// Sort by name for stable ordering (using device name, not deprecated light metadata)
 	sort.Slice(lights, func(i, j int) bool {
 		return s.GetLightName(lights[i]) < s.GetLightName(lights[j])
 	})
-	
+
 	return lights
 }
 
@@ -291,7 +291,7 @@ func (s *BridgeState) AllScenes() []openhue.SceneGet {
 	for _, sc := range s.Scenes {
 		scenes = append(scenes, sc)
 	}
-	
+
 	// Sort by name for stable ordering
 	sort.Slice(scenes, func(i, j int) bool {
 		nameI := ""
@@ -304,7 +304,7 @@ func (s *BridgeState) AllScenes() []openhue.SceneGet {
 		}
 		return nameI < nameJ
 	})
-	
+
 	return scenes
 }
 
@@ -876,6 +876,7 @@ func (s *BridgeState) SetGroupedLightOn(id string, on bool) {
 		s.GroupedLights[id] = gl
 	}
 }
+
 // ApplyLightUpdate applies a partial update from an SSE event to a light.
 // Returns true if the light was found and updated.
 func (s *BridgeState) ApplyLightUpdate(id string, on *bool, brightness *float64) bool {
@@ -887,26 +888,20 @@ func (s *BridgeState) ApplyLightUpdate(id string, on *bool, brightness *float64)
 		return false
 	}
 
-	updated := false
-
 	if on != nil {
 		if light.On == nil {
 			light.On = &openhue.On{}
 		}
 		light.On.On = on
-		updated = true
 	}
 
 	if brightness != nil && light.Dimming != nil {
 		b := openhue.Brightness(*brightness)
 		light.Dimming.Brightness = &b
-		updated = true
 	}
 
-	if updated {
-		s.Lights[id] = light
-	}
-	return updated
+	s.Lights[id] = light
+	return true
 }
 
 // ApplyGroupedLightUpdate applies a partial update from an SSE event to a grouped light.
@@ -919,48 +914,20 @@ func (s *BridgeState) ApplyGroupedLightUpdate(id string, on *bool, brightness *f
 		return false
 	}
 
-	updated := false
-
 	if on != nil {
 		if gl.On == nil {
 			gl.On = &openhue.On{}
 		}
 		gl.On.On = on
-		updated = true
 	}
 
 	if brightness != nil && gl.Dimming != nil {
 		b := openhue.Brightness(*brightness)
 		gl.Dimming.Brightness = &b
-		updated = true
 	}
 
-	if updated {
-		s.GroupedLights[id] = gl
-		return true
-	}
-
-	return false
-}
-
-// ApplySceneStatus applies a status update from an SSE event to a scene.
-func (s *BridgeState) ApplySceneStatus(id string, status string) bool {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	scene, ok := s.Scenes[id]
-	if !ok {
-		return false
-	}
-
-	if scene.Status != nil {
-		active := openhue.SceneGetStatusActive(status)
-		scene.Status.Active = &active
-		s.Scenes[id] = scene
-		return true
-	}
-
-	return false
+	s.GroupedLights[id] = gl
+	return true
 }
 
 // ApplyMotionUpdate applies a partial update from an SSE event to a motion sensor.
@@ -973,15 +940,35 @@ func (s *BridgeState) ApplyMotionUpdate(id string, motion bool) bool {
 		return false
 	}
 
-	// Update both Motion.Motion and Motion.MotionReport.Motion
-	// since GetDeviceMotionState checks MotionReport first
+	// Only update if the Motion struct exists
 	if m.Motion != nil {
 		m.Motion.Motion = &motion
+		// Also update MotionReport if it exists (keeps both in sync)
 		if m.Motion.MotionReport != nil {
 			m.Motion.MotionReport.Motion = &motion
 		}
 	}
 
 	s.MotionSensors[id] = m
+	return true
+}
+
+// ApplySceneStatus applies a status update from an SSE event to a scene.
+func (s *BridgeState) ApplySceneStatus(id string, status string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	scene, ok := s.Scenes[id]
+	if !ok {
+		return false
+	}
+
+	// Only update if the Status struct exists
+	if scene.Status != nil {
+		active := openhue.SceneGetStatusActive(status)
+		scene.Status.Active = &active
+	}
+
+	s.Scenes[id] = scene
 	return true
 }

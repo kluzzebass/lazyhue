@@ -284,7 +284,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.setStatus("Sync error: "+msg.Err.Error(), true)
 
 	case LightsSyncedMsg:
-		m.bridgePanel().SetPolling(false)
+		m.bridgePanel().SetPolling("", false)
 		// Refresh hierarchy if this is the active bridge or if BridgeID is empty (batch sync)
 		if msg.BridgeID == "" || msg.BridgeID == m.manager.GetActiveBridgeID() {
 			m.refreshHierarchyPanel()
@@ -293,8 +293,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case BridgeEventMsg:
 		// SSE event received - state was already updated in-memory by the bridge
-		// Just flash the indicator and refresh the UI
-		m.bridgePanel().SetPolling(true)
+		// Just flash the indicator for THIS bridge and refresh the UI
+		m.bridgePanel().SetPolling(msg.BridgeID, true)
 		cmds = append(cmds, tea.Tick(300*time.Millisecond, func(t time.Time) tea.Msg {
 			return indicatorRefreshMsg{}
 		}))
@@ -309,7 +309,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case SyncTickMsg:
 		connectedBridges := m.manager.ConnectedBridges()
 		if len(connectedBridges) > 0 {
-			m.bridgePanel().SetPolling(true)
+			m.bridgePanel().SetPolling("", true) // Flash all connected bridges
 			cmds = append(cmds, syncAllConnectedBridges(connectedBridges))
 			cmds = append(cmds, tea.Tick(300*time.Millisecond, func(t time.Time) tea.Msg {
 				return indicatorRefreshMsg{}
