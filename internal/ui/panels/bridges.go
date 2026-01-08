@@ -244,9 +244,9 @@ func (p *BridgePanel) View(active bool) string {
 	// Discovery indicator (always visible)
 	var discoverIndicator string
 	if p.isDiscoveringVisible() {
-		discoverIndicator = "●" // Active scanning
+		discoverIndicator = IndicatorOn // Active scanning
 	} else {
-		discoverIndicator = "○" // Idle
+		discoverIndicator = IndicatorOff // Idle
 	}
 
 	cfg := ui.BorderConfig{
@@ -271,27 +271,28 @@ func (p *BridgePanel) renderBridge(bridge *hue.Bridge, selected, active bool, wi
 
 	switch bridge.Status {
 	case hue.StatusConnected:
-		indicator = "●"
+		// Show hollow circle when polling, filled when idle
 		if p.isPollingVisible() {
-			indicatorColor = lipgloss.Color("#00ff00") // Green when polling
+			indicator = IndicatorOff
 		} else {
-			indicatorColor = lipgloss.Color("#ffffff") // White when idle
+			indicator = IndicatorOn
 		}
+		indicatorColor = p.styles.Theme.Foreground
 	case hue.StatusConnecting:
-		indicator = "○"
-		indicatorColor = lipgloss.Color("#ffff00") // Yellow
+		indicator = IndicatorOff
+		indicatorColor = p.styles.Theme.Warning
 	case hue.StatusPairing:
-		indicator = "◐"
-		indicatorColor = lipgloss.Color("#ffff00") // Yellow
+		indicator = "◐" // Half-filled for pairing in progress
+		indicatorColor = p.styles.Theme.Warning
 	case hue.StatusDisconnected:
-		indicator = "○"
-		indicatorColor = lipgloss.Color("#888888") // Gray
+		indicator = IndicatorOff
+		indicatorColor = p.styles.Theme.Muted
 	case hue.StatusError:
-		indicator = "✕"
-		indicatorColor = lipgloss.Color("#ff0000") // Red
+		indicator = "✕" // X for error
+		indicatorColor = p.styles.Theme.Error
 	default:
 		indicator = "?"
-		indicatorColor = lipgloss.Color("#888888")
+		indicatorColor = p.styles.Theme.Muted
 	}
 
 	// Use the bridge name, falling back to IP if empty
@@ -300,8 +301,14 @@ func (p *BridgePanel) renderBridge(bridge *hue.Bridge, selected, active bool, wi
 		name = bridge.Info.IPAddress
 	}
 
+	// Add check mark for active bridge
+	activeMarker := ""
+	if bridge.Info.ID == p.activeBridge {
+		activeMarker = " ✓"
+	}
+
 	// Calculate padding for full-width background
-	plainLine := indicator + " " + name
+	plainLine := indicator + " " + name + activeMarker
 	visibleWidth := lipgloss.Width(plainLine)
 	padding := ""
 	if visibleWidth < width {
@@ -323,7 +330,7 @@ func (p *BridgePanel) renderBridge(bridge *hue.Bridge, selected, active bool, wi
 	}
 
 	coloredIndicator := indicatorStyle.Render(indicator)
-	styledRest := style.Render(" " + name + padding)
+	styledRest := style.Render(" " + name + activeMarker + padding)
 
 	return coloredIndicator + styledRest
 }

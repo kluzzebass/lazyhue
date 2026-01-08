@@ -143,6 +143,9 @@ func (b *Bridge) SyncAll(ctx context.Context) error {
 	_ = b.SyncLightLevels(ctx)
 	_ = b.SyncDevicePowers(ctx)
 
+	// Entertainment configurations (non-fatal)
+	_ = b.SyncEntertainmentConfigurations(ctx)
+
 	// Bridge resource, home, and auth apps (non-fatal)
 	_ = b.SyncBridgeResource(ctx)
 	_ = b.SyncBridgeHome(ctx)
@@ -400,6 +403,25 @@ func (b *Bridge) SyncAuthApps(ctx context.Context) error {
 	}
 
 	b.state.UpdateAuthApps(apps)
+	return nil
+}
+
+// SyncEntertainmentConfigurations fetches entertainment configuration data.
+func (b *Bridge) SyncEntertainmentConfigurations(ctx context.Context) error {
+	b.mu.RLock()
+	extended := b.extended
+	b.mu.RUnlock()
+
+	if extended == nil {
+		return ErrAuthFailed
+	}
+
+	configs, err := extended.GetEntertainmentConfigurations(ctx)
+	if err != nil {
+		return err
+	}
+
+	b.state.UpdateEntertainmentConfigurations(configs)
 	return nil
 }
 

@@ -52,6 +52,11 @@ func (m Model) View() string {
 		result = m.overlayPairing(result)
 	}
 
+	// Overlay popup panel if visible (highest priority)
+	if m.popupPanel.IsVisible() {
+		result = m.overlayPopup(result)
+	}
+
 	return result
 }
 
@@ -264,6 +269,74 @@ func ansiSubstring(s string, n int) string {
 
 func isAnsiTerminator(r rune) bool {
 	return (r >= 'A' && r <= 'Z') || (r >= 'a' && r <= 'z')
+}
+
+// overlayPopup composites popup panel on top of base UI.
+func (m *Model) overlayPopup(base string) string {
+	popupView := m.popupPanel.View()
+	popupWidth := m.popupPanel.Width()
+	popupHeight := m.popupPanel.Height()
+
+	// Calculate centered position
+	startX := (m.width - popupWidth) / 2
+	startY := (m.height - popupHeight) / 2
+	if startX < 0 {
+		startX = 0
+	}
+	if startY < 0 {
+		startY = 0
+	}
+
+	baseLines := strings.Split(base, "\n")
+	popupLines := strings.Split(popupView, "\n")
+
+	// Ensure we have enough base lines
+	for len(baseLines) < m.height {
+		baseLines = append(baseLines, "")
+	}
+
+	// Overlay each popup line onto the corresponding base line
+	for i, popupLine := range popupLines {
+		baseY := startY + i
+		if baseY >= len(baseLines) {
+			break
+		}
+
+		baseLine := baseLines[baseY]
+		baseVisualWidth := lipgloss.Width(baseLine)
+
+		var result strings.Builder
+
+		// Left portion
+		if startX > 0 {
+			if baseVisualWidth > 0 {
+				left := ansiTruncate(baseLine, startX)
+				result.WriteString(left)
+				leftWidth := lipgloss.Width(left)
+				for j := leftWidth; j < startX; j++ {
+					result.WriteByte(' ')
+				}
+			} else {
+				for j := 0; j < startX; j++ {
+					result.WriteByte(' ')
+				}
+			}
+		}
+
+		// Popup line
+		result.WriteString(popupLine)
+
+		// Right portion
+		popupEnd := startX + lipgloss.Width(popupLine)
+		if popupEnd < baseVisualWidth {
+			right := ansiSubstring(baseLine, popupEnd)
+			result.WriteString(right)
+		}
+
+		baseLines[baseY] = result.String()
+	}
+
+	return strings.Join(baseLines, "\n")
 }
 
 

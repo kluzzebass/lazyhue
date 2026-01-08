@@ -69,6 +69,7 @@ type Styles struct {
 	Muted    lipgloss.Style
 	Error    lipgloss.Style
 	Success  lipgloss.Style
+	Warning  lipgloss.Style
 	KeyHelp  lipgloss.Style
 }
 
@@ -154,6 +155,9 @@ func DefaultStyles() Styles {
 
 		Success: lipgloss.NewStyle().
 			Foreground(theme.Success),
+
+		Warning: lipgloss.NewStyle().
+			Foreground(theme.Warning),
 
 		KeyHelp: lipgloss.NewStyle().
 			Foreground(theme.Muted),

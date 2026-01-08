@@ -308,11 +308,8 @@ func (p *TabbedPanel) renderItem(item list.Item, selected, active bool, width in
 		return ""
 	}
 
-	// Status indicator
-	indicator := "○"
-	if ei.IsOn {
-		indicator = "●"
-	}
+	// Use centralized indicator rendering
+	indicator := RenderEntityIndicator(ei, p.styles, selected && active)
 
 	name := ei.Name
 	line := indicator + " " + name

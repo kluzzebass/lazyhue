@@ -203,9 +203,9 @@ type AuthV1Entry struct {
 
 // whitelistEntry represents a single entry in the V1 config whitelist.
 type whitelistEntry struct {
-	Name           string `json:"name"`
-	CreateDate     string `json:"create date"`
-	LastUseDate    string `json:"last use date"`
+	Name        string `json:"name"`
+	CreateDate  string `json:"create date"`
+	LastUseDate string `json:"last use date"`
 }
 
 // v1ConfigResponse is the relevant part of the V1 /config response.
@@ -256,6 +256,108 @@ func (c *ExtendedClient) GetAuthenticatedApps(ctx context.Context) ([]AuthV1Entr
 	return apps, nil
 }
 
-// Note: Entertainment configurations are not yet supported by openhue-go v0.4.0.
-// The API endpoints exist but the types are not implemented.
+// EntertainmentConfiguration represents an entertainment area configuration.
+type EntertainmentConfiguration struct {
+	ID             string                    `json:"id"`
+	Type           string                    `json:"type"`
+	Metadata       *EntertainmentMetadata    `json:"metadata,omitempty"`
+	Name           string                    `json:"name,omitempty"` // Some API versions use this
+	Status         string                    `json:"status,omitempty"` // inactive, active, streaming
+	ConfigurationType string                 `json:"configuration_type,omitempty"` // screen, monitor, music, 3dspace, other
+	Channels       []EntertainmentChannel    `json:"channels,omitempty"`
+	Lights         []EntertainmentLightEntry `json:"light_services,omitempty"`
+	Locations      *EntertainmentLocations   `json:"locations,omitempty"`
+	StreamProxy    *StreamProxy              `json:"stream_proxy,omitempty"`
+	ActiveStreamer *ResourceIdentifier       `json:"active_streamer,omitempty"`
+}
 
+// EntertainmentMetadata holds metadata for an entertainment configuration.
+type EntertainmentMetadata struct {
+	Name string `json:"name"`
+}
+
+// EntertainmentLocations contains service locations for entertainment.
+type EntertainmentLocations struct {
+	ServiceLocations []ServiceLocation `json:"service_locations,omitempty"`
+}
+
+// ServiceLocation represents a light's position in the entertainment area.
+type ServiceLocation struct {
+	Service  *ResourceIdentifier      `json:"service,omitempty"`
+	Position *EntertainmentPosition   `json:"position,omitempty"`
+	Positions []EntertainmentPosition `json:"positions,omitempty"` // Some lights have multiple positions
+}
+
+// ResourceIdentifier is a reference to a resource.
+type ResourceIdentifier struct {
+	RID   string `json:"rid"`
+	RType string `json:"rtype"`
+}
+
+// StreamProxy contains streaming proxy information.
+type StreamProxy struct {
+	Mode string              `json:"mode,omitempty"` // auto, manual
+	Node *ResourceIdentifier `json:"node,omitempty"`
+}
+
+// EntertainmentChannel represents a channel in an entertainment configuration.
+type EntertainmentChannel struct {
+	ChannelID uint8                     `json:"channel_id"`
+	Position  *EntertainmentPosition    `json:"position,omitempty"`
+	Members   []EntertainmentLightEntry `json:"members,omitempty"`
+}
+
+// EntertainmentPosition represents a 3D position.
+type EntertainmentPosition struct {
+	X float64 `json:"x"`
+	Y float64 `json:"y"`
+	Z float64 `json:"z"`
+}
+
+// EntertainmentLightEntry represents a light in an entertainment configuration.
+type EntertainmentLightEntry struct {
+	Service *struct {
+		RID   string `json:"rid"`
+		RType string `json:"rtype"`
+	} `json:"service,omitempty"`
+}
+
+// GetEntertainmentConfigurations fetches all entertainment configurations.
+func (c *ExtendedClient) GetEntertainmentConfigurations(ctx context.Context) (map[string]EntertainmentConfiguration, error) {
+	url := fmt.Sprintf("https://%s/clip/v2/resource/entertainment_configuration", c.bridgeIP)
+	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("hue-application-key", c.apiKey)
+
+	client := &http.Client{
+		Transport: &http.Transport{
+			TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+		},
+	}
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+
+	var result struct {
+		Data []EntertainmentConfiguration `json:"data"`
+	}
+	if err := json.Unmarshal(body, &result); err != nil {
+		return nil, err
+	}
+
+	configs := make(map[string]EntertainmentConfiguration)
+	for _, cfg := range result.Data {
+		configs[cfg.ID] = cfg
+	}
+	return configs, nil
+}

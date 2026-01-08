@@ -13,8 +13,8 @@ func (m *Model) bridgePanel() *panels.BridgePanel {
 	return m.panelMap[PanelIDBridges].(*panels.BridgePanel)
 }
 
-func (m *Model) hierarchyPanel() *panels.TreePanel {
-	return m.panelMap[PanelIDHierarchy].(*panels.TreePanel)
+func (m *Model) hierarchyPanel() *panels.HomeTabbedPanel {
+	return m.panelMap[PanelIDHierarchy].(*panels.HomeTabbedPanel)
 }
 
 func (m *Model) focusedOnDetail() bool {
@@ -60,6 +60,9 @@ func (m *Model) updateLayout() {
 
 	// Size pairing panel
 	m.pairingPanel.SetSize(m.width, m.height)
+
+	// Size popup panel
+	m.popupPanel.SetSize(m.width, m.height)
 }
 
 func (m *Model) refreshAllPanels() {
@@ -70,7 +73,8 @@ func (m *Model) refreshAllPanels() {
 func (m *Model) refreshHierarchyPanel() {
 	bridge := m.manager.GetActiveBridge()
 	if bridge == nil {
-		m.hierarchyPanel().SetRoots(nil)
+		m.hierarchyPanel().Clear()
+		m.displayedBridgeID = ""
 		return
 	}
 
@@ -79,14 +83,20 @@ func (m *Model) refreshHierarchyPanel() {
 		return
 	}
 
-	// Don't set empty tree - this would clear the expanded state
-	// Wait until we actually have data
+	// Update Home tab (tree)
 	tree := panels.BuildHierarchyTree(state)
-	if len(tree) == 0 {
-		return
-	}
-
 	m.hierarchyPanel().SetRoots(tree)
+
+	// Update Lights tab (flat list)
+	m.hierarchyPanel().SetLights(panels.BuildLightItems(state))
+
+	// Update Devices tab (flat list)
+	m.hierarchyPanel().SetDevices(panels.BuildDeviceItems(state))
+
+	// Update Scenes tab (flat list)
+	m.hierarchyPanel().SetScenes(panels.BuildSceneItems(state))
+
+	m.displayedBridgeID = bridge.Info.ID
 }
 
 func (m *Model) updateBridgePanel() {
@@ -157,13 +167,15 @@ func (m *Model) syncSelectionFromFocusedPanel() {
 
 				// Set as active and show its hierarchy
 				m.manager.SetActiveBridge(bridge.Info.ID)
+				m.updateBridgePanel() // Update checkmark indicator immediately
 				m.refreshHierarchyPanel()
+				m.updateDetailPanel() // Refresh details with new bridge's data
 
 				// Restore new bridge's expanded state
 				m.restoreExpandedState(bridge.Info.ID)
 			} else {
 				// Clear hierarchy for disconnected bridges
-				m.hierarchyPanel().SetRoots(nil)
+				m.hierarchyPanel().Clear()
 			}
 		}
 	}

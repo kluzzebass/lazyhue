@@ -78,14 +78,20 @@ func syncAllConnectedBridges(bridges []*hue.Bridge) tea.Cmd {
 			wg.Add(1)
 			go func(b *hue.Bridge) {
 				defer wg.Done()
-				// Sync lights and grouped lights
+				// Sync all entity types
 				_ = b.SyncLights(ctx)
+				_ = b.SyncRooms(ctx)
+				_ = b.SyncZones(ctx)
 				_ = b.SyncGroupedLights(ctx)
+				_ = b.SyncScenes(ctx)
+				_ = b.SyncDevices(ctx)
 				// Sync sensor services (non-fatal)
 				_ = b.SyncMotionSensors(ctx)
 				_ = b.SyncTemperatures(ctx)
 				_ = b.SyncLightLevels(ctx)
 				_ = b.SyncDevicePowers(ctx)
+				// Entertainment configurations
+				_ = b.SyncEntertainmentConfigurations(ctx)
 			}(bridge)
 		}
 

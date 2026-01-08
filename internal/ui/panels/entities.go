@@ -26,7 +26,28 @@ const (
 	EntityDevice
 	EntityEntertainment
 	EntityBridge
+	EntityLightsCategory   // Aggregate for "Lights" folder
+	EntityDevicesCategory  // Aggregate for "Devices" folder
+	EntityScenesCategory   // Aggregate for "Scenes" folder
 )
+
+// LightsCategoryData holds aggregate data for a lights category folder.
+type LightsCategoryData struct {
+	ParentName string
+	Lights     []openhue.LightGet
+}
+
+// DevicesCategoryData holds aggregate data for a devices category folder.
+type DevicesCategoryData struct {
+	ParentName string
+	Devices    []openhue.DeviceGet
+}
+
+// ScenesCategoryData holds aggregate data for a scenes category folder.
+type ScenesCategoryData struct {
+	ParentName string
+	Scenes     []openhue.SceneGet
+}
 
 // EntityItem wraps an entity for the list component.
 type EntityItem struct {
@@ -34,8 +55,9 @@ type EntityItem struct {
 	Name           string
 	Type           EntityType
 	IsOn           bool
-	RawPtr         any    // The underlying openhue type for access to full data
-	IndicatorColor string // Hex color for the indicator (e.g., "#ff0000"), empty for default
+	RawPtr         any     // The underlying openhue type for access to full data
+	IndicatorColor string  // Hex color for the indicator (e.g., "#ff0000"), empty for default
+	Brightness     float64 // Brightness level 0-100 for brightness indicator (lights, scenes)
 }
 
 func (i EntityItem) FilterValue() string { return i.Name }
@@ -207,12 +229,25 @@ func BuildLightItems(state *hue.BridgeState) []list.Item {
 			name = *light.Metadata.Name
 		}
 
+		// Get brightness and color for indicator
+		var brightness float64
+		var indicatorColor string
+		if light.IsOn() {
+			brightness = 100.0
+			if light.Dimming != nil && light.Dimming.Brightness != nil {
+				brightness = float64(*light.Dimming.Brightness)
+			}
+			indicatorColor = string(getLightColor(light))
+		}
+
 		items = append(items, EntityItem{
-			ID:     id,
-			Name:   name,
-			Type:   EntityLight,
-			IsOn:   light.IsOn(),
-			RawPtr: light,
+			ID:             id,
+			Name:           name,
+			Type:           EntityLight,
+			IsOn:           light.IsOn(),
+			RawPtr:         light,
+			IndicatorColor: indicatorColor,
+			Brightness:     brightness,
 		})
 	}
 
@@ -254,12 +289,64 @@ func BuildSceneItems(state *hue.BridgeState) []list.Item {
 		if scene.Id != nil {
 			id = *scene.Id
 		}
+
+		// Check if scene is active
+		isActive := false
+		if scene.Status != nil && scene.Status.Active != nil {
+			isActive = *scene.Status.Active != openhue.SceneGetStatusActiveInactive
+		}
+
+		// Calculate indicator color and brightness for active scenes (same logic as buildSceneNode)
+		var indicatorColor string
+		var brightness float64
+		if isActive && scene.Group != nil && scene.Group.Rid != nil {
+			var lights []openhue.LightGet
+			if room, ok := state.GetRoom(*scene.Group.Rid); ok {
+				lights = state.RoomLights(room)
+			} else if zone, ok := state.GetZone(*scene.Group.Rid); ok {
+				lights = state.RoomLights(zone)
+			}
+
+			var totalBrightness, totalR, totalG, totalB float64
+			var onCount int
+			for _, light := range lights {
+				if light.IsOn() {
+					onCount++
+					if light.Dimming != nil && light.Dimming.Brightness != nil {
+						totalBrightness += float64(*light.Dimming.Brightness)
+					} else {
+						totalBrightness += 100
+					}
+					color := getLightColor(light)
+					colorStr := string(color)
+					if len(colorStr) == 7 && colorStr[0] == '#' {
+						var r, g, b int
+						fmt.Sscanf(colorStr, "#%02x%02x%02x", &r, &g, &b)
+						totalR += float64(r)
+						totalG += float64(g)
+						totalB += float64(b)
+					}
+				}
+			}
+			if onCount > 0 {
+				brightness = totalBrightness / float64(onCount)
+				avgR := int(totalR / float64(onCount))
+				avgG := int(totalG / float64(onCount))
+				avgB := int(totalB / float64(onCount))
+				indicatorColor = fmt.Sprintf("#%02x%02x%02x", avgR, avgG, avgB)
+			}
+		} else if isActive {
+			brightness = 100
+		}
+
 		items = append(items, EntityItem{
-			ID:     id,
-			Name:   name,
-			Type:   EntityScene,
-			IsOn:   false,
-			RawPtr: scene,
+			ID:             id,
+			Name:           name,
+			Type:           EntityScene,
+			IsOn:           isActive,
+			RawPtr:         scene,
+			IndicatorColor: indicatorColor,
+			Brightness:     brightness,
 		})
 	}
 	return items
@@ -468,10 +555,26 @@ func BuildDeviceItems(state *hue.BridgeState) []list.Item {
 	return items
 }
 
-// BuildEntertainmentItems returns an empty list (entertainment areas not yet supported by openhue-go Home).
+// BuildEntertainmentItems converts entertainment configurations to list items.
 func BuildEntertainmentItems(state *hue.BridgeState) []list.Item {
-	// Entertainment areas are not yet exposed via openhue-go Home interface
-	return nil
+	configs := state.AllEntertainmentConfigurations()
+	items := make([]list.Item, 0, len(configs))
+
+	for _, cfg := range configs {
+		name := cfg.ID
+		if cfg.Metadata != nil && cfg.Metadata.Name != "" {
+			name = cfg.Metadata.Name
+		}
+
+		items = append(items, EntityItem{
+			ID:     cfg.ID,
+			Name:   name,
+			Type:   EntityEntertainment,
+			IsOn:   cfg.Status == "streaming",
+			RawPtr: cfg,
+		})
+	}
+	return items
 }
 
 // GetRoomFromItem extracts the openhue.RoomGet from an EntityItem.
@@ -524,6 +627,15 @@ func GetBridgeFromItem(item EntityItem) (BridgeData, bool) {
 	}
 	data, ok := item.RawPtr.(BridgeData)
 	return data, ok
+}
+
+// GetEntertainmentFromItem extracts the EntertainmentConfiguration from an EntityItem.
+func GetEntertainmentFromItem(item EntityItem) (hue.EntertainmentConfiguration, bool) {
+	if item.Type != EntityEntertainment {
+		return hue.EntertainmentConfiguration{}, false
+	}
+	cfg, ok := item.RawPtr.(hue.EntertainmentConfiguration)
+	return cfg, ok
 }
 
 // BuildHierarchyTree creates a unified tree with rooms/zones as top-level,
@@ -592,9 +704,10 @@ func BuildHierarchyTree(state *hue.BridgeState) []*TreeNode {
 		groupNode := &TreeNode{
 			Label: label,
 			Item: &EntityItem{
-				ID:   groupID,
-				Name: groupName,
-				Type: entityType,
+				ID:     groupID,
+				Name:   groupName,
+				Type:   entityType,
+				RawPtr: group, // Store the actual RoomGet for details panel
 			},
 			Expanded: false, // Start collapsed
 		}
@@ -634,14 +747,23 @@ func BuildHierarchyTree(state *hue.BridgeState) []*TreeNode {
 			}
 		}
 
-		// Sort lights by name
+		// Sort lights by name (from owning device, not deprecated light metadata)
 		sort.Slice(groupLights, func(i, j int) bool {
 			nameI, nameJ := "", ""
-			if groupLights[i].Metadata != nil && groupLights[i].Metadata.Name != nil {
-				nameI = *groupLights[i].Metadata.Name
+			// Get name from owning device
+			if groupLights[i].Owner != nil && groupLights[i].Owner.Rid != nil {
+				if device, ok := deviceMap[*groupLights[i].Owner.Rid]; ok {
+					if device.Metadata != nil && device.Metadata.Name != nil {
+						nameI = *device.Metadata.Name
+					}
+				}
 			}
-			if groupLights[j].Metadata != nil && groupLights[j].Metadata.Name != nil {
-				nameJ = *groupLights[j].Metadata.Name
+			if groupLights[j].Owner != nil && groupLights[j].Owner.Rid != nil {
+				if device, ok := deviceMap[*groupLights[j].Owner.Rid]; ok {
+					if device.Metadata != nil && device.Metadata.Name != nil {
+						nameJ = *device.Metadata.Name
+					}
+				}
 			}
 			return nameI < nameJ
 		})
@@ -665,6 +787,11 @@ func BuildHierarchyTree(state *hue.BridgeState) []*TreeNode {
 				Item: &EntityItem{
 					ID:   groupID + ":lights",
 					Name: "Lights",
+					Type: EntityLightsCategory,
+					RawPtr: LightsCategoryData{
+						ParentName: groupName,
+						Lights:     groupLights,
+					},
 				},
 				Expanded: false, // Start collapsed
 			}
@@ -681,6 +808,11 @@ func BuildHierarchyTree(state *hue.BridgeState) []*TreeNode {
 				Item: &EntityItem{
 					ID:   groupID + ":devices",
 					Name: "Devices",
+					Type: EntityDevicesCategory,
+					RawPtr: DevicesCategoryData{
+						ParentName: groupName,
+						Devices:    groupDevices,
+					},
 				},
 				Expanded: false, // Start collapsed
 			}
@@ -710,11 +842,16 @@ func BuildHierarchyTree(state *hue.BridgeState) []*TreeNode {
 				Item: &EntityItem{
 					ID:   groupID + ":scenes",
 					Name: "Scenes",
+					Type: EntityScenesCategory,
+					RawPtr: ScenesCategoryData{
+						ParentName: groupName,
+						Scenes:     scenes,
+					},
 				},
 				Expanded: false, // Start collapsed
 			}
 			for _, scene := range scenes {
-				scenesNode.Children = append(scenesNode.Children, buildSceneNode(scene))
+				scenesNode.Children = append(scenesNode.Children, buildSceneNode(scene, state))
 			}
 			groupNode.Children = append(groupNode.Children, scenesNode)
 		}
@@ -730,6 +867,38 @@ func BuildHierarchyTree(state *hue.BridgeState) []*TreeNode {
 	// Add zones
 	for _, zone := range zones {
 		roots = append(roots, buildGroupNode(zone, true))
+	}
+
+	// Add entertainment areas
+	entertainmentConfigs := state.AllEntertainmentConfigurations()
+	for _, cfg := range entertainmentConfigs {
+		name := cfg.ID
+		if cfg.Metadata != nil && cfg.Metadata.Name != "" {
+			name = cfg.Metadata.Name
+		}
+
+		entNode := &TreeNode{
+			Label: name + " (entertainment)",
+			Item: &EntityItem{
+				ID:     cfg.ID,
+				Name:   name,
+				Type:   EntityEntertainment,
+				IsOn:   cfg.Status == "streaming",
+				RawPtr: cfg,
+			},
+			Expanded: false,
+		}
+
+		// Add lights in this entertainment area as children
+		for _, lightEntry := range cfg.Lights {
+			if lightEntry.Service != nil && lightEntry.Service.RID != "" {
+				if light, ok := state.GetLight(lightEntry.Service.RID); ok {
+					entNode.Children = append(entNode.Children, buildLightNode(light, state))
+				}
+			}
+		}
+
+		roots = append(roots, entNode)
 	}
 
 	// Build ungrouped section
@@ -795,14 +964,22 @@ func BuildHierarchyTree(state *hue.BridgeState) []*TreeNode {
 		}
 
 		if len(ungroupedLights) > 0 {
-			// Sort by name
+			// Sort by name (from owning device, not deprecated light metadata)
 			sort.Slice(ungroupedLights, func(i, j int) bool {
 				nameI, nameJ := "", ""
-				if ungroupedLights[i].Metadata != nil && ungroupedLights[i].Metadata.Name != nil {
-					nameI = *ungroupedLights[i].Metadata.Name
+				if ungroupedLights[i].Owner != nil && ungroupedLights[i].Owner.Rid != nil {
+					if device, ok := deviceMap[*ungroupedLights[i].Owner.Rid]; ok {
+						if device.Metadata != nil && device.Metadata.Name != nil {
+							nameI = *device.Metadata.Name
+						}
+					}
 				}
-				if ungroupedLights[j].Metadata != nil && ungroupedLights[j].Metadata.Name != nil {
-					nameJ = *ungroupedLights[j].Metadata.Name
+				if ungroupedLights[j].Owner != nil && ungroupedLights[j].Owner.Rid != nil {
+					if device, ok := deviceMap[*ungroupedLights[j].Owner.Rid]; ok {
+						if device.Metadata != nil && device.Metadata.Name != nil {
+							nameJ = *device.Metadata.Name
+						}
+					}
 				}
 				return nameI < nameJ
 			})
@@ -812,6 +989,11 @@ func BuildHierarchyTree(state *hue.BridgeState) []*TreeNode {
 				Item: &EntityItem{
 					ID:   "_ungrouped:lights",
 					Name: "Lights",
+					Type: EntityLightsCategory,
+					RawPtr: LightsCategoryData{
+						ParentName: "Ungrouped",
+						Lights:     ungroupedLights,
+					},
 				},
 				Expanded: false, // Start collapsed
 			}
@@ -839,6 +1021,11 @@ func BuildHierarchyTree(state *hue.BridgeState) []*TreeNode {
 				Item: &EntityItem{
 					ID:   "_ungrouped:devices",
 					Name: "Devices",
+					Type: EntityDevicesCategory,
+					RawPtr: DevicesCategoryData{
+						ParentName: "Ungrouped",
+						Devices:    ungroupedDevices,
+					},
 				},
 				Expanded: false,
 			}
@@ -868,6 +1055,190 @@ func brightnessIndicator(brightness float64) string {
 		return "◕" // three-quarters
 	default:
 		return "●" // full
+	}
+}
+
+// RenderEntityIndicator renders the appropriate indicator for an entity.
+// This is the single source of truth for all entity indicators in the app.
+// Parameters:
+//   - item: the entity to render an indicator for
+//   - styles: UI styles for colors
+//   - selected: whether the item is currently selected (for background color)
+//
+// Returns the styled indicator string.
+func RenderEntityIndicator(item EntityItem, styles ui.Styles, selected bool) string {
+	switch item.Type {
+	case EntityLight:
+		return renderLightIndicator(item, styles, selected)
+	case EntityDevice:
+		// Devices with motion show on/off, others show neutral bullet
+		if item.IsOn {
+			return lipgloss.NewStyle().Foreground(styles.Theme.OnColor).Render(IndicatorOn)
+		}
+		// Check if it's a motion sensor
+		if device, ok := item.RawPtr.(openhue.DeviceGet); ok {
+			if device.Services != nil {
+				for _, svc := range *device.Services {
+					if svc.Rtype != nil && *svc.Rtype == "motion" {
+						return styles.Muted.Render(IndicatorOff) // Motion sensor, not detecting
+					}
+				}
+			}
+		}
+		return IndicatorNeutral // Non-motion device
+	case EntityScene:
+		if item.IsOn {
+			// Use colored brightness indicator if available (from scene's room average)
+			indicatorChar := brightnessIndicator(item.Brightness)
+			if item.IndicatorColor != "" {
+				indicatorStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(item.IndicatorColor))
+				if selected {
+					indicatorStyle = indicatorStyle.Background(styles.SelectedItem.GetBackground())
+				}
+				return indicatorStyle.Render(indicatorChar)
+			}
+			return lipgloss.NewStyle().Foreground(styles.Theme.OnColor).Render(indicatorChar)
+		}
+		return styles.Muted.Render(IndicatorOff)
+	case EntityRoom, EntityZone:
+		if item.IsOn {
+			return styles.OnIndicator.String()
+		}
+		return styles.OffIndicator.String()
+	case EntityEntertainment:
+		if item.IsOn {
+			return lipgloss.NewStyle().Foreground(styles.Theme.Success).Render(IndicatorOn)
+		}
+		return styles.Muted.Render(IndicatorOff)
+	default:
+		if item.IsOn {
+			return IndicatorOn
+		}
+		return styles.Muted.Render(IndicatorOff)
+	}
+}
+
+// renderLightIndicator renders a colored brightness indicator for a light.
+func renderLightIndicator(item EntityItem, styles ui.Styles, selected bool) string {
+	if !item.IsOn {
+		return styles.OffIndicator.String()
+	}
+
+	// Use brightness from EntityItem, fallback to RawPtr for backwards compatibility
+	brightness := item.Brightness
+	if brightness == 0 {
+		if light, ok := item.RawPtr.(openhue.LightGet); ok {
+			if light.Dimming != nil && light.Dimming.Brightness != nil {
+				brightness = float64(*light.Dimming.Brightness)
+			} else {
+				brightness = 100.0
+			}
+		} else {
+			brightness = 100.0
+		}
+	}
+
+	indicatorChar := brightnessIndicator(brightness)
+
+	// Apply color if available
+	if item.IndicatorColor != "" {
+		indicatorStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(item.IndicatorColor))
+		if selected {
+			indicatorStyle = indicatorStyle.Background(styles.SelectedItem.GetBackground())
+		}
+		return indicatorStyle.Render(indicatorChar)
+	}
+
+	// No color - use default on color
+	return lipgloss.NewStyle().Foreground(styles.Theme.OnColor).Render(indicatorChar)
+}
+
+// RenderLightIndicatorFromLight renders an indicator directly from an openhue.LightGet.
+// Used when we have the light object directly, not wrapped in an EntityItem.
+func RenderLightIndicatorFromLight(light openhue.LightGet, styles ui.Styles) string {
+	if !light.IsOn() {
+		return styles.OffIndicator.String()
+	}
+
+	// Get brightness
+	brightness := 100.0
+	if light.Dimming != nil && light.Dimming.Brightness != nil {
+		brightness = float64(*light.Dimming.Brightness)
+	}
+
+	color := getLightColor(light)
+	return RenderBrightnessIndicator(brightness, color)
+}
+
+// RenderBrightnessIndicator renders a brightness indicator character with the given color.
+// This is the most generic form, used when you have pre-calculated brightness and color.
+func RenderBrightnessIndicator(brightness float64, color lipgloss.Color) string {
+	indicatorChar := brightnessIndicator(brightness)
+	return lipgloss.NewStyle().Foreground(color).Render(indicatorChar)
+}
+
+// RenderOffIndicator renders a muted hollow circle indicator for off/inactive state.
+func RenderOffIndicator(styles ui.Styles) string {
+	return styles.OffIndicator.String()
+}
+
+// PlainIndicator returns a plain (unstyled) indicator character for on/off state.
+// Used for building tree node labels where coloring is handled separately.
+func PlainIndicator(isOn bool) string {
+	if isOn {
+		return IndicatorOn
+	}
+	return IndicatorOff
+}
+
+// Indicator character constants for consistency across the app.
+const (
+	IndicatorOn      = "●" // Filled circle - on/active state
+	IndicatorOff     = "○" // Hollow circle - off/inactive state
+	IndicatorNeutral = "•" // Bullet - neutral/no state (devices without sensors)
+)
+
+// PlainEntityIndicator returns the appropriate plain-text indicator for an entity.
+// Used for building tree node labels.
+func PlainEntityIndicator(item EntityItem) string {
+	switch item.Type {
+	case EntityLight:
+		if !item.IsOn {
+			return IndicatorOff
+		}
+		// For lights, get brightness from RawPtr
+		brightness := 100.0
+		if light, ok := item.RawPtr.(openhue.LightGet); ok {
+			if light.Dimming != nil && light.Dimming.Brightness != nil {
+				brightness = float64(*light.Dimming.Brightness)
+			}
+		}
+		return brightnessIndicator(brightness)
+	case EntityDevice:
+		// Devices show on/off for motion sensors, neutral for others
+		if item.IsOn {
+			return IndicatorOn
+		}
+		// Check if it's a motion sensor by looking at RawPtr
+		if device, ok := item.RawPtr.(openhue.DeviceGet); ok {
+			// If we have a device, check if it has motion capability
+			// Devices without motion sensing get neutral indicator
+			if device.Services != nil {
+				for _, svc := range *device.Services {
+					if svc.Rtype != nil && *svc.Rtype == "motion" {
+						return IndicatorOff // Motion sensor, not detecting
+					}
+				}
+			}
+			return IndicatorNeutral // Non-motion device
+		}
+		return IndicatorNeutral
+	case EntityScene:
+		return PlainIndicator(item.IsOn)
+	case EntityRoom, EntityZone, EntityEntertainment:
+		return PlainIndicator(item.IsOn)
+	default:
+		return PlainIndicator(item.IsOn)
 	}
 }
 
@@ -1012,22 +1383,20 @@ func buildLightNode(light openhue.LightGet, state *hue.BridgeState) *TreeNode {
 	}
 
 	// Build label with brightness indicator (plain text, color stored separately)
-	var label string
-	var brightness float64
 	var indicatorColor string
+	var indicator string
+	var brightness float64
 	if light.IsOn() {
+		brightness = 100.0
 		if light.Dimming != nil && light.Dimming.Brightness != nil {
 			brightness = float64(*light.Dimming.Brightness)
-		} else {
-			brightness = 100 // Assume full if no dimming info
 		}
-		indicator := brightnessIndicator(brightness)
-		// Store color separately for rendering
+		indicator = brightnessIndicator(brightness)
 		indicatorColor = string(getLightColor(light))
-		label = indicator + " " + name
 	} else {
-		label = "○ " + name
+		indicator = IndicatorOff
 	}
+	label := indicator + " " + name
 
 	return &TreeNode{
 		Label: label,
@@ -1038,6 +1407,7 @@ func buildLightNode(light openhue.LightGet, state *hue.BridgeState) *TreeNode {
 			IsOn:           light.IsOn(),
 			RawPtr:         light,
 			IndicatorColor: indicatorColor,
+			Brightness:     brightness,
 		},
 	}
 }
@@ -1057,18 +1427,19 @@ func buildDeviceNode(device openhue.DeviceGet, state *hue.BridgeState) *TreeNode
 	// Check if device has motion sensor and its state
 	hasMotion, isDetecting := state.GetDeviceMotionState(device)
 
-	var label string
+	var indicator string
 	isOn := false
 	if hasMotion {
 		if isDetecting {
-			label = "● " + name // Motion detected
+			indicator = IndicatorOn
 			isOn = true
 		} else {
-			label = "○ " + name // No motion
+			indicator = IndicatorOff
 		}
 	} else {
-		label = "◦ " + name // Non-motion device (neutral indicator)
+		indicator = IndicatorNeutral
 	}
+	label := indicator + " " + name
 
 	return &TreeNode{
 		Label: label,
@@ -1083,7 +1454,7 @@ func buildDeviceNode(device openhue.DeviceGet, state *hue.BridgeState) *TreeNode
 }
 
 // buildSceneNode creates a tree node for a scene.
-func buildSceneNode(scene openhue.SceneGet) *TreeNode {
+func buildSceneNode(scene openhue.SceneGet, state *hue.BridgeState) *TreeNode {
 	name := ""
 	if scene.Metadata != nil && scene.Metadata.Name != nil {
 		name = *scene.Metadata.Name
@@ -1101,20 +1472,74 @@ func buildSceneNode(scene openhue.SceneGet) *TreeNode {
 		isActive = *scene.Status.Active != openhue.SceneGetStatusActiveInactive
 	}
 
-	indicator := "○"
-	if isActive {
-		indicator = "●"
+	var indicator string
+	var indicatorColor string
+	var brightness float64
+
+	if isActive && state != nil && scene.Group != nil && scene.Group.Rid != nil {
+		// Calculate average color/brightness from the scene's room/zone lights
+		var lights []openhue.LightGet
+		if room, ok := state.GetRoom(*scene.Group.Rid); ok {
+			lights = state.RoomLights(room)
+		} else if zone, ok := state.GetZone(*scene.Group.Rid); ok {
+			lights = state.RoomLights(zone)
+		}
+
+		var totalBrightness float64
+		var totalR, totalG, totalB float64
+		var onCount int
+
+		for _, light := range lights {
+			if light.IsOn() {
+				onCount++
+				if light.Dimming != nil && light.Dimming.Brightness != nil {
+					totalBrightness += float64(*light.Dimming.Brightness)
+				} else {
+					totalBrightness += 100
+				}
+				color := getLightColor(light)
+				colorStr := string(color)
+				if len(colorStr) == 7 && colorStr[0] == '#' {
+					var r, g, b int
+					fmt.Sscanf(colorStr, "#%02x%02x%02x", &r, &g, &b)
+					totalR += float64(r)
+					totalG += float64(g)
+					totalB += float64(b)
+				}
+			}
+		}
+
+		if onCount > 0 {
+			brightness = totalBrightness / float64(onCount)
+			avgR := int(totalR / float64(onCount))
+			avgG := int(totalG / float64(onCount))
+			avgB := int(totalB / float64(onCount))
+			indicator = brightnessIndicator(brightness)
+			indicatorColor = fmt.Sprintf("#%02x%02x%02x", avgR, avgG, avgB)
+		} else {
+			indicator = IndicatorOn
+			brightness = 100
+		}
+	} else if isActive {
+		indicator = IndicatorOn
+		brightness = 100
+	} else {
+		indicator = IndicatorOff
+		brightness = 0
 	}
+
 	label := indicator + " " + name
 
 	return &TreeNode{
 		Label: label,
 		Item: &EntityItem{
-			ID:     id,
-			Name:   name,
-			Type:   EntityScene,
-			IsOn:   isActive,
-			RawPtr: scene,
+			ID:             id,
+			Name:           name,
+			Type:           EntityScene,
+			IsOn:           isActive,
+			RawPtr:         scene,
+			IndicatorColor: indicatorColor,
+			Brightness:     brightness,
 		},
 	}
 }

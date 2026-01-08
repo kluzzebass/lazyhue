@@ -86,6 +86,71 @@ func (p *DetailsPanel) updateContent() {
 		if device, ok := GetDeviceFromItem(*p.item); ok {
 			p.renderDevice(&content, device)
 		}
+	case EntityEntertainment:
+		if cfg, ok := GetEntertainmentFromItem(*p.item); ok {
+			p.renderEntertainment(&content, cfg)
+		}
+	case EntityLightsCategory:
+		// Rebuild category data from current state to ensure fresh data
+		if data, ok := p.item.RawPtr.(LightsCategoryData); ok {
+			if p.state != nil {
+				// Refresh lights from current state
+				freshData := LightsCategoryData{ParentName: data.ParentName}
+				// Find the room/zone to get fresh lights
+				for _, room := range p.state.AllRooms() {
+					if room.Metadata != nil && room.Metadata.Name != nil && *room.Metadata.Name == data.ParentName {
+						freshData.Lights = p.state.RoomLights(room)
+						break
+					}
+				}
+				if len(freshData.Lights) == 0 {
+					for _, zone := range p.state.AllZones() {
+						if zone.Metadata != nil && zone.Metadata.Name != nil && *zone.Metadata.Name == data.ParentName {
+							freshData.Lights = p.state.RoomLights(zone)
+							break
+						}
+					}
+				}
+				p.renderLightsCategory(&content, freshData)
+			} else {
+				p.renderLightsCategory(&content, data)
+			}
+		}
+	case EntityDevicesCategory:
+		// Devices don't have a direct room association in the API,
+		// so we use the cached data from the tree node
+		if data, ok := p.item.RawPtr.(DevicesCategoryData); ok {
+			p.renderDevicesCategory(&content, data)
+		}
+	case EntityScenesCategory:
+		// Rebuild category data from current state to ensure fresh data
+		if data, ok := p.item.RawPtr.(ScenesCategoryData); ok {
+			if p.state != nil {
+				freshData := ScenesCategoryData{ParentName: data.ParentName}
+				// Find the room/zone ID to get fresh scenes
+				for _, room := range p.state.AllRooms() {
+					if room.Metadata != nil && room.Metadata.Name != nil && *room.Metadata.Name == data.ParentName {
+						if room.Id != nil {
+							freshData.Scenes = p.state.RoomScenes(*room.Id)
+						}
+						break
+					}
+				}
+				if len(freshData.Scenes) == 0 {
+					for _, zone := range p.state.AllZones() {
+						if zone.Metadata != nil && zone.Metadata.Name != nil && *zone.Metadata.Name == data.ParentName {
+							if zone.Id != nil {
+								freshData.Scenes = p.state.RoomScenes(*zone.Id)
+							}
+							break
+						}
+					}
+				}
+				p.renderScenesCategory(&content, freshData)
+			} else {
+				p.renderScenesCategory(&content, data)
+			}
+		}
 	case EntityBridge:
 		if bridgeData, ok := GetBridgeFromItem(*p.item); ok {
 			p.renderBridge(&content, bridgeData)
@@ -111,6 +176,13 @@ func (p *DetailsPanel) renderRoom(w *strings.Builder, room openhue.RoomGet, isZo
 	if room.Id != nil {
 		w.WriteString(p.styles.Muted.Render("ID: "))
 		w.WriteString(*room.Id)
+		w.WriteString("\n")
+	}
+
+	// Legacy ID (for v1 API compatibility)
+	if room.IdV1 != nil && *room.IdV1 != "" {
+		w.WriteString(p.styles.Muted.Render("ID (v1): "))
+		w.WriteString(*room.IdV1)
 		w.WriteString("\n")
 	}
 
@@ -154,20 +226,35 @@ func (p *DetailsPanel) renderRoom(w *strings.Builder, room openhue.RoomGet, isZo
 		w.WriteString("\n")
 
 		for _, light := range lights {
-			name := ""
-			if light.Metadata != nil && light.Metadata.Name != nil {
-				name = *light.Metadata.Name
-			}
-			indicator := p.styles.OnOffIndicator(light.IsOn())
-			brightness := ""
+			name := p.getLightName(light)
+			indicator := p.renderLightIndicator(light)
+
+			var details []string
 			if light.IsOn() {
 				if light.Dimming != nil && light.Dimming.Brightness != nil {
-					brightness = fmt.Sprintf(" %.0f%%", float64(*light.Dimming.Brightness))
+					details = append(details, fmt.Sprintf("%.0f%%", float64(*light.Dimming.Brightness)))
+				}
+				// Color temperature
+				if light.ColorTemperature != nil && light.ColorTemperature.Mirek != nil {
+					mirek := *light.ColorTemperature.Mirek
+					kelvin := 1000000 / mirek
+					details = append(details, fmt.Sprintf("%dK", kelvin))
+				}
+				// Color (if not using color temp)
+				if light.Color != nil && light.Color.Xy != nil {
+					if light.ColorTemperature == nil || light.ColorTemperature.Mirek == nil {
+						details = append(details, fmt.Sprintf("xy(%.2f,%.2f)", *light.Color.Xy.X, *light.Color.Xy.Y))
+					}
 				}
 			} else {
-				brightness = " Off"
+				details = append(details, "Off")
 			}
-			line := fmt.Sprintf("  %s %s%s", indicator, name, brightness)
+
+			detailStr := ""
+			if len(details) > 0 {
+				detailStr = " " + strings.Join(details, ", ")
+			}
+			line := fmt.Sprintf("  %s %s%s", indicator, name, detailStr)
 			w.WriteString(line)
 			w.WriteString("\n")
 		}
@@ -227,6 +314,30 @@ func (p *DetailsPanel) renderRoom(w *strings.Builder, room openhue.RoomGet, isZo
 			w.WriteString(fmt.Sprintf("  • %s\n", name))
 		}
 	}
+}
+
+// renderLightIndicator returns a colored brightness indicator for a light.
+// Delegates to the centralized RenderLightIndicatorFromLight function.
+func (p *DetailsPanel) renderLightIndicator(light openhue.LightGet) string {
+	return RenderLightIndicatorFromLight(light, p.styles)
+}
+
+// getLightName returns the user-assigned name for a light.
+// The name comes from the owning device, not the light's deprecated Metadata.Name.
+func (p *DetailsPanel) getLightName(light openhue.LightGet) string {
+	// Try to get name from owning device (this is where user-assigned names are stored)
+	if p.state != nil && light.Owner != nil && light.Owner.Rid != nil {
+		if device, ok := p.state.GetDevice(*light.Owner.Rid); ok {
+			if device.Metadata != nil && device.Metadata.Name != nil {
+				return *device.Metadata.Name
+			}
+		}
+	}
+	// Fallback to light's own metadata (deprecated, but better than nothing)
+	if light.Metadata != nil && light.Metadata.Name != nil {
+		return *light.Metadata.Name
+	}
+	return "Unknown"
 }
 
 func (p *DetailsPanel) renderLight(w *strings.Builder, light openhue.LightGet) {
@@ -304,7 +415,7 @@ func (p *DetailsPanel) renderLight(w *strings.Builder, light openhue.LightGet) {
 	}
 
 	// Status
-	indicator := p.styles.OnOffIndicator(light.IsOn())
+	indicator := p.renderLightIndicator(light)
 	status := "Off"
 	if light.IsOn() {
 		status = "On"
@@ -609,18 +720,7 @@ func (p *DetailsPanel) renderScene(w *strings.Builder, scene openhue.SceneGet) {
 				// Try to get friendly name from owning device
 				if p.state != nil {
 					if light, ok := p.state.GetLight(*action.Target.Rid); ok {
-						// Get name from owning device (preferred)
-						if light.Owner != nil && light.Owner.Rid != nil {
-							if device, ok := p.state.GetDevice(*light.Owner.Rid); ok {
-								if device.Metadata != nil && device.Metadata.Name != nil {
-									targetName = *device.Metadata.Name
-								}
-							}
-						}
-						// Fallback to light's own metadata
-						if targetName == *action.Target.Rid && light.Metadata != nil && light.Metadata.Name != nil {
-							targetName = *light.Metadata.Name
-						}
+						targetName = p.getLightName(light)
 					}
 				}
 			}
@@ -805,6 +905,360 @@ func (p *DetailsPanel) renderDevice(w *strings.Builder, device openhue.DeviceGet
 	}
 }
 
+func (p *DetailsPanel) renderEntertainment(w *strings.Builder, cfg hue.EntertainmentConfiguration) {
+	// ID
+	w.WriteString(p.styles.Muted.Render("ID: "))
+	w.WriteString(cfg.ID)
+	w.WriteString("\n")
+
+	// Name
+	name := cfg.ID
+	if cfg.Metadata != nil && cfg.Metadata.Name != "" {
+		name = cfg.Metadata.Name
+	} else if cfg.Name != "" {
+		name = cfg.Name
+	}
+	w.WriteString(p.styles.Muted.Render("Name: "))
+	w.WriteString(name)
+	w.WriteString("\n")
+
+	// Status
+	w.WriteString(p.styles.Muted.Render("Status: "))
+	statusStyle := p.styles.ListItem
+	switch cfg.Status {
+	case "streaming":
+		statusStyle = lipgloss.NewStyle().Foreground(p.styles.Theme.Success)
+		w.WriteString(statusStyle.Render("● Streaming"))
+	case "active":
+		statusStyle = lipgloss.NewStyle().Foreground(p.styles.Theme.Warning)
+		w.WriteString(statusStyle.Render("● Active"))
+	default:
+		w.WriteString(p.styles.Muted.Render("○ Inactive"))
+	}
+	w.WriteString("\n")
+
+	// Configuration type
+	if cfg.ConfigurationType != "" {
+		w.WriteString(p.styles.Muted.Render("Type: "))
+		w.WriteString(cfg.ConfigurationType)
+		w.WriteString("\n")
+	}
+
+	// Channels
+	if len(cfg.Channels) > 0 {
+		w.WriteString("\n")
+		w.WriteString(p.styles.Subtitle.Render("Channels:"))
+		w.WriteString(fmt.Sprintf(" (%d)\n", len(cfg.Channels)))
+
+		for _, ch := range cfg.Channels {
+			w.WriteString(fmt.Sprintf("  Channel %d", ch.ChannelID))
+			if ch.Position != nil {
+				w.WriteString(fmt.Sprintf(" at (%.2f, %.2f, %.2f)", ch.Position.X, ch.Position.Y, ch.Position.Z))
+			}
+			w.WriteString("\n")
+
+			// Show members
+			for _, member := range ch.Members {
+				if member.Service != nil && member.Service.RID != "" {
+					lightName := member.Service.RID
+					// Try to get actual light name from owning device
+					if p.state != nil {
+						if light, ok := p.state.GetLight(member.Service.RID); ok {
+							lightName = p.getLightName(light)
+						}
+					}
+					w.WriteString(fmt.Sprintf("    • %s\n", lightName))
+				}
+			}
+		}
+	}
+
+	// Lights (service locations)
+	if len(cfg.Lights) > 0 {
+		w.WriteString("\n")
+		w.WriteString(p.styles.Subtitle.Render("Lights:"))
+		w.WriteString(fmt.Sprintf(" (%d)\n", len(cfg.Lights)))
+
+		for _, light := range cfg.Lights {
+			if light.Service != nil && light.Service.RID != "" {
+				lightName := light.Service.RID
+				// Try to get actual light name from owning device
+				if p.state != nil {
+					if l, ok := p.state.GetLight(light.Service.RID); ok {
+						lightName = p.getLightName(l)
+					}
+				}
+				w.WriteString(fmt.Sprintf("  • %s\n", lightName))
+			}
+		}
+	}
+
+	// Service locations with positions
+	if cfg.Locations != nil && len(cfg.Locations.ServiceLocations) > 0 {
+		w.WriteString("\n")
+		w.WriteString(p.styles.Subtitle.Render("Light Positions:"))
+		w.WriteString("\n")
+
+		for _, loc := range cfg.Locations.ServiceLocations {
+			if loc.Service != nil {
+				lightName := loc.Service.RID
+				// Try to get actual light name from owning device
+				if p.state != nil {
+					if l, ok := p.state.GetLight(loc.Service.RID); ok {
+						lightName = p.getLightName(l)
+					}
+				}
+				w.WriteString(fmt.Sprintf("  • %s\n", lightName))
+				if loc.Position != nil {
+					w.WriteString(fmt.Sprintf("    Position: (%.2f, %.2f, %.2f)\n", loc.Position.X, loc.Position.Y, loc.Position.Z))
+				}
+				for i, pos := range loc.Positions {
+					w.WriteString(fmt.Sprintf("    Position %d: (%.2f, %.2f, %.2f)\n", i+1, pos.X, pos.Y, pos.Z))
+				}
+			}
+		}
+	}
+
+	// Stream proxy
+	if cfg.StreamProxy != nil {
+		w.WriteString("\n")
+		w.WriteString(p.styles.Subtitle.Render("Stream Proxy:"))
+		w.WriteString("\n")
+		if cfg.StreamProxy.Mode != "" {
+			w.WriteString(fmt.Sprintf("  Mode: %s\n", cfg.StreamProxy.Mode))
+		}
+		if cfg.StreamProxy.Node != nil {
+			w.WriteString(fmt.Sprintf("  Node: %s\n", cfg.StreamProxy.Node.RID))
+		}
+	}
+
+	// Active streamer
+	if cfg.ActiveStreamer != nil && cfg.ActiveStreamer.RID != "" {
+		w.WriteString("\n")
+		w.WriteString(p.styles.Muted.Render("Active Streamer: "))
+		w.WriteString(cfg.ActiveStreamer.RID)
+		w.WriteString("\n")
+	}
+}
+
+func (p *DetailsPanel) renderLightsCategory(w *strings.Builder, data LightsCategoryData) {
+	w.WriteString(p.styles.Subtitle.Render("Lights in " + data.ParentName))
+	w.WriteString("\n\n")
+
+	if len(data.Lights) == 0 {
+		w.WriteString(p.styles.Muted.Render("No lights"))
+		return
+	}
+
+	// Calculate aggregates
+	onCount := 0
+	totalBrightness := 0.0
+	brightnessCount := 0
+
+	for _, light := range data.Lights {
+		if light.IsOn() {
+			onCount++
+			if light.Dimming != nil && light.Dimming.Brightness != nil {
+				totalBrightness += float64(*light.Dimming.Brightness)
+				brightnessCount++
+			}
+		}
+	}
+
+	// Summary
+	w.WriteString(fmt.Sprintf("Total: %d lights\n", len(data.Lights)))
+	w.WriteString(fmt.Sprintf("On: %d / Off: %d\n", onCount, len(data.Lights)-onCount))
+	if brightnessCount > 0 {
+		avgBrightness := totalBrightness / float64(brightnessCount)
+		w.WriteString(fmt.Sprintf("Avg Brightness: %.0f%%\n", avgBrightness))
+	}
+
+	// List all lights
+	w.WriteString("\n")
+	for _, light := range data.Lights {
+		name := p.getLightName(light)
+		indicator := p.renderLightIndicator(light)
+
+		var details []string
+		if light.IsOn() {
+			if light.Dimming != nil && light.Dimming.Brightness != nil {
+				details = append(details, fmt.Sprintf("%.0f%%", float64(*light.Dimming.Brightness)))
+			}
+			// Color temperature
+			if light.ColorTemperature != nil && light.ColorTemperature.Mirek != nil {
+				mirek := *light.ColorTemperature.Mirek
+				kelvin := 1000000 / mirek
+				details = append(details, fmt.Sprintf("%dK", kelvin))
+			}
+			// Color (if not using color temp)
+			if light.Color != nil && light.Color.Xy != nil {
+				if light.ColorTemperature == nil || light.ColorTemperature.Mirek == nil {
+					details = append(details, fmt.Sprintf("xy(%.2f,%.2f)", *light.Color.Xy.X, *light.Color.Xy.Y))
+				}
+			}
+		} else {
+			details = append(details, "Off")
+		}
+
+		detailStr := ""
+		if len(details) > 0 {
+			detailStr = " " + strings.Join(details, ", ")
+		}
+		w.WriteString(fmt.Sprintf("  %s %s%s\n", indicator, name, detailStr))
+	}
+}
+
+func (p *DetailsPanel) renderDevicesCategory(w *strings.Builder, data DevicesCategoryData) {
+	w.WriteString(p.styles.Subtitle.Render("Devices in " + data.ParentName))
+	w.WriteString("\n\n")
+
+	if len(data.Devices) == 0 {
+		w.WriteString(p.styles.Muted.Render("No devices"))
+		return
+	}
+
+	// Group by product type
+	productCounts := make(map[string]int)
+	for _, device := range data.Devices {
+		productName := "Unknown"
+		if device.ProductData != nil && device.ProductData.ProductName != nil {
+			productName = *device.ProductData.ProductName
+		}
+		productCounts[productName]++
+	}
+
+	// Summary
+	w.WriteString(fmt.Sprintf("Total: %d devices\n", len(data.Devices)))
+	if len(productCounts) > 1 {
+		// Sort product names for stable display order
+		products := make([]string, 0, len(productCounts))
+		for product := range productCounts {
+			products = append(products, product)
+		}
+		sort.Strings(products)
+
+		w.WriteString("\nBy Product:\n")
+		for _, product := range products {
+			w.WriteString(fmt.Sprintf("  %s: %d\n", product, productCounts[product]))
+		}
+	}
+
+	// List all devices
+	w.WriteString("\n")
+	for _, device := range data.Devices {
+		name := ""
+		if device.Metadata != nil && device.Metadata.Name != nil {
+			name = *device.Metadata.Name
+		}
+		productName := ""
+		if device.ProductData != nil && device.ProductData.ProductName != nil {
+			productName = *device.ProductData.ProductName
+		}
+		line := fmt.Sprintf("  • %s", name)
+		if productName != "" {
+			line += fmt.Sprintf(" (%s)", productName)
+		}
+		w.WriteString(line)
+		w.WriteString("\n")
+	}
+}
+
+func (p *DetailsPanel) renderScenesCategory(w *strings.Builder, data ScenesCategoryData) {
+	w.WriteString(p.styles.Subtitle.Render("Scenes in " + data.ParentName))
+	w.WriteString("\n\n")
+
+	if len(data.Scenes) == 0 {
+		w.WriteString(p.styles.Muted.Render("No scenes"))
+		return
+	}
+
+	// Summary
+	w.WriteString(fmt.Sprintf("Total: %d scenes\n\n", len(data.Scenes)))
+
+	// List all scenes with status
+	for _, scene := range data.Scenes {
+		name := ""
+		if scene.Metadata != nil && scene.Metadata.Name != nil {
+			name = *scene.Metadata.Name
+		}
+
+		// Check if scene is active
+		// Note: The Hue API only briefly marks scenes as active during recall,
+		// then they go back to "inactive". So this indicator mainly shows
+		// dynamic scenes that are currently playing.
+		isActive := false
+		statusStr := ""
+		if scene.Status != nil && scene.Status.Active != nil {
+			status := *scene.Status.Active
+			if status == openhue.SceneGetStatusActiveStatic {
+				isActive = true
+				statusStr = "static"
+			} else if status == openhue.SceneGetStatusActiveDynamicPalette {
+				isActive = true
+				statusStr = "dynamic"
+			}
+		}
+
+		if isActive {
+			// Get the scene's group lights to calculate average color/brightness
+			var avgBrightness float64
+			var avgColor lipgloss.Color = p.styles.Theme.OnColor // Default to OnColor
+
+			if p.state != nil && scene.Group != nil && scene.Group.Rid != nil {
+				// Get lights in the scene's group
+				var lights []openhue.LightGet
+				if room, ok := p.state.GetRoom(*scene.Group.Rid); ok {
+					lights = p.state.RoomLights(room)
+				} else if zone, ok := p.state.GetZone(*scene.Group.Rid); ok {
+					lights = p.state.RoomLights(zone) // Zones use same method
+				}
+
+				// Calculate average brightness and color from ON lights
+				var totalBrightness float64
+				var totalR, totalG, totalB float64
+				var onCount int
+
+				for _, light := range lights {
+					if light.IsOn() {
+						onCount++
+						if light.Dimming != nil && light.Dimming.Brightness != nil {
+							totalBrightness += float64(*light.Dimming.Brightness)
+						} else {
+							totalBrightness += 100
+						}
+						// Get color
+						color := getLightColor(light)
+						// Parse hex color to RGB
+						colorStr := string(color)
+						if len(colorStr) == 7 && colorStr[0] == '#' {
+							var r, g, b int
+							fmt.Sscanf(colorStr, "#%02x%02x%02x", &r, &g, &b)
+							totalR += float64(r)
+							totalG += float64(g)
+							totalB += float64(b)
+						}
+					}
+				}
+
+				if onCount > 0 {
+					avgBrightness = totalBrightness / float64(onCount)
+					avgR := int(totalR / float64(onCount))
+					avgG := int(totalG / float64(onCount))
+					avgB := int(totalB / float64(onCount))
+					avgColor = lipgloss.Color(fmt.Sprintf("#%02x%02x%02x", avgR, avgG, avgB))
+				}
+			}
+
+			// Use centralized brightness indicator with average color
+			indicator := RenderBrightnessIndicator(avgBrightness, avgColor)
+			w.WriteString(fmt.Sprintf("  %s %s (%s)\n", indicator, name, statusStr))
+		} else {
+			indicator := RenderOffIndicator(p.styles)
+			w.WriteString(fmt.Sprintf("  %s %s\n", indicator, name))
+		}
+	}
+}
+
 func (p *DetailsPanel) renderBridge(w *strings.Builder, data BridgeData) {
 	bridge := data.Bridge
 	if bridge == nil {
@@ -819,9 +1273,9 @@ func (p *DetailsPanel) renderBridge(w *strings.Builder, data BridgeData) {
 	case hue.StatusConnected:
 		w.WriteString(p.styles.Success.Render("Connected"))
 	case hue.StatusConnecting:
-		w.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("#ffff00")).Render("Connecting..."))
+		w.WriteString(p.styles.Warning.Render("Connecting..."))
 	case hue.StatusPairing:
-		w.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("#ffff00")).Render("Pairing..."))
+		w.WriteString(p.styles.Warning.Render("Pairing..."))
 	case hue.StatusError:
 		w.WriteString(p.styles.Error.Render("Error"))
 	default:

@@ -39,6 +39,7 @@ type Model struct {
 	detailPanel    *panels.DetailsPanel
 	helpPanel      *panels.HelpPanel
 	pairingPanel   *panels.PairingPanel
+	popupPanel     *panels.PopupPanel
 	statusBar      *panels.StatusBar
 	styles         ui.Styles
 
@@ -50,20 +51,21 @@ type Model struct {
 	layoutTree *layout.Tree
 
 	// Current selection
-	selectedItem *panels.EntityItem
+	selectedItem      *panels.EntityItem
+	displayedBridgeID string // Bridge currently shown in hierarchy panel
 
 	// Window dimensions
 	width  int
 	height int
 
 	// State
-	ready            bool
-	quitting         bool
-	pairing          bool
-	pairingFor       *hue.BridgeInfo
-	pairingCancel    context.CancelFunc
-	statusMsg  string
-	isError    bool
+	ready         bool
+	quitting      bool
+	pairing       bool
+	pairingFor    *hue.BridgeInfo
+	pairingCancel context.CancelFunc
+	statusMsg     string
+	isError       bool
 }
 
 // New creates a new application model.
@@ -73,7 +75,7 @@ func New(cfg *config.Config, creds *config.CredentialStore, uiState *config.UISt
 	// Create panels indexed by ID
 	panelMap := map[string]panels.Panel{
 		PanelIDBridges:   panels.NewBridgePanel(styles, "1"),
-		PanelIDHierarchy: panels.NewTreePanel(styles, "Home", "2"),
+		PanelIDHierarchy: panels.NewHomeTabbedPanel(styles, "2"),
 	}
 
 	// Panel order for keyboard focus cycling
@@ -113,13 +115,15 @@ func New(cfg *config.Config, creds *config.CredentialStore, uiState *config.UISt
 		detailPanel:  panels.NewDetailsPanel(styles),
 		helpPanel:    panels.NewHelpPanel(styles),
 		pairingPanel: panels.NewPairingPanel(styles),
+		popupPanel:   panels.NewPopupPanel(styles),
 		statusBar:    panels.NewStatusBar(styles),
 	}
 
 	// Initialize keybindings - handlers are defined here, right next to keys
 	m.initBindings()
 
-	// Restore last selected bridge from saved state
+	// Restore last selected bridge from saved state (visual selection only)
+	// Active bridge will be set after bridges are loaded in connectFromStoredCredentials
 	if uiState.LastSelectedBridgeID != "" {
 		m.bridgePanel().SetInitialSelection(uiState.LastSelectedBridgeID)
 	}
@@ -158,6 +162,11 @@ func (m *Model) connectFromStoredCredentials() tea.Cmd {
 		}
 	}
 
+	// Now that bridges are added, set the active bridge from saved state
+	if m.uiState.LastSelectedBridgeID != "" {
+		m.manager.SetActiveBridge(m.uiState.LastSelectedBridgeID)
+	}
+
 	return tea.Batch(cmds...)
 }
 
@@ -173,7 +182,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.ready = true
 
 	case tea.KeyMsg:
-		// Handle pairing panel input first
+		// Handle popup panel input first (highest priority modal)
+		if m.popupPanel.IsVisible() {
+			if cmd := m.popupPanel.Update(msg); cmd != nil {
+				cmds = append(cmds, cmd)
+			}
+			return m, tea.Batch(cmds...)
+		}
+
+		// Handle pairing panel input
 		if m.pairingPanel.IsVisible() {
 			if cmd := m.pairingPanel.Update(msg); cmd != nil {
 				cmds = append(cmds, cmd)
@@ -235,11 +252,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.setStatus("Connection failed: "+msg.Err.Error(), true)
 
 	case StateSyncedMsg:
-		m.refreshAllPanels()
 		m.updateBridgePanel()
-		// Only restore expanded state if this is the active bridge
-		// (otherwise we'd apply wrong paths to wrong tree)
+		// Only refresh hierarchy if this is the active bridge
 		if msg.BridgeID == m.manager.GetActiveBridgeID() {
+			m.refreshAllPanels()
 			m.restoreExpandedState(msg.BridgeID)
 		}
 		m.clearStatus()
@@ -249,8 +265,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case LightsSyncedMsg:
 		m.bridgePanel().SetPolling(false)
-		m.refreshHierarchyPanel()
-		m.updateDetailPanel()
+		// Refresh hierarchy if this is the active bridge or if BridgeID is empty (batch sync)
+		if msg.BridgeID == "" || msg.BridgeID == m.manager.GetActiveBridgeID() {
+			m.refreshHierarchyPanel()
+			m.updateDetailPanel()
+		}
 
 	case SyncTickMsg:
 		connectedBridges := m.manager.ConnectedBridges()

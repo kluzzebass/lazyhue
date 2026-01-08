@@ -12,16 +12,17 @@ import (
 type BridgeState struct {
 	mu sync.RWMutex
 
-	Lights        map[string]openhue.LightGet
-	Rooms         map[string]openhue.RoomGet
-	Zones         map[string]openhue.RoomGet // Zones use the same type as Rooms
-	Scenes        map[string]openhue.SceneGet
-	GroupedLights map[string]openhue.GroupedLightGet
-	Devices       map[string]openhue.DeviceGet
-	MotionSensors map[string]openhue.MotionGet
-	Temperatures  map[string]openhue.TemperatureGet
-	LightLevels   map[string]openhue.LightLevelGet
-	DevicePowers  map[string]openhue.DevicePowerGet
+	Lights                      map[string]openhue.LightGet
+	Rooms                       map[string]openhue.RoomGet
+	Zones                       map[string]openhue.RoomGet // Zones use the same type as Rooms
+	Scenes                      map[string]openhue.SceneGet
+	GroupedLights               map[string]openhue.GroupedLightGet
+	Devices                     map[string]openhue.DeviceGet
+	MotionSensors               map[string]openhue.MotionGet
+	Temperatures                map[string]openhue.TemperatureGet
+	LightLevels                 map[string]openhue.LightLevelGet
+	DevicePowers                map[string]openhue.DevicePowerGet
+	EntertainmentConfigurations map[string]EntertainmentConfiguration
 
 	// Bridge-specific resources
 	BridgeResource *openhue.BridgeGet     // The bridge resource itself
@@ -32,16 +33,17 @@ type BridgeState struct {
 // NewBridgeState creates an empty bridge state.
 func NewBridgeState() *BridgeState {
 	return &BridgeState{
-		Lights:        make(map[string]openhue.LightGet),
-		Rooms:         make(map[string]openhue.RoomGet),
-		Zones:         make(map[string]openhue.RoomGet),
-		Scenes:        make(map[string]openhue.SceneGet),
-		GroupedLights: make(map[string]openhue.GroupedLightGet),
-		Devices:       make(map[string]openhue.DeviceGet),
-		MotionSensors: make(map[string]openhue.MotionGet),
-		Temperatures:  make(map[string]openhue.TemperatureGet),
-		LightLevels:   make(map[string]openhue.LightLevelGet),
-		DevicePowers:  make(map[string]openhue.DevicePowerGet),
+		Lights:                      make(map[string]openhue.LightGet),
+		Rooms:                       make(map[string]openhue.RoomGet),
+		Zones:                       make(map[string]openhue.RoomGet),
+		Scenes:                      make(map[string]openhue.SceneGet),
+		GroupedLights:               make(map[string]openhue.GroupedLightGet),
+		Devices:                     make(map[string]openhue.DeviceGet),
+		MotionSensors:               make(map[string]openhue.MotionGet),
+		Temperatures:                make(map[string]openhue.TemperatureGet),
+		LightLevels:                 make(map[string]openhue.LightLevelGet),
+		DevicePowers:                make(map[string]openhue.DevicePowerGet),
+		EntertainmentConfigurations: make(map[string]EntertainmentConfiguration),
 	}
 }
 
@@ -93,6 +95,25 @@ func (s *BridgeState) GetDevice(id string) (openhue.DeviceGet, bool) {
 	return d, ok
 }
 
+// GetLightName returns the user-assigned name for a light.
+// The name comes from the owning device, not the light's deprecated Metadata.Name.
+// Caller must hold the lock or call this on data that won't change.
+func (s *BridgeState) GetLightName(light openhue.LightGet) string {
+	// Get name from owning device (this is where user-assigned names are stored)
+	if light.Owner != nil && light.Owner.Rid != nil {
+		if device, ok := s.Devices[*light.Owner.Rid]; ok {
+			if device.Metadata != nil && device.Metadata.Name != nil {
+				return *device.Metadata.Name
+			}
+		}
+	}
+	// Fallback to light's own metadata (deprecated, but better than nothing)
+	if light.Metadata != nil && light.Metadata.Name != nil {
+		return *light.Metadata.Name
+	}
+	return "Unknown"
+}
+
 // RoomLights returns the lights belonging to a room by resolving device references, sorted by name.
 func (s *BridgeState) RoomLights(room openhue.RoomGet) []openhue.LightGet {
 	s.mu.RLock()
@@ -118,17 +139,9 @@ func (s *BridgeState) RoomLights(room openhue.RoomGet) []openhue.LightGet {
 		}
 	}
 	
-	// Sort by name for stable ordering
+	// Sort by name for stable ordering (using device name, not deprecated light metadata)
 	sort.Slice(lights, func(i, j int) bool {
-		nameI := ""
-		nameJ := ""
-		if lights[i].Metadata != nil && lights[i].Metadata.Name != nil {
-			nameI = *lights[i].Metadata.Name
-		}
-		if lights[j].Metadata != nil && lights[j].Metadata.Name != nil {
-			nameJ = *lights[j].Metadata.Name
-		}
-		return nameI < nameJ
+		return s.GetLightName(lights[i]) < s.GetLightName(lights[j])
 	})
 	
 	return lights
@@ -258,17 +271,9 @@ func (s *BridgeState) AllLights() []openhue.LightGet {
 		lights = append(lights, l)
 	}
 	
-	// Sort by name for stable ordering
+	// Sort by name for stable ordering (using device name, not deprecated light metadata)
 	sort.Slice(lights, func(i, j int) bool {
-		nameI := ""
-		nameJ := ""
-		if lights[i].Metadata != nil && lights[i].Metadata.Name != nil {
-			nameI = *lights[i].Metadata.Name
-		}
-		if lights[j].Metadata != nil && lights[j].Metadata.Name != nil {
-			nameJ = *lights[j].Metadata.Name
-		}
-		return nameI < nameJ
+		return s.GetLightName(lights[i]) < s.GetLightName(lights[j])
 	})
 	
 	return lights
@@ -495,6 +500,13 @@ func (s *BridgeState) UpdateDevicePowers(powers map[string]openhue.DevicePowerGe
 	s.DevicePowers = powers
 }
 
+// UpdateEntertainmentConfigurations replaces entertainment configuration data.
+func (s *BridgeState) UpdateEntertainmentConfigurations(configs map[string]EntertainmentConfiguration) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.EntertainmentConfigurations = configs
+}
+
 // UpdateBridgeResource sets the bridge resource.
 func (s *BridgeState) UpdateBridgeResource(bridge *openhue.BridgeGet) {
 	s.mu.Lock()
@@ -578,6 +590,31 @@ func (s *BridgeState) AllDevices() []openhue.DeviceGet {
 	})
 
 	return devices
+}
+
+// AllEntertainmentConfigurations returns all entertainment configurations, sorted by name.
+func (s *BridgeState) AllEntertainmentConfigurations() []EntertainmentConfiguration {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	configs := make([]EntertainmentConfiguration, 0, len(s.EntertainmentConfigurations))
+	for _, c := range s.EntertainmentConfigurations {
+		configs = append(configs, c)
+	}
+
+	sort.Slice(configs, func(i, j int) bool {
+		nameI := ""
+		nameJ := ""
+		if configs[i].Metadata != nil {
+			nameI = configs[i].Metadata.Name
+		}
+		if configs[j].Metadata != nil {
+			nameJ = configs[j].Metadata.Name
+		}
+		return nameI < nameJ
+	})
+
+	return configs
 }
 
 // IsRoomOn returns true if any light in the room is on.
