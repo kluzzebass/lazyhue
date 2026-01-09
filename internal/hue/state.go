@@ -295,7 +295,28 @@ func (s *BridgeState) AllScenes() []hueclient.SceneGet {
 		scenes = append(scenes, sc)
 	}
 
-	// Sort by name for stable ordering
+	// Helper to get group name (room or zone name) for a scene
+	getGroupName := func(sc hueclient.SceneGet) string {
+		if sc.Group == nil || sc.Group.Rid == nil {
+			return ""
+		}
+		rid := *sc.Group.Rid
+		// Check rooms first
+		if room, ok := s.Rooms[rid]; ok {
+			if room.Metadata != nil && room.Metadata.Name != nil {
+				return *room.Metadata.Name
+			}
+		}
+		// Check zones
+		if zone, ok := s.Zones[rid]; ok {
+			if zone.Metadata != nil && zone.Metadata.Name != nil {
+				return *zone.Metadata.Name
+			}
+		}
+		return ""
+	}
+
+	// Sort by scene name first, then by group name (room/zone), then by ID for stable ordering
 	sort.Slice(scenes, func(i, j int) bool {
 		nameI := ""
 		nameJ := ""
@@ -305,7 +326,24 @@ func (s *BridgeState) AllScenes() []hueclient.SceneGet {
 		if scenes[j].Metadata != nil && scenes[j].Metadata.Name != nil {
 			nameJ = *scenes[j].Metadata.Name
 		}
-		return nameI < nameJ
+		if nameI != nameJ {
+			return nameI < nameJ
+		}
+		groupI := getGroupName(scenes[i])
+		groupJ := getGroupName(scenes[j])
+		if groupI != groupJ {
+			return groupI < groupJ
+		}
+		// Tertiary sort by ID for full stability
+		idI := ""
+		idJ := ""
+		if scenes[i].Id != nil {
+			idI = *scenes[i].Id
+		}
+		if scenes[j].Id != nil {
+			idJ = *scenes[j].Id
+		}
+		return idI < idJ
 	})
 
 	return scenes
