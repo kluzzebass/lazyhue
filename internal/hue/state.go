@@ -1011,3 +1011,47 @@ func (s *BridgeState) ApplySceneStatus(id string, status string) bool {
 	s.Scenes[id] = scene
 	return true
 }
+
+// GetTemperature returns a temperature sensor by ID.
+func (s *BridgeState) GetTemperature(id string) (hueclient.TemperatureGet, bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	t, ok := s.Temperatures[id]
+	return t, ok
+}
+
+// GetGroupedLightName returns the room or zone name for a grouped light.
+func (s *BridgeState) GetGroupedLightName(groupedLightID string) string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	// Check rooms
+	for _, room := range s.Rooms {
+		if room.Services != nil {
+			for _, svc := range *room.Services {
+				if svc.Rtype != nil && *svc.Rtype == hueclient.ResourceIdentifierRtypeGroupedLight &&
+					svc.Rid != nil && *svc.Rid == groupedLightID {
+					if room.Metadata != nil && room.Metadata.Name != nil {
+						return *room.Metadata.Name
+					}
+				}
+			}
+		}
+	}
+
+	// Check zones
+	for _, zone := range s.Zones {
+		if zone.Services != nil {
+			for _, svc := range *zone.Services {
+				if svc.Rtype != nil && *svc.Rtype == hueclient.ResourceIdentifierRtypeGroupedLight &&
+					svc.Rid != nil && *svc.Rid == groupedLightID {
+					if zone.Metadata != nil && zone.Metadata.Name != nil {
+						return *zone.Metadata.Name
+					}
+				}
+			}
+		}
+	}
+
+	return ""
+}

@@ -174,11 +174,11 @@ func (b *Bridge) handleEvents(container EventContainer) {
 		for _, update := range updates {
 			debug.Log("SSE %s: %s %s", event.Type, update.Type, update.ID)
 
-			// Apply the update directly to our cached state
-			updated := b.applyResourceUpdate(update)
+			// Apply the update directly to our cached state (if we handle this type)
+			b.applyResourceUpdate(update)
 
-			// Notify listener for each update
-			if updated && callback != nil {
+			// Notify listener for all events, even unhandled ones
+			if callback != nil {
 				callback(b.Info.ID, update.Type, update.ID, string(event.Type))
 			}
 		}

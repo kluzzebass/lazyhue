@@ -256,7 +256,8 @@ func (p *PopupPanel) handleConfirmKey(msg tea.KeyMsg) tea.Cmd {
 }
 
 func (p *PopupPanel) handleMouse(msg tea.MouseMsg) tea.Cmd {
-	if p.mode == PopupModeDisplay {
+	switch p.mode {
+	case PopupModeDisplay:
 		switch msg.Type {
 		case tea.MouseWheelUp:
 			if p.scroll > 0 {
@@ -265,6 +266,46 @@ func (p *PopupPanel) handleMouse(msg tea.MouseMsg) tea.Cmd {
 		case tea.MouseWheelDown:
 			if p.scroll < p.maxScroll() {
 				p.scroll++
+			}
+		}
+	case PopupModeConfirm:
+		if msg.Type == tea.MouseLeft {
+			// Check if click is on a button
+			// Calculate popup position (centered on screen)
+			popupX := (p.screenWidth - p.width()) / 2
+			popupY := (p.screenHeight - p.height()) / 2
+
+			// Calculate button row (midY+1 in content, +1 for top border, +1 for content padding)
+			contentHeight := p.contentHeight()
+			midY := contentHeight / 2
+			buttonRowY := popupY + 1 + midY + 1 // +1 border, +1 to get to midY+1
+
+			// Check if click is on button row
+			if msg.Y == buttonRowY {
+				// Calculate button positions within the popup
+				contentWidth := p.contentWidth()
+				yesBtn := " " + p.yesLabel + " "
+				noBtn := " " + p.noLabel + " "
+				buttons := yesBtn + "  " + noBtn
+				buttonsLen := lipgloss.Width(buttons)
+				buttonsStartX := popupX + 2 + (contentWidth-buttonsLen)/2 // +2 for border+padding
+
+				// Check Yes button
+				yesEndX := buttonsStartX + lipgloss.Width(yesBtn)
+				if msg.X >= buttonsStartX && msg.X < yesEndX {
+					p.selected = 0
+					p.close(PopupResult{Confirmed: true})
+					return nil
+				}
+
+				// Check No button (after Yes + 2 spaces gap)
+				noStartX := yesEndX + 2
+				noEndX := noStartX + lipgloss.Width(noBtn)
+				if msg.X >= noStartX && msg.X < noEndX {
+					p.selected = 1
+					p.close(PopupResult{Confirmed: false})
+					return nil
+				}
 			}
 		}
 	}

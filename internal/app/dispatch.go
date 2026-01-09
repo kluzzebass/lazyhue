@@ -77,6 +77,8 @@ func (m *Model) dispatch(action ui.Action) tea.Cmd {
 	// Global
 	case ui.ActionHelp:
 		m.toggleHelp()
+	case ui.ActionToggleLog:
+		m.toggleLogPanel()
 	case ui.ActionQuit:
 		m.quitting = true
 		// Save state before quitting
@@ -199,3 +201,13 @@ func (m *Model) toggleHelp() {
 	}
 }
 
+func (m *Model) toggleLogPanel() {
+	m.logPanelVisible = !m.logPanelVisible
+	m.layoutTree = buildLayoutTree(m.logPanelVisible)
+	m.updateLayout()
+
+	// If hiding log panel and it was focused, move focus to detail panel
+	if !m.logPanelVisible && m.focusIndex == -2 {
+		m.focusIndex = -1
+	}
+}

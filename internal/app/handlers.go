@@ -35,7 +35,7 @@ func (m *Model) handleKey(msg tea.KeyMsg) tea.Cmd {
 		m.focusIndex = -1 // Detail panel
 		return nil
 	}
-	if keyStr == "3" {
+	if keyStr == "3" && m.logPanelVisible {
 		if m.focusIndex >= 0 {
 			m.lastFocusIndex = m.focusIndex
 		}
@@ -135,10 +135,12 @@ func (m *Model) handleMouse(msg tea.MouseMsg) tea.Cmd {
 			}
 			m.focusIndex = -1
 		case PanelIDLog:
-			if m.focusIndex >= 0 {
-				m.lastFocusIndex = m.focusIndex
+			if m.logPanelVisible {
+				if m.focusIndex >= 0 {
+					m.lastFocusIndex = m.focusIndex
+				}
+				m.focusIndex = -2
 			}
-			m.focusIndex = -2
 		default:
 			for i, id := range m.panelOrder {
 				if id == leaf.ID {

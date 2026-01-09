@@ -400,8 +400,16 @@ func (p *HomeTabbedPanel) View(active bool) string {
 	case 0: // Home (tree)
 		// Use tree panel's rendering but extract content
 		itemCount = len(p.treePanel.flatList)
-		itemIndex = p.treePanel.cursor
 		scrollOffset = p.treePanel.offset
+		// Show last visible line, not cursor position
+		lastVisible := scrollOffset + contentHeight
+		if lastVisible > itemCount {
+			lastVisible = itemCount
+		}
+		itemIndex = lastVisible - 1
+		if itemIndex < 0 {
+			itemIndex = 0
+		}
 
 		if itemCount == 0 {
 			lines = append(lines, p.styles.Muted.Render("No items"))
@@ -417,8 +425,16 @@ func (p *HomeTabbedPanel) View(active bool) string {
 
 	case 1: // Lights
 		itemCount = len(p.lights)
-		itemIndex = p.lightsCursor
 		scrollOffset = p.lightsOffset
+		// Show last visible line
+		lastVisible := scrollOffset + contentHeight
+		if lastVisible > itemCount {
+			lastVisible = itemCount
+		}
+		itemIndex = lastVisible - 1
+		if itemIndex < 0 {
+			itemIndex = 0
+		}
 
 		if itemCount == 0 {
 			lines = append(lines, p.styles.Muted.Render("No lights"))
@@ -433,8 +449,16 @@ func (p *HomeTabbedPanel) View(active bool) string {
 
 	case 2: // Devices
 		itemCount = len(p.devices)
-		itemIndex = p.devicesCursor
 		scrollOffset = p.devicesOffset
+		// Show last visible line
+		lastVisible := scrollOffset + contentHeight
+		if lastVisible > itemCount {
+			lastVisible = itemCount
+		}
+		itemIndex = lastVisible - 1
+		if itemIndex < 0 {
+			itemIndex = 0
+		}
 
 		if itemCount == 0 {
 			lines = append(lines, p.styles.Muted.Render("No devices"))
@@ -449,8 +473,16 @@ func (p *HomeTabbedPanel) View(active bool) string {
 
 	case 3: // Scenes
 		itemCount = len(p.scenes)
-		itemIndex = p.scenesCursor
 		scrollOffset = p.scenesOffset
+		// Show last visible line
+		lastVisible := scrollOffset + contentHeight
+		if lastVisible > itemCount {
+			lastVisible = itemCount
+		}
+		itemIndex = lastVisible - 1
+		if itemIndex < 0 {
+			itemIndex = 0
+		}
 
 		if itemCount == 0 {
 			lines = append(lines, p.styles.Muted.Render("No scenes"))

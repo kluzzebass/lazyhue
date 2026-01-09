@@ -247,7 +247,7 @@ func BuildLightItems(state *hue.BridgeState) []list.Item {
 			if light.Dimming != nil && light.Dimming.Brightness != nil {
 				brightness = float64(*light.Dimming.Brightness)
 			}
-			indicatorColor = string(getLightColor(light))
+			indicatorColor = string(GetLightColor(light))
 		}
 
 		items = append(items, EntityItem{
@@ -327,7 +327,7 @@ func BuildSceneItems(state *hue.BridgeState) []list.Item {
 					} else {
 						totalBrightness += 100
 					}
-					color := getLightColor(light)
+					color := GetLightColor(light)
 					colorStr := string(color)
 					if len(colorStr) == 7 && colorStr[0] == '#' {
 						var r, g, b int
@@ -1182,7 +1182,7 @@ func RenderLightIndicatorFromLight(light hueclient.LightGet, styles ui.Styles) s
 		brightness = float64(*light.Dimming.Brightness)
 	}
 
-	color := getLightColor(light)
+	color := GetLightColor(light)
 	return RenderBrightnessIndicator(brightness, color)
 }
 
@@ -1348,8 +1348,8 @@ func mirekToRGB(mirek int) (r, g, b uint8) {
 	return clamp(rFloat), clamp(gFloat), clamp(bFloat)
 }
 
-// getLightColor extracts the RGB color from a light.
-func getLightColor(light hueclient.LightGet) lipgloss.Color {
+// GetLightColor extracts the RGB color from a light.
+func GetLightColor(light hueclient.LightGet) lipgloss.Color {
 	brightness := 100.0
 	if light.Dimming != nil && light.Dimming.Brightness != nil {
 		brightness = float64(*light.Dimming.Brightness)
@@ -1408,7 +1408,7 @@ func buildLightNode(light hueclient.LightGet, state *hue.BridgeState) *TreeNode 
 			brightness = float64(*light.Dimming.Brightness)
 		}
 		indicator = brightnessIndicator(brightness)
-		indicatorColor = string(getLightColor(light))
+		indicatorColor = string(GetLightColor(light))
 	} else {
 		indicator = IndicatorOff
 	}
@@ -1518,7 +1518,7 @@ func buildSceneNode(scene hueclient.SceneGet, state *hue.BridgeState) *TreeNode 
 				} else {
 					totalBrightness += 100
 				}
-				color := getLightColor(light)
+				color := GetLightColor(light)
 				colorStr := string(color)
 				if len(colorStr) == 7 && colorStr[0] == '#' {
 					var r, g, b int

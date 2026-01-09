@@ -41,9 +41,10 @@ const (
 	ActionPrevTab Action = "prev_tab"
 
 	// Global
-	ActionHelp Action = "help"
-	ActionQuit    Action = "quit"
-	ActionBack    Action = "back"
+	ActionHelp      Action = "help"
+	ActionQuit      Action = "quit"
+	ActionBack      Action = "back"
+	ActionToggleLog Action = "toggle_log"
 )
 
 // Binding represents a keybinding with its associated action.

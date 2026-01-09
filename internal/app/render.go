@@ -27,10 +27,15 @@ func (m Model) View() string {
 	}
 	leftColumn := lipgloss.JoinVertical(lipgloss.Left, panelViews...)
 
-	// Right column: detail panel + log panel
+	// Right column: detail panel + log panel (if visible)
 	detailView := m.detailPanel.View(m.focusedOnDetail())
-	logView := m.logPanel.View(m.focusedOnLog())
-	rightColumn := lipgloss.JoinVertical(lipgloss.Left, detailView, logView)
+	var rightColumn string
+	if m.logPanelVisible {
+		logView := m.logPanel.View(m.focusedOnLog())
+		rightColumn = lipgloss.JoinVertical(lipgloss.Left, detailView, logView)
+	} else {
+		rightColumn = detailView
+	}
 
 	// Combine columns - constrain to actual dimensions
 	content := lipgloss.JoinHorizontal(lipgloss.Top, leftColumn, rightColumn)

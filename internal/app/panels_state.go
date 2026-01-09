@@ -1,6 +1,7 @@
 package app
 
 import (
+	"fmt"
 	"sort"
 
 	"github.com/kluzzebass/lazyhue/internal/hue"
@@ -23,7 +24,7 @@ func (m *Model) focusedOnDetail() bool {
 }
 
 func (m *Model) focusedOnLog() bool {
-	return m.focusIndex == -2
+	return m.logPanelVisible && m.focusIndex == -2
 }
 
 func (m *Model) focusedPanelID() string {
@@ -374,4 +375,124 @@ func filterBindingsByAction(bindings []ui.Binding, actions ...ui.Action) []ui.Bi
 	return filtered
 }
 
+// buildEventDetails creates rich event details by looking up resource info from bridge state.
+func (m *Model) buildEventDetails(msg BridgeEventMsg) panels.EventDetails {
+	details := panels.EventDetails{
+		ResourceType: msg.ResourceType,
+		EventType:    msg.EventType,
+	}
 
+	bridge := m.manager.GetBridge(msg.BridgeID)
+	if bridge == nil || bridge.GetState() == nil {
+		return details
+	}
+	state := bridge.GetState()
+
+	switch msg.ResourceType {
+	case "light":
+		if light, ok := state.GetLight(msg.ResourceID); ok {
+			if light.Metadata != nil && light.Metadata.Name != nil {
+				details.ResourceName = *light.Metadata.Name
+			}
+			// Show current state
+			if light.On != nil && light.On.On != nil {
+				if *light.On.On {
+					if light.Dimming != nil && light.Dimming.Brightness != nil {
+						details.Details = fmt.Sprintf("on %.0f%%", *light.Dimming.Brightness)
+					} else {
+						details.Details = "on"
+					}
+				} else {
+					details.Details = "off"
+				}
+			}
+		}
+
+	case "grouped_light":
+		if gl, ok := state.GetGroupedLight(msg.ResourceID); ok {
+			// Try to find the room/zone name for this grouped light
+			if name := state.GetGroupedLightName(msg.ResourceID); name != "" {
+				details.ResourceName = name
+			}
+			if gl.On != nil && gl.On.On != nil {
+				if *gl.On.On {
+					if gl.Dimming != nil && gl.Dimming.Brightness != nil {
+						details.Details = fmt.Sprintf("on %.0f%%", *gl.Dimming.Brightness)
+					} else {
+						details.Details = "on"
+					}
+				} else {
+					details.Details = "off"
+				}
+			}
+		}
+
+	case "scene":
+		if scene, ok := state.GetScene(msg.ResourceID); ok {
+			if scene.Metadata != nil && scene.Metadata.Name != nil {
+				details.ResourceName = *scene.Metadata.Name
+			}
+			if scene.Status != nil && scene.Status.Active != nil {
+				if *scene.Status.Active == "active" {
+					details.Details = "activated"
+				} else {
+					details.Details = "deactivated"
+				}
+			}
+		}
+
+	case "motion":
+		if motion, ok := state.GetMotion(msg.ResourceID); ok {
+			// Try to get device name
+			if motion.Owner != nil && motion.Owner.Rid != nil {
+				if device, ok := state.GetDevice(*motion.Owner.Rid); ok {
+					if device.Metadata != nil && device.Metadata.Name != nil {
+						details.ResourceName = *device.Metadata.Name
+					}
+				}
+			}
+			if motion.Motion != nil && motion.Motion.Motion != nil {
+				if *motion.Motion.Motion {
+					details.Details = "motion detected"
+				} else {
+					details.Details = "clear"
+				}
+			}
+		}
+
+	case "temperature":
+		if temp, ok := state.GetTemperature(msg.ResourceID); ok {
+			// Try to get device name
+			if temp.Owner != nil && temp.Owner.Rid != nil {
+				if device, ok := state.GetDevice(*temp.Owner.Rid); ok {
+					if device.Metadata != nil && device.Metadata.Name != nil {
+						details.ResourceName = *device.Metadata.Name
+					}
+				}
+			}
+			if temp.Temperature != nil && temp.Temperature.Temperature != nil {
+				details.Details = fmt.Sprintf("%.1f°C", *temp.Temperature.Temperature)
+			}
+		}
+
+	case "light_level":
+		if ll, ok := state.GetLightLevel(msg.ResourceID); ok {
+			// Try to get device name
+			if ll.Owner != nil && ll.Owner.Rid != nil {
+				if device, ok := state.GetDevice(*ll.Owner.Rid); ok {
+					if device.Metadata != nil && device.Metadata.Name != nil {
+						details.ResourceName = *device.Metadata.Name
+					}
+				}
+			}
+			if ll.Light != nil && ll.Light.LightLevel != nil {
+				// Convert from Hue's log scale to approximate lux
+				lux := float64(*ll.Light.LightLevel-1) / 10000.0
+				lux = 100 * (lux * lux * lux) // Rough approximation
+				details.Details = fmt.Sprintf("%.0f lux", lux)
+			}
+		}
+	}
+
+	return details
+}

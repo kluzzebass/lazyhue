@@ -149,8 +149,16 @@ func (p *DetailsPanel) View(active bool) string {
 	contentLines := strings.Count(p.viewport.View(), "\n") + 1
 	totalLines := p.viewport.TotalLineCount()
 
+	// Calculate visible line indicator - clamp to actual content
+	lastVisibleLine := p.viewport.YOffset + contentLines
+	if lastVisibleLine > totalLines {
+		lastVisibleLine = totalLines
+	}
+
 	cfg := ui.BorderConfig{
 		Title:       "[0] Details",
+		ItemIndex:   lastVisibleLine - 1, // 0-based index of last visible line
+		ItemCount:   totalLines,
 		ScrollPos:   p.viewport.YOffset,
 		TotalHeight: totalLines,
 		ViewHeight:  contentLines,

@@ -13,9 +13,15 @@ import (
 
 // LogEntry represents a single log entry.
 type LogEntry struct {
-	Time    time.Time
-	Type    string // "event", "request", "response", "error"
-	Message string
+	Time           time.Time
+	Type           string  // "event", "request", "response", "error"
+	Message        string
+	ResourceType   string  // For events: "light", "scene", etc.
+	ResourceName   string  // For events: the human-readable name (styled differently)
+	Details        string  // For events: "on 50%", "activated", etc.
+	IndicatorColor string  // Hex color for brightness indicator (lights)
+	Brightness     float64 // Brightness 0-100 for indicator
+	IsOn           bool    // Whether the light/entity is on
 }
 
 // LogPanel displays a rolling log of events and requests.
@@ -78,15 +84,48 @@ func (p *LogPanel) AddEntry(entryType, message string) {
 	}
 }
 
-// AddEvent adds an SSE event entry.
-func (p *LogPanel) AddEvent(bridgeID, resourceType, resourceID string) {
-	// Truncate resource ID safely
-	shortResource := resourceID
-	if len(shortResource) > 8 {
-		shortResource = shortResource[:8]
+// EventDetails contains rich information about an SSE event.
+type EventDetails struct {
+	ResourceType   string  // "light", "scene", "motion", etc.
+	ResourceName   string  // Human-readable name
+	EventType      string  // "update", "add", "delete"
+	Details        string  // What changed: "on", "off", "50%", "activated", "motion detected"
+	IndicatorColor string  // Hex color for brightness indicator (lights)
+	Brightness     float64 // Brightness 0-100 for indicator
+	IsOn           bool    // Whether the light/entity is on
+}
+
+// AddEvent adds an SSE event entry with rich details.
+func (p *LogPanel) AddEvent(details EventDetails) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	entry := LogEntry{
+		Time:           time.Now(),
+		Type:           "event",
+		ResourceType:   details.ResourceType,
+		ResourceName:   details.ResourceName,
+		Details:        details.Details,
+		IndicatorColor: details.IndicatorColor,
+		Brightness:     details.Brightness,
+		IsOn:           details.IsOn,
 	}
-	msg := fmt.Sprintf("%s %s", resourceType, shortResource)
-	p.AddEntry("event", msg)
+
+	// If scrolled away from top, increment offset to keep current view stable
+	if p.offset > 0 {
+		p.offset++
+	}
+
+	p.entries = append(p.entries, entry)
+
+	// Trim if too many entries
+	if len(p.entries) > p.maxSize {
+		p.entries = p.entries[len(p.entries)-p.maxSize:]
+		maxOff := p.maxOffset()
+		if p.offset > maxOff {
+			p.offset = maxOff
+		}
+	}
 }
 
 // AddRequest adds an API request entry.
@@ -118,8 +157,19 @@ func (p *LogPanel) maxOffset() int {
 	return maxOff
 }
 
-// ScrollUp scrolls the log up by n lines.
+// ScrollUp scrolls the log up by n lines (to see older entries).
 func (p *LogPanel) ScrollUp(n int) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	maxOffset := p.maxOffset()
+	p.offset += n
+	if p.offset > maxOffset {
+		p.offset = maxOffset
+	}
+}
+
+// ScrollDown scrolls the log down by n lines (to see newer entries).
+func (p *LogPanel) ScrollDown(n int) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.offset -= n
@@ -128,36 +178,18 @@ func (p *LogPanel) ScrollUp(n int) {
 	}
 }
 
-// ScrollDown scrolls the log down by n lines.
-func (p *LogPanel) ScrollDown(n int) {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	viewHeight := p.height - 2
-	if viewHeight < 1 {
-		viewHeight = 1
-	}
-	maxOffset := len(p.entries) - viewHeight
-	if maxOffset < 0 {
-		maxOffset = 0
-	}
-	p.offset += n
-	if p.offset > maxOffset {
-		p.offset = maxOffset
-	}
-}
-
-// ScrollToTop scrolls to newest entries (top of display).
+// ScrollToTop scrolls to oldest entries (top of log).
 func (p *LogPanel) ScrollToTop() {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	p.offset = 0
+	p.offset = p.maxOffset()
 }
 
-// ScrollToEnd scrolls to oldest entries (bottom of display).
+// ScrollToEnd scrolls to newest entries (bottom of log).
 func (p *LogPanel) ScrollToEnd() {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	p.offset = p.maxOffset()
+	p.offset = 0
 }
 
 // View renders the log panel.
@@ -176,19 +208,24 @@ func (p *LogPanel) View(active bool) string {
 		contentHeight = 1
 	}
 
-	// Build visible entries (newest first - reverse order)
+	// Build visible entries (chronological order - oldest at top, newest at bottom)
 	var lines []string
 	viewHeight := contentHeight
 	totalEntries := len(p.entries)
 
-	// Calculate which entries to show (offset from the end, displayed in reverse)
-	startIdx := totalEntries - 1 - p.offset
-	endIdx := startIdx - viewHeight
-	if endIdx < -1 {
-		endIdx = -1
+	// Calculate which entries to show
+	// offset=0 means we're viewing the newest entries (at the end of the slice)
+	// higher offset means scrolling up to see older entries
+	endIdx := totalEntries - p.offset
+	startIdx := endIdx - viewHeight
+	if startIdx < 0 {
+		startIdx = 0
+	}
+	if endIdx > totalEntries {
+		endIdx = totalEntries
 	}
 
-	for i := startIdx; i > endIdx && i >= 0; i-- {
+	for i := startIdx; i < endIdx; i++ {
 		entry := p.entries[i]
 		line := p.renderEntry(entry, contentWidth)
 		lines = append(lines, line)
@@ -202,9 +239,17 @@ func (p *LogPanel) View(active bool) string {
 	content := strings.Join(lines, "\n")
 
 	// Use standard bordered panel rendering
+	// For log panel, ItemIndex shows the last visible line number
+	lastVisibleIdx := len(p.entries) - p.offset
+	if lastVisibleIdx < 0 {
+		lastVisibleIdx = 0
+	}
+
 	cfg := ui.BorderConfig{
 		PanelKey:    p.panelKey,
 		Title:       p.panelTitle,
+		ItemIndex:   lastVisibleIdx - 1, // 0-based index of last visible
+		ItemCount:   len(p.entries),
 		ScrollPos:   p.offset,
 		TotalHeight: len(p.entries),
 		ViewHeight:  contentHeight,
@@ -233,7 +278,63 @@ func (p *LogPanel) renderEntry(entry LogEntry, width int) string {
 	}
 
 	typeIndicator := typeStyle.Render(string(entry.Type[0]))
-	line := fmt.Sprintf("%s %s %s", p.styles.Muted.Render(timeStr), typeIndicator, entry.Message)
+
+	var line string
+	if entry.Type == "event" && entry.ResourceType != "" {
+		// For events, style the resource name in a faded color
+		nameStyle := lipgloss.NewStyle().Foreground(p.styles.Theme.Muted)
+
+		// Build brightness/color indicator for lights
+		var indicator string
+		if (entry.ResourceType == "light" || entry.ResourceType == "grouped_light") && entry.IsOn {
+			indicatorChar := brightnessIndicatorLog(entry.Brightness)
+			if entry.IndicatorColor != "" {
+				indicatorStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(entry.IndicatorColor))
+				indicator = indicatorStyle.Render(indicatorChar) + " "
+			} else {
+				indicator = lipgloss.NewStyle().Foreground(p.styles.Theme.OnColor).Render(indicatorChar) + " "
+			}
+		} else if (entry.ResourceType == "light" || entry.ResourceType == "grouped_light") && !entry.IsOn {
+			indicator = p.styles.Muted.Render("○") + " "
+		}
+
+		if entry.ResourceName != "" {
+			if entry.Details != "" {
+				line = fmt.Sprintf("%s %s %s%s %s → %s",
+					p.styles.Muted.Render(timeStr),
+					typeIndicator,
+					indicator,
+					entry.ResourceType,
+					nameStyle.Render(entry.ResourceName),
+					entry.Details)
+			} else {
+				line = fmt.Sprintf("%s %s %s%s %s",
+					p.styles.Muted.Render(timeStr),
+					typeIndicator,
+					indicator,
+					entry.ResourceType,
+					nameStyle.Render(entry.ResourceName))
+			}
+		} else {
+			// No resource name - show details if available
+			if entry.Details != "" {
+				line = fmt.Sprintf("%s %s %s%s → %s",
+					p.styles.Muted.Render(timeStr),
+					typeIndicator,
+					indicator,
+					entry.ResourceType,
+					entry.Details)
+			} else {
+				line = fmt.Sprintf("%s %s %s%s update",
+					p.styles.Muted.Render(timeStr),
+					typeIndicator,
+					indicator,
+					entry.ResourceType)
+			}
+		}
+	} else {
+		line = fmt.Sprintf("%s %s %s", p.styles.Muted.Render(timeStr), typeIndicator, entry.Message)
+	}
 
 	// Truncate if needed
 	if lipgloss.Width(line) > width {
@@ -311,4 +412,21 @@ func (p *LogPanel) Update(msg tea.Msg) tea.Cmd {
 // Title returns the panel title.
 func (p *LogPanel) Title() string {
 	return "Activity"
+}
+
+// brightnessIndicatorLog returns a character representing the brightness level.
+// Uses circle fill characters: ○ ◔ ◑ ◕ ●
+func brightnessIndicatorLog(brightness float64) string {
+	switch {
+	case brightness <= 0:
+		return "○" // off/empty
+	case brightness < 37.5:
+		return "◔" // quarter (1-37%)
+	case brightness < 62.5:
+		return "◑" // half (38-62%)
+	case brightness < 87.5:
+		return "◕" // three-quarters (63-87%)
+	default:
+		return "●" // full (88-100%)
+	}
 }

@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
-	"runtime/debug"
 	"syscall"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -31,14 +30,6 @@ func init() {
 }
 
 func run(cmd *cobra.Command, args []string) {
-	// Capture panics and print stack trace
-	defer func() {
-		if r := recover(); r != nil {
-			fmt.Fprintf(os.Stderr, "\n=== PANIC ===\n%v\n\n%s\n", r, debug.Stack())
-			os.Exit(1)
-		}
-	}()
-
 	// Initialize debug logging if requested
 	if debugLog != "" {
 		if err := lazydebug.Init(debugLog); err != nil {
@@ -77,7 +68,6 @@ func run(cmd *cobra.Command, args []string) {
 		model,
 		tea.WithAltScreen(),
 		tea.WithMouseCellMotion(), // Enable mouse support
-		tea.WithoutCatchPanics(),  // Let panics bubble up with stack traces
 	)
 
 	// Handle SIGTERM/SIGINT to save state before exiting
@@ -97,14 +87,6 @@ func run(cmd *cobra.Command, args []string) {
 }
 
 func main() {
-	// Top-level panic capture
-	defer func() {
-		if r := recover(); r != nil {
-			fmt.Fprintf(os.Stderr, "\n=== PANIC (main) ===\n%v\n\n%s\n", r, debug.Stack())
-			os.Exit(1)
-		}
-	}()
-
 	if err := rootCmd.Execute(); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)

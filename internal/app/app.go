@@ -61,16 +61,49 @@ type Model struct {
 	height int
 
 	// State
-	ready         bool
-	quitting      bool
-	pairing       bool
-	pairingFor    *hue.BridgeInfo
-	pairingCancel context.CancelFunc
-	statusMsg     string
-	isError       bool
+	ready           bool
+	quitting        bool
+	pairing         bool
+	pairingFor      *hue.BridgeInfo
+	pairingCancel   context.CancelFunc
+	statusMsg       string
+	isError         bool
+	logPanelVisible bool
 
 	// SSE event channel for receiving bridge events from goroutines
 	eventChan chan BridgeEventMsg
+}
+
+// buildLayoutTree creates the layout tree with or without the log panel.
+func buildLayoutTree(showLog bool) *layout.Tree {
+	var rightColumn layout.Node
+	if showLog {
+		// Right column split into detail (⅔) and log (⅓)
+		rightColumn = layout.VSplit(
+			layout.Child{Size: layout.Flex(0.67), Node: layout.NewLeaf(PanelIDDetail)},
+			layout.Child{Size: layout.Flex(0.33), Node: layout.NewLeaf(PanelIDLog)},
+		)
+	} else {
+		// Right column is just detail panel
+		rightColumn = layout.NewLeaf(PanelIDDetail)
+	}
+
+	return layout.NewTree(
+		layout.VSplit(
+			// Main content area
+			layout.Child{Size: layout.Flex(1), Node: layout.HSplit(
+				// Left column (40%)
+				layout.Child{Size: layout.Flex(0.4), Node: layout.VSplit(
+					layout.Child{Size: layout.Fixed(5), Node: layout.NewLeaf(PanelIDBridges)},
+					layout.Child{Size: layout.Flex(1), Node: layout.NewLeaf(PanelIDHierarchy)},
+				)},
+				// Right column (60%)
+				layout.Child{Size: layout.Flex(0.6), Node: rightColumn},
+			)},
+			// Status bar at bottom
+			layout.Child{Size: layout.Fixed(1), Node: layout.NewLeaf(PanelIDStatus)},
+		),
+	)
 }
 
 // New creates a new application model.
@@ -90,25 +123,8 @@ func New(cfg *config.Config, creds *config.CredentialStore, uiState *config.UISt
 	}
 
 	// Build layout tree - this defines visual structure
-	layoutTree := layout.NewTree(
-		layout.VSplit(
-			// Main content area
-			layout.Child{Size: layout.Flex(1), Node: layout.HSplit(
-				// Left column (40%)
-				layout.Child{Size: layout.Flex(0.4), Node: layout.VSplit(
-					layout.Child{Size: layout.Fixed(5), Node: layout.NewLeaf(PanelIDBridges)},
-					layout.Child{Size: layout.Flex(1), Node: layout.NewLeaf(PanelIDHierarchy)},
-				)},
-				// Right column (60%) - split into detail (⅔) and log (⅓)
-				layout.Child{Size: layout.Flex(0.6), Node: layout.VSplit(
-					layout.Child{Size: layout.Flex(0.67), Node: layout.NewLeaf(PanelIDDetail)},
-					layout.Child{Size: layout.Flex(0.33), Node: layout.NewLeaf(PanelIDLog)},
-				)},
-			)},
-			// Status bar at bottom
-			layout.Child{Size: layout.Fixed(1), Node: layout.NewLeaf(PanelIDStatus)},
-		),
-	)
+	// Build initial layout without log panel (starts hidden)
+	layoutTree := buildLayoutTree(false)
 
 	m := Model{
 		config:       cfg,
@@ -235,6 +251,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.Batch(cmds...)
 
 	case tea.MouseMsg:
+		// Handle mouse in popup panel first (highest priority modal)
+		if m.popupPanel.IsVisible() {
+			if cmd := m.popupPanel.Update(msg); cmd != nil {
+				cmds = append(cmds, cmd)
+			}
+			return m, tea.Batch(cmds...)
+		}
+
 		// Handle mouse in help panel when visible
 		if m.helpPanel.IsVisible() {
 			cmd := m.helpPanel.Update(msg)
@@ -318,8 +342,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case BridgeEventMsg:
 		// SSE event received - state was already updated in-memory by the bridge
-		// Log the event
-		m.logPanel.AddEvent(msg.BridgeID, msg.ResourceType, msg.ResourceID)
+		// Log the event with rich details
+		details := m.buildEventDetails(msg)
+		m.logPanel.AddEvent(details)
 		// Just flash the indicator for THIS bridge and refresh the UI
 		m.bridgePanel().SetPolling(msg.BridgeID, true)
 		cmds = append(cmds, tea.Tick(300*time.Millisecond, func(t time.Time) tea.Msg {

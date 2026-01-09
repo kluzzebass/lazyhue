@@ -252,7 +252,7 @@ func (p *DetailsPanel) buildScenesCategoryView(data ScenesCategoryData) *details
 						} else {
 							totalBrightness += 100
 						}
-						color := getLightColor(light)
+						color := GetLightColor(light)
 						colorStr := string(color)
 						if len(colorStr) == 7 && colorStr[0] == '#' {
 							var r, g, b int
