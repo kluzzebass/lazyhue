@@ -189,10 +189,7 @@ func BuildRoomItems(state *hue.BridgeState) []list.Item {
 	rooms := state.AllRooms()
 	items := make([]list.Item, 0, len(rooms))
 	for _, room := range rooms {
-		name := ""
-		if room.Metadata != nil && room.Metadata.Name != nil {
-			name = *room.Metadata.Name
-		}
+		name := hue.RoomName(room, "")
 		id := ""
 		if room.Id != nil {
 			id = *room.Id
@@ -214,14 +211,6 @@ func BuildLightItems(state *hue.BridgeState) []list.Item {
 	lights := state.AllLights()
 	items := make([]list.Item, 0, len(lights))
 
-	// Build device ID -> name lookup for proper light names
-	deviceNames := make(map[string]string)
-	for _, device := range state.AllDevices() {
-		if device.Id != nil && device.Metadata != nil && device.Metadata.Name != nil {
-			deviceNames[*device.Id] = *device.Metadata.Name
-		}
-	}
-
 	for _, light := range lights {
 		id := ""
 		if light.Id != nil {
@@ -229,15 +218,7 @@ func BuildLightItems(state *hue.BridgeState) []list.Item {
 		}
 
 		// Get name from owning device (preferred) or fall back to light metadata
-		name := ""
-		if light.Owner != nil && light.Owner.Rid != nil {
-			if deviceName, ok := deviceNames[*light.Owner.Rid]; ok {
-				name = deviceName
-			}
-		}
-		if name == "" && light.Metadata != nil && light.Metadata.Name != nil {
-			name = *light.Metadata.Name
-		}
+		name := state.GetLightName(light)
 
 		// Get brightness and color for indicator
 		var brightness float64
@@ -277,16 +258,13 @@ func BuildSceneItems(state *hue.BridgeState) []list.Item {
 	// Build room ID -> name lookup
 	roomNames := make(map[string]string)
 	for _, room := range state.AllRooms() {
-		if room.Id != nil && room.Metadata != nil && room.Metadata.Name != nil {
-			roomNames[*room.Id] = *room.Metadata.Name
+		if room.Id != nil {
+			roomNames[*room.Id] = hue.RoomName(room, "")
 		}
 	}
 
 	for _, scene := range scenes {
-		name := ""
-		if scene.Metadata != nil && scene.Metadata.Name != nil {
-			name = *scene.Metadata.Name
-		}
+		name := hue.SceneName(scene, "")
 
 		// Add room/zone context
 		if scene.Group != nil && scene.Group.Rid != nil {
@@ -374,15 +352,15 @@ func BuildSceneTree(state *hue.BridgeState) []*TreeNode {
 	groupIsZone := make(map[string]bool)
 
 	for _, room := range state.AllRooms() {
-		if room.Id != nil && room.Metadata != nil && room.Metadata.Name != nil {
-			groupNames[*room.Id] = *room.Metadata.Name
+		if room.Id != nil {
+			groupNames[*room.Id] = hue.RoomName(room, "")
 			groupIsZone[*room.Id] = false
 		}
 	}
 
 	for _, zone := range state.AllZones() {
-		if zone.Id != nil && zone.Metadata != nil && zone.Metadata.Name != nil {
-			groupNames[*zone.Id] = *zone.Metadata.Name
+		if zone.Id != nil {
+			groupNames[*zone.Id] = hue.RoomName(zone, "")
 			groupIsZone[*zone.Id] = true
 		}
 	}
@@ -433,10 +411,7 @@ func BuildSceneTree(state *hue.BridgeState) []*TreeNode {
 		}
 
 		for _, scene := range groupScenes[entry.id] {
-			name := ""
-			if scene.Metadata != nil && scene.Metadata.Name != nil {
-				name = *scene.Metadata.Name
-			}
+			name := hue.SceneName(scene, "")
 			id := ""
 			if scene.Id != nil {
 				id = *scene.Id
@@ -459,10 +434,7 @@ func BuildSceneTree(state *hue.BridgeState) []*TreeNode {
 
 	// Add ungrouped scenes at root level
 	for _, scene := range ungroupedScenes {
-		name := ""
-		if scene.Metadata != nil && scene.Metadata.Name != nil {
-			name = *scene.Metadata.Name
-		}
+		name := hue.SceneName(scene, "")
 		id := ""
 		if scene.Id != nil {
 			id = *scene.Id
@@ -493,10 +465,7 @@ func BuildZoneItems(state *hue.BridgeState) []list.Item {
 			id = *zone.Id
 		}
 
-		name := ""
-		if zone.Metadata != nil && zone.Metadata.Name != nil {
-			name = *zone.Metadata.Name
-		}
+		name := hue.RoomName(zone, "")
 
 		isOn := state.IsZoneOn(zone)
 
@@ -549,10 +518,7 @@ func BuildDeviceItems(state *hue.BridgeState) []list.Item {
 			continue
 		}
 
-		name := ""
-		if device.Metadata != nil && device.Metadata.Name != nil {
-			name = *device.Metadata.Name
-		}
+		name := hue.DeviceName(device, "")
 
 		// Check if device has motion sensor and its state
 		hasMotion, isDetecting := state.GetDeviceMotionState(device)
@@ -575,14 +541,9 @@ func BuildEntertainmentItems(state *hue.BridgeState) []list.Item {
 	items := make([]list.Item, 0, len(configs))
 
 	for _, cfg := range configs {
-		name := cfg.ID
-		if cfg.Metadata != nil && cfg.Metadata.Name != "" {
-			name = cfg.Metadata.Name
-		}
-
 		items = append(items, EntityItem{
 			ID:     cfg.ID,
-			Name:   name,
+			Name:   hue.EntertainmentName(cfg, cfg.ID),
 			Type:   EntityEntertainment,
 			IsOn:   cfg.Status == "streaming",
 			RawPtr: cfg,
@@ -704,9 +665,7 @@ func BuildHierarchyTree(state *hue.BridgeState) []*TreeNode {
 		if group.Id != nil {
 			groupID = *group.Id
 		}
-		if group.Metadata != nil && group.Metadata.Name != nil {
-			groupName = *group.Metadata.Name
-		}
+		groupName = hue.RoomName(group, "")
 
 		label := groupName
 		entityType := EntityRoom
@@ -767,16 +726,12 @@ func BuildHierarchyTree(state *hue.BridgeState) []*TreeNode {
 			// Get name from owning device
 			if groupLights[i].Owner != nil && groupLights[i].Owner.Rid != nil {
 				if device, ok := deviceMap[*groupLights[i].Owner.Rid]; ok {
-					if device.Metadata != nil && device.Metadata.Name != nil {
-						nameI = *device.Metadata.Name
-					}
+					nameI = hue.DeviceName(device, "")
 				}
 			}
 			if groupLights[j].Owner != nil && groupLights[j].Owner.Rid != nil {
 				if device, ok := deviceMap[*groupLights[j].Owner.Rid]; ok {
-					if device.Metadata != nil && device.Metadata.Name != nil {
-						nameJ = *device.Metadata.Name
-					}
+					nameJ = hue.DeviceName(device, "")
 				}
 			}
 			return nameI < nameJ
@@ -784,14 +739,7 @@ func BuildHierarchyTree(state *hue.BridgeState) []*TreeNode {
 
 		// Sort devices by name
 		sort.Slice(groupDevices, func(i, j int) bool {
-			nameI, nameJ := "", ""
-			if groupDevices[i].Metadata != nil && groupDevices[i].Metadata.Name != nil {
-				nameI = *groupDevices[i].Metadata.Name
-			}
-			if groupDevices[j].Metadata != nil && groupDevices[j].Metadata.Name != nil {
-				nameJ = *groupDevices[j].Metadata.Name
-			}
-			return nameI < nameJ
+			return hue.DeviceName(groupDevices[i], "") < hue.DeviceName(groupDevices[j], "")
 		})
 
 		// Lights category
@@ -841,14 +789,7 @@ func BuildHierarchyTree(state *hue.BridgeState) []*TreeNode {
 		if len(scenes) > 0 {
 			// Sort scenes by name
 			sort.Slice(scenes, func(i, j int) bool {
-				nameI, nameJ := "", ""
-				if scenes[i].Metadata != nil && scenes[i].Metadata.Name != nil {
-					nameI = *scenes[i].Metadata.Name
-				}
-				if scenes[j].Metadata != nil && scenes[j].Metadata.Name != nil {
-					nameJ = *scenes[j].Metadata.Name
-				}
-				return nameI < nameJ
+				return hue.SceneName(scenes[i], "") < hue.SceneName(scenes[j], "")
 			})
 
 			scenesNode := &TreeNode{
@@ -886,10 +827,7 @@ func BuildHierarchyTree(state *hue.BridgeState) []*TreeNode {
 	// Add entertainment areas
 	entertainmentConfigs := state.AllEntertainmentConfigurations()
 	for _, cfg := range entertainmentConfigs {
-		name := cfg.ID
-		if cfg.Metadata != nil && cfg.Metadata.Name != "" {
-			name = cfg.Metadata.Name
-		}
+		name := hue.EntertainmentName(cfg, cfg.ID)
 
 		entNode := &TreeNode{
 			Label: name + " (entertainment)",
@@ -983,16 +921,12 @@ func BuildHierarchyTree(state *hue.BridgeState) []*TreeNode {
 				nameI, nameJ := "", ""
 				if ungroupedLights[i].Owner != nil && ungroupedLights[i].Owner.Rid != nil {
 					if device, ok := deviceMap[*ungroupedLights[i].Owner.Rid]; ok {
-						if device.Metadata != nil && device.Metadata.Name != nil {
-							nameI = *device.Metadata.Name
-						}
+						nameI = hue.DeviceName(device, "")
 					}
 				}
 				if ungroupedLights[j].Owner != nil && ungroupedLights[j].Owner.Rid != nil {
 					if device, ok := deviceMap[*ungroupedLights[j].Owner.Rid]; ok {
-						if device.Metadata != nil && device.Metadata.Name != nil {
-							nameJ = *device.Metadata.Name
-						}
+						nameJ = hue.DeviceName(device, "")
 					}
 				}
 				return nameI < nameJ
@@ -1020,14 +954,7 @@ func BuildHierarchyTree(state *hue.BridgeState) []*TreeNode {
 		if len(ungroupedDevices) > 0 {
 			// Sort by name
 			sort.Slice(ungroupedDevices, func(i, j int) bool {
-				nameI, nameJ := "", ""
-				if ungroupedDevices[i].Metadata != nil && ungroupedDevices[i].Metadata.Name != nil {
-					nameI = *ungroupedDevices[i].Metadata.Name
-				}
-				if ungroupedDevices[j].Metadata != nil && ungroupedDevices[j].Metadata.Name != nil {
-					nameJ = *ungroupedDevices[j].Metadata.Name
-				}
-				return nameI < nameJ
+				return hue.DeviceName(ungroupedDevices[i], "") < hue.DeviceName(ungroupedDevices[j], "")
 			})
 
 			devicesNode := &TreeNode{
@@ -1453,18 +1380,7 @@ func GetLightColor(light hueclient.LightGet) lipgloss.Color {
 // buildLightNode creates a tree node for a light.
 func buildLightNode(light hueclient.LightGet, state *hue.BridgeState) *TreeNode {
 	// Get the user-assigned name from the owning device
-	name := ""
-	if light.Owner != nil && light.Owner.Rid != nil {
-		if device, ok := state.GetDevice(*light.Owner.Rid); ok {
-			if device.Metadata != nil && device.Metadata.Name != nil {
-				name = *device.Metadata.Name
-			}
-		}
-	}
-	// Fallback to light's own metadata name if device lookup fails
-	if name == "" && light.Metadata != nil && light.Metadata.Name != nil {
-		name = *light.Metadata.Name
-	}
+	name := state.GetLightName(light)
 
 	id := ""
 	if light.Id != nil {
@@ -1503,10 +1419,7 @@ func buildLightNode(light hueclient.LightGet, state *hue.BridgeState) *TreeNode 
 
 // buildDeviceNode creates a tree node for a device.
 func buildDeviceNode(device hueclient.DeviceGet, state *hue.BridgeState) *TreeNode {
-	name := ""
-	if device.Metadata != nil && device.Metadata.Name != nil {
-		name = *device.Metadata.Name
-	}
+	name := hue.DeviceName(device, "")
 
 	id := ""
 	if device.Id != nil {
@@ -1549,10 +1462,7 @@ func buildDeviceNode(device hueclient.DeviceGet, state *hue.BridgeState) *TreeNo
 
 // buildSceneNode creates a tree node for a scene.
 func buildSceneNode(scene hueclient.SceneGet, state *hue.BridgeState) *TreeNode {
-	name := ""
-	if scene.Metadata != nil && scene.Metadata.Name != nil {
-		name = *scene.Metadata.Name
-	}
+	name := hue.SceneName(scene, "")
 
 	id := ""
 	if scene.Id != nil {

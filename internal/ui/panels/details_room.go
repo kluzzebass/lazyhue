@@ -5,6 +5,7 @@ import (
 	"math"
 	"strings"
 
+	"github.com/kluzzebass/lazyhue/internal/hue"
 	"github.com/kluzzebass/lazyhue/internal/hueclient"
 	"github.com/kluzzebass/lazyhue/internal/ui/panels/details"
 )
@@ -119,10 +120,7 @@ func (p *DetailsPanel) buildRoomView(roomAny interface{}, isZone bool) *details.
 			if isLight {
 				continue
 			}
-			name := *child.Rid
-			if device.Metadata != nil && device.Metadata.Name != nil {
-				name = *device.Metadata.Name
-			}
+			name := hue.DeviceName(device, *child.Rid)
 			nonLightDevices = append(nonLightDevices, name)
 		}
 
@@ -146,11 +144,7 @@ func (p *DetailsPanel) buildRoomView(roomAny interface{}, isZone bool) *details.
 		view.Add(details.Header("Scenes"))
 		scenesList := details.NewList()
 		for _, scene := range scenes {
-			name := ""
-			if scene.Metadata != nil && scene.Metadata.Name != nil {
-				name = *scene.Metadata.Name
-			}
-			scenesList.Add(name)
+			scenesList.Add(hue.SceneName(scene, ""))
 		}
 		view.Add(scenesList)
 	}

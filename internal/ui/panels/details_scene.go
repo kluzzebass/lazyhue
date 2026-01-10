@@ -3,6 +3,7 @@ package panels
 import (
 	"fmt"
 
+	"github.com/kluzzebass/lazyhue/internal/hue"
 	"github.com/kluzzebass/lazyhue/internal/hueclient"
 	"github.com/kluzzebass/lazyhue/internal/ui/panels/details"
 )
@@ -55,13 +56,9 @@ func (p *DetailsPanel) buildSceneView(sceneAny interface{}) *details.View {
 
 		if p.state != nil {
 			if room, ok := p.state.GetRoom(*scene.Group.Rid); ok {
-				if room.Metadata != nil && room.Metadata.Name != nil {
-					group.Add("Name", *room.Metadata.Name)
-				}
+				group.Add("Name", hue.RoomName(room, "Unknown"))
 			} else if zone, ok := p.state.GetZone(*scene.Group.Rid); ok {
-				if zone.Metadata != nil && zone.Metadata.Name != nil {
-					group.Add("Name", fmt.Sprintf("%s (zone)", *zone.Metadata.Name))
-				}
+				group.Add("Name", fmt.Sprintf("%s (zone)", hue.RoomName(zone, "Unknown")))
 			}
 		}
 		view.Add(group)

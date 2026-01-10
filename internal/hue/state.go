@@ -7,6 +7,53 @@ import (
 	"github.com/kluzzebass/lazyhue/internal/hueclient"
 )
 
+// Standalone name helper functions - use these when you don't have BridgeState access.
+// These safely handle nil Metadata and nil Name pointers.
+
+// DeviceName returns the name of a device, or fallback if not available.
+func DeviceName(device hueclient.DeviceGet, fallback string) string {
+	if device.Metadata != nil && device.Metadata.Name != nil {
+		return *device.Metadata.Name
+	}
+	return fallback
+}
+
+// RoomName returns the name of a room, or fallback if not available.
+func RoomName(room hueclient.RoomGet, fallback string) string {
+	if room.Metadata != nil && room.Metadata.Name != nil {
+		return *room.Metadata.Name
+	}
+	return fallback
+}
+
+// SceneName returns the name of a scene, or fallback if not available.
+func SceneName(scene hueclient.SceneGet, fallback string) string {
+	if scene.Metadata != nil && scene.Metadata.Name != nil {
+		return *scene.Metadata.Name
+	}
+	return fallback
+}
+
+// LightName returns the name from a light's metadata, or fallback if not available.
+// Note: For user-assigned names, prefer BridgeState.GetLightName which checks the owning device.
+func LightName(light hueclient.LightGet, fallback string) string {
+	if light.Metadata != nil && light.Metadata.Name != nil {
+		return *light.Metadata.Name
+	}
+	return fallback
+}
+
+// EntertainmentName returns the name of an entertainment configuration, or fallback if not available.
+func EntertainmentName(cfg EntertainmentConfiguration, fallback string) string {
+	if cfg.Metadata != nil && cfg.Metadata.Name != "" {
+		return cfg.Metadata.Name
+	}
+	if cfg.Name != "" {
+		return cfg.Name
+	}
+	return fallback
+}
+
 // BridgeState holds cached entities from a bridge using hueclient types.
 // Relationships are stored as IDs and resolved on-demand.
 type BridgeState struct {
@@ -113,6 +160,30 @@ func (s *BridgeState) GetLightName(light hueclient.LightGet) string {
 	// Fallback to light's own metadata (deprecated, but better than nothing)
 	if light.Metadata != nil && light.Metadata.Name != nil {
 		return *light.Metadata.Name
+	}
+	return "Unknown"
+}
+
+// GetDeviceName returns the name of a device, or "Unknown" if not available.
+func (s *BridgeState) GetDeviceName(device hueclient.DeviceGet) string {
+	if device.Metadata != nil && device.Metadata.Name != nil {
+		return *device.Metadata.Name
+	}
+	return "Unknown"
+}
+
+// GetRoomName returns the name of a room, or "Unknown" if not available.
+func (s *BridgeState) GetRoomName(room hueclient.RoomGet) string {
+	if room.Metadata != nil && room.Metadata.Name != nil {
+		return *room.Metadata.Name
+	}
+	return "Unknown"
+}
+
+// GetSceneName returns the name of a scene, or "Unknown" if not available.
+func (s *BridgeState) GetSceneName(scene hueclient.SceneGet) string {
+	if scene.Metadata != nil && scene.Metadata.Name != nil {
+		return *scene.Metadata.Name
 	}
 	return "Unknown"
 }

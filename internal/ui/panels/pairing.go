@@ -191,11 +191,11 @@ func (p *PairingPanel) View() string {
 	titleLen := len(title) + 2
 	leftPad := max(0, (width-2-titleLen)/2)
 	rightPad := max(0, width-2-titleLen-leftPad)
-	topBorder := p.colorize(tl, borderFg) +
-		p.colorize(strings.Repeat(horiz, leftPad), borderFg) +
-		p.colorize(" "+title+" ", p.styles.Theme.Accent) +
-		p.colorize(strings.Repeat(horiz, rightPad), borderFg) +
-		p.colorize(tr, borderFg)
+	topBorder := ui.Colorize(tl, borderFg) +
+		ui.Colorize(strings.Repeat(horiz, leftPad), borderFg) +
+		ui.Colorize(" "+title+" ", p.styles.Theme.Accent) +
+		ui.Colorize(strings.Repeat(horiz, rightPad), borderFg) +
+		ui.Colorize(tr, borderFg)
 
 	// Content
 	var lines []string
@@ -222,17 +222,17 @@ func (p *PairingPanel) View() string {
 	var wrappedLines []string
 	for _, line := range lines {
 		wrappedLines = append(wrappedLines,
-			p.colorize(vert, borderFg)+" "+line+" "+p.colorize(vert, borderFg))
+			ui.Colorize(vert, borderFg)+" "+line+" "+ui.Colorize(vert, borderFg))
 	}
 
 	// Bottom border with hint
-	hint := p.colorize(" Esc:cancel ", p.styles.Theme.Muted)
+	hint := ui.Colorize(" Esc:cancel ", p.styles.Theme.Muted)
 	hintLen := lipgloss.Width(hint)
 	bottomPad := max(0, width-2-hintLen)
-	bottomBorder := p.colorize(bl, borderFg) +
-		p.colorize(strings.Repeat(horiz, bottomPad), borderFg) +
+	bottomBorder := ui.Colorize(bl, borderFg) +
+		ui.Colorize(strings.Repeat(horiz, bottomPad), borderFg) +
 		hint +
-		p.colorize(br, borderFg)
+		ui.Colorize(br, borderFg)
 
 	var result []string
 	result = append(result, topBorder)
@@ -248,8 +248,4 @@ func (p *PairingPanel) padLine(s string, width int) string {
 		return s
 	}
 	return s + strings.Repeat(" ", width-sLen)
-}
-
-func (p *PairingPanel) colorize(s string, color lipgloss.Color) string {
-	return lipgloss.NewStyle().Foreground(color).Render(s)
 }

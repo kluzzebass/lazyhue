@@ -500,9 +500,7 @@ func (m *Model) showRenamePopup() tea.Cmd {
 		}
 		itemID = *bridgeDevice.Id
 		itemType = panels.EntityDevice
-		if bridgeDevice.Metadata != nil && bridgeDevice.Metadata.Name != nil {
-			currentName = *bridgeDevice.Metadata.Name
-		}
+		currentName = hue.DeviceName(bridgeDevice, "")
 		entityType = "bridge"
 	case panels.EntityDevice:
 		entityType = "device"
@@ -528,9 +526,7 @@ func (m *Model) showRenamePopup() tea.Cmd {
 		}
 		itemID = *light.Owner.Rid
 		itemType = panels.EntityDevice
-		if device.Metadata != nil && device.Metadata.Name != nil {
-			currentName = *device.Metadata.Name
-		}
+		currentName = hue.DeviceName(device, "")
 		entityType = "device"
 	default:
 		m.setStatusTemporary("This item cannot be renamed", false, 3*time.Second)
@@ -767,4 +763,3 @@ func startBlinkTicker() tea.Cmd {
 		return blinkTickMsg{}
 	})
 }
-

@@ -345,17 +345,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.updateDetailPanel()
 		}
 
-	case MotionSensorsSyncedMsg:
-		// Log the request if action info is provided
-		if msg.Action != "" {
-			m.logPanel.AddEntry("request", msg.Target+": "+msg.Action)
-		}
-		// Refresh UI when motion sensor state changes
-		if msg.BridgeID == m.displayedBridgeID {
-			m.refreshHierarchyPanel()
-			m.updateDetailPanel()
-		}
-
 	case BridgeEventMsg:
 		// SSE event received - state was already updated in-memory by the bridge
 		// Log the event with rich details

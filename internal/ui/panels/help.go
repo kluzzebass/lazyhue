@@ -343,11 +343,11 @@ func (h *HelpPanel) View() string {
 	titleLen := len(title) + 2
 	leftPad := max(0, (width-2-titleLen)/2)
 	rightPad := max(0, width-2-titleLen-leftPad)
-	topBorder := h.colorize(tl, borderFg) +
-		h.colorize(strings.Repeat(horiz, leftPad), borderFg) +
-		h.colorize(" "+title+" ", h.styles.Theme.Accent) +
-		h.colorize(strings.Repeat(horiz, rightPad), borderFg) +
-		h.colorize(tr, borderFg)
+	topBorder := ui.Colorize(tl, borderFg) +
+		ui.Colorize(strings.Repeat(horiz, leftPad), borderFg) +
+		ui.Colorize(" "+title+" ", h.styles.Theme.Accent) +
+		ui.Colorize(strings.Repeat(horiz, rightPad), borderFg) +
+		ui.Colorize(tr, borderFg)
 
 	// Content lines
 	var contentLines []string
@@ -402,25 +402,25 @@ func (h *HelpPanel) View() string {
 	var wrappedLines []string
 	maxScroll := max(0, len(h.items)-viewHeight)
 	for i, line := range contentLines {
-		rightBorderStr := h.colorize(vert, borderFg)
+		rightBorderStr := ui.Colorize(vert, borderFg)
 		// Scroll indicator
 		if maxScroll > 0 {
 			thumbPos, thumbSize := h.scrollThumb(viewHeight, maxScroll)
 			if i >= thumbPos && i < thumbPos+thumbSize {
-				rightBorderStr = h.colorize("┃", borderFg)
+				rightBorderStr = ui.Colorize("┃", borderFg)
 			}
 		}
-		wrappedLines = append(wrappedLines, h.colorize(vert, borderFg)+" "+line+" "+rightBorderStr)
+		wrappedLines = append(wrappedLines, ui.Colorize(vert, borderFg)+" "+line+" "+rightBorderStr)
 	}
 
 	// Bottom border with hint
-	hint := h.colorize(" Enter:execute  Esc:close ", h.styles.Theme.Muted)
+	hint := ui.Colorize(" Enter:execute  Esc:close ", h.styles.Theme.Muted)
 	hintLen := lipgloss.Width(hint)
 	bottomPad := max(0, width-2-hintLen)
-	bottomBorder := h.colorize(bl, borderFg) +
-		h.colorize(strings.Repeat(horiz, bottomPad), borderFg) +
+	bottomBorder := ui.Colorize(bl, borderFg) +
+		ui.Colorize(strings.Repeat(horiz, bottomPad), borderFg) +
 		hint +
-		h.colorize(br, borderFg)
+		ui.Colorize(br, borderFg)
 
 	var result []string
 	result = append(result, topBorder)
@@ -440,8 +440,4 @@ func (h *HelpPanel) scrollThumb(viewHeight, maxScroll int) (pos, size int) {
 		pos = h.scroll * (viewHeight - size) / maxScroll
 	}
 	return pos, size
-}
-
-func (h *HelpPanel) colorize(s string, color lipgloss.Color) string {
-	return lipgloss.NewStyle().Foreground(color).Render(s)
 }

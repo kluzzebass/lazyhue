@@ -1883,11 +1883,11 @@ func (p *PopupPanel) View() string {
 	titleLen := len(p.title) + 2 // +2 for spaces
 	leftPad := max(0, (width-2-titleLen)/2)
 	rightPad := max(0, width-2-titleLen-leftPad)
-	topBorder := p.colorize(tl, borderFg) +
-		p.colorize(strings.Repeat(horiz, leftPad), borderFg) +
-		p.colorize(" "+p.title+" ", p.styles.Theme.Accent) +
-		p.colorize(strings.Repeat(horiz, rightPad), borderFg) +
-		p.colorize(tr, borderFg)
+	topBorder := ui.Colorize(tl, borderFg) +
+		ui.Colorize(strings.Repeat(horiz, leftPad), borderFg) +
+		ui.Colorize(" "+p.title+" ", p.styles.Theme.Accent) +
+		ui.Colorize(strings.Repeat(horiz, rightPad), borderFg) +
+		ui.Colorize(tr, borderFg)
 
 	// Build content based on mode
 	var contentLines []string
@@ -1908,25 +1908,25 @@ func (p *PopupPanel) View() string {
 	var wrappedLines []string
 	for i, line := range contentLines {
 		// Right border - scroll indicator for display mode
-		rightBorderStr := p.colorize(vert, borderFg)
+		rightBorderStr := ui.Colorize(vert, borderFg)
 		if p.mode == PopupModeDisplay && p.maxScroll() > 0 {
 			thumbPos, thumbSize := p.scrollThumb(len(contentLines))
 			if i >= thumbPos && i < thumbPos+thumbSize {
-				rightBorderStr = p.colorize("┃", borderFg)
+				rightBorderStr = ui.Colorize("┃", borderFg)
 			}
 		}
 		wrappedLines = append(wrappedLines,
-			p.colorize(vert, borderFg)+" "+line+" "+rightBorderStr)
+			ui.Colorize(vert, borderFg)+" "+line+" "+rightBorderStr)
 	}
 
 	// Build bottom border with hints on the right
 	hints := p.getHints()
 	hintsLen := lipgloss.Width(hints)
 	bottomPad := max(0, width-2-hintsLen)
-	bottomBorder := p.colorize(bl, borderFg) +
-		p.colorize(strings.Repeat(horiz, bottomPad), borderFg) +
+	bottomBorder := ui.Colorize(bl, borderFg) +
+		ui.Colorize(strings.Repeat(horiz, bottomPad), borderFg) +
 		hints +
-		p.colorize(br, borderFg)
+		ui.Colorize(br, borderFg)
 
 	// Combine all
 	var result []string
@@ -2876,7 +2876,7 @@ func (p *PopupPanel) getHints() string {
 			}
 		}
 	}
-	return p.colorize(hint, p.styles.Theme.Muted)
+	return ui.Colorize(hint, p.styles.Theme.Muted)
 }
 
 func (p *PopupPanel) scrollThumb(viewHeight int) (pos int, size int) {
@@ -2892,11 +2892,6 @@ func (p *PopupPanel) scrollThumb(viewHeight int) (pos int, size int) {
 	}
 	return pos, size
 }
-
-func (p *PopupPanel) colorize(s string, color lipgloss.Color) string {
-	return lipgloss.NewStyle().Foreground(color).Render(s)
-}
-
 func (p *PopupPanel) padRight(s string, width int) string {
 	sLen := lipgloss.Width(s)
 	if sLen >= width {

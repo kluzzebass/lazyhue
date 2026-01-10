@@ -302,57 +302,11 @@ func recallScene(bridge *hue.Bridge, sceneID string) tea.Cmd {
 	return func() tea.Msg {
 		sceneName := sceneID
 		if scene, ok := bridge.GetState().GetScene(sceneID); ok {
-			if scene.Metadata != nil && scene.Metadata.Name != nil {
-				sceneName = *scene.Metadata.Name
-			}
+			sceneName = hue.SceneName(scene, sceneID)
 		}
 		if err := bridge.RecallScene(sceneID); err != nil {
 			return ActionErrorMsg{Action: "recall scene", Err: err}
 		}
 		return LightsSyncedMsg{BridgeID: bridge.Info.ID, Action: "activate", Target: sceneName}
-	}
-}
-
-// Motion sensor control commands
-
-func toggleMotionSensor(bridge *hue.Bridge, motionID string) tea.Cmd {
-	return func() tea.Msg {
-		sensorName := motionID
-		if motion, ok := bridge.GetState().GetMotionSensor(motionID); ok {
-			if motion.Owner != nil && motion.Owner.Rid != nil {
-				if device, ok := bridge.GetState().GetDevice(*motion.Owner.Rid); ok {
-					if device.Metadata != nil && device.Metadata.Name != nil {
-						sensorName = *device.Metadata.Name
-					}
-				}
-			}
-		}
-		if err := bridge.ToggleMotionSensor(motionID); err != nil {
-			return ActionErrorMsg{Action: "toggle motion sensor", Err: err}
-		}
-		return MotionSensorsSyncedMsg{BridgeID: bridge.Info.ID, Action: "toggle sensor", Target: sensorName}
-	}
-}
-
-func setMotionSensorSensitivity(bridge *hue.Bridge, motionID string, sensitivity int) tea.Cmd {
-	return func() tea.Msg {
-		sensorName := motionID
-		if motion, ok := bridge.GetState().GetMotionSensor(motionID); ok {
-			if motion.Owner != nil && motion.Owner.Rid != nil {
-				if device, ok := bridge.GetState().GetDevice(*motion.Owner.Rid); ok {
-					if device.Metadata != nil && device.Metadata.Name != nil {
-						sensorName = *device.Metadata.Name
-					}
-				}
-			}
-		}
-		if err := bridge.SetMotionSensorSensitivity(motionID, sensitivity); err != nil {
-			return ActionErrorMsg{Action: "set motion sensitivity", Err: err}
-		}
-		return MotionSensorsSyncedMsg{
-			BridgeID: bridge.Info.ID,
-			Action:   fmt.Sprintf("sensitivity %d", sensitivity),
-			Target:   sensorName,
-		}
 	}
 }
