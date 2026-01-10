@@ -68,6 +68,7 @@ type Model struct {
 	pairingCancel   context.CancelFunc
 	statusMsg       string
 	isError         bool
+	statusExpiry    time.Time // When to auto-clear status (zero means no expiry)
 	logPanelVisible bool
 
 	// SSE event channel for receiving bridge events from goroutines
@@ -297,7 +298,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					// Channel full, drop event (will catch up on next one)
 				}
 			})
-			m.setStatus("Connected to "+bridge.Info.Name, false)
+			m.setStatusTemporary("Connected to "+bridge.Info.Name, false, 3*time.Second)
 			m.updateBridgePanel() // This will set active bridge if none is set
 			cmds = append(cmds, syncBridgeState(bridge))
 		}
@@ -413,7 +414,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.Quit
 
 	case indicatorRefreshMsg:
-		// Just triggers a redraw to update indicator visibility
+		// Check if status message should be cleared
+		m.checkStatusExpiry()
 
 	case PairingTickMsg:
 		// Update the pairing panel and continue ticking while pairing is active
@@ -445,7 +447,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if bridge != nil {
 			bridge.Status = hue.StatusDisconnected
 		}
-		m.setStatus("Pairing cancelled", false)
+		m.setStatusTemporary("Pairing cancelled", false, 3*time.Second)
 		m.updateBridgePanel()
 
 	case PairingSuccessMsg:

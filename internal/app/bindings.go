@@ -11,6 +11,7 @@ func (m *Model) initBindings() {
 	m.panelBindings = map[string][]ui.Binding{
 		PanelIDBridges: {
 			{Keys: []string{"enter"}, Display: "<enter>", Desc: "Connect", Action: ui.ActionSelect, Priority: 100},
+			{Keys: []string{"r"}, Display: "r", Desc: "Rename", Action: ui.ActionRename, Priority: 95},
 			{Keys: []string{"x"}, Display: "x", Desc: "Forget bridge", Action: ui.ActionForgetBridge, Priority: 90},
 		},
 		PanelIDHierarchy: {
@@ -43,6 +44,7 @@ func (m *Model) initBindings() {
 		{Keys: []string{"]"}, Display: "]", Desc: "Next bridge", Action: ui.ActionNextBridge},
 		{Keys: []string{"["}, Display: "[", Desc: "Prev bridge", Action: ui.ActionPrevBridge},
 		{Keys: []string{"a"}, Display: "a", Desc: "Activity log", Action: ui.ActionToggleLog, Priority: 15},
+		{Keys: []string{"t"}, Display: "t", Desc: "Test form", Action: ui.ActionTestForm, Priority: 12},
 		{Keys: []string{"?"}, Display: "?", Desc: "Help", Action: ui.ActionHelp, Priority: 10},
 		{Keys: []string{"q", "ctrl+c"}, Display: "q", Desc: "Quit", Action: ui.ActionQuit, Priority: 5},
 	}

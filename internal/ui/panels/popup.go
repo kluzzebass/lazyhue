@@ -4,6 +4,7 @@ package panels
 import (
 	"fmt"
 	"strings"
+	"unicode"
 
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
@@ -46,6 +47,9 @@ const (
 	FormFieldColorTemp                       // Color temperature slider (warm to cool)
 	FormFieldColor                           // Color picker (XY color space)
 	FormFieldSelect                          // Dropdown selection from options
+	FormFieldRadio                           // Radio button group (inline options)
+	FormFieldHSL                             // HSL color picker (3 sliders: Hue, Saturation, Lightness)
+	FormFieldRGB                             // RGB color picker (3 sliders: Red, Green, Blue)
 )
 
 // SelectOption represents an option for FormFieldSelect.
@@ -74,7 +78,26 @@ type FormField struct {
 	ColorMode      int     // 0=hue, 1=saturation adjustment mode
 
 	// Select field options
-	Options []FormSelectOption // Available options for select field
+	Options  []FormSelectOption // Available options for select field
+	Vertical bool               // For radio buttons: true = vertical layout, false = horizontal
+
+	// HSL fields (for FormFieldHSL)
+	Hue            int // 0-360 degrees
+	Saturation     int // 0-100 percent
+	Lightness      int // 0-100 percent
+	OriginalHue    int // Original hue
+	OriginalSat    int // Original saturation
+	OriginalLight  int // Original lightness
+	HSLSliderFocus int // Which slider is focused: 0=hue, 1=sat, 2=light
+
+	// RGB fields (for FormFieldRGB)
+	Red            int // 0-255
+	Green          int // 0-255
+	Blue           int // 0-255
+	OriginalRed    int // Original red
+	OriginalGreen  int // Original green
+	OriginalBlue   int // Original blue
+	RGBSliderFocus int // Which slider is focused: 0=red, 1=green, 2=blue
 }
 
 // PopupPanel is a generic modal dialog.
@@ -105,13 +128,35 @@ type PopupPanel struct {
 	selectCursor  int
 
 	// Form mode
-	formFields     []FormField
-	formCursor     int  // Which field is focused
-	formOnButtons  bool // true when focus is on Save/Cancel buttons
-	formBtnIndex   int  // 0 = Save, 1 = Cancel
-	formTextInputs map[int]textinput.Model // Text inputs for FormFieldText fields (indexed by field index)
-	formLiveMode   bool                    // true = changes apply immediately, false = apply on Save
-	formOnChange   func(field FormField)   // Callback for live mode changes
+	formFields       []FormField
+	formCursor       int  // Which field is focused
+	formOnButtons    bool // true when focus is on Save/Cancel buttons
+	formBtnIndex     int  // 0 = Save, 1 = Cancel
+	formTextInputs   map[int]textinput.Model // Text inputs for FormFieldText fields (indexed by field index)
+	formLiveMode     bool                    // true = changes apply immediately, false = apply on Save
+	formOnChange     func(field FormField)   // Callback for live mode changes
+	formFieldEditing bool                    // true when current field is in edit mode (captures keys)
+	mouseCaptureIdx  int                     // Field index that has mouse capture (-1 = none)
+	mouseCaptureType FormFieldType           // Type of captured field for validation
+
+	// Select dropdown state
+	selectDropdownOpen       bool // Whether a select dropdown is currently open
+	selectDropdownCursor     int  // Highlighted option in dropdown
+	selectDropdownScroll     int  // Scroll offset for long dropdown lists
+	selectDropdownJustOpened bool // Flag to ignore the first mouse event after opening
+
+	// Radio edit state
+	radioEditCursor    int // Cursor position when editing radio (index into Options)
+	radioOriginalValue int // Original value before editing (for cancel)
+
+	// Color edit state
+	colorOriginalX float64 // Original X before editing (for cancel)
+	colorOriginalY float64 // Original Y before editing (for cancel)
+	colorSelRow    int     // Selected row on disc (screen coordinates)
+	colorSelCol    int     // Selected column on disc (screen coordinates)
+
+	// HSL/RGB slider capture state
+	capturedSliderRow int // Which sub-slider (0,1,2) is captured during drag (-1 = none)
 
 	// Sizing
 	screenWidth  int
@@ -227,6 +272,12 @@ func (p *PopupPanel) showFormInternal(title string, fields []FormField, onClose 
 	p.formCursor = 0
 	p.formOnButtons = false
 	p.formBtnIndex = 0
+	p.formFieldEditing = false  // Not editing any field initially
+	p.mouseCaptureIdx = -1      // No mouse capture initially
+	p.capturedSliderRow = -1    // No slider row captured
+	p.selectDropdownOpen = false
+	p.selectDropdownCursor = 0
+	p.selectDropdownScroll = 0
 
 	// Focus the first text input if applicable
 	if len(p.formFields) > 0 && p.formFields[0].Type == FormFieldText {
@@ -438,99 +489,134 @@ func (p *PopupPanel) handleSelectKey(msg tea.KeyMsg) tea.Cmd {
 func (p *PopupPanel) handleFormKey(msg tea.KeyMsg) tea.Cmd {
 	key := msg.String()
 
-	// Check if current field is a text input
-	isTextFieldFocused := !p.formOnButtons && p.formCursor < len(p.formFields) &&
-		p.formFields[p.formCursor].Type == FormFieldText
+	// Handle select dropdown if open
+	if p.selectDropdownOpen {
+		return p.handleSelectDropdownKey(msg)
+	}
 
-	// Handle escape and enter universally
-	switch key {
-	case "esc":
+	// Handle edit mode for text inputs and vertical radio
+	if p.formFieldEditing {
+		return p.handleFieldEditMode(msg)
+	}
+
+	// Handle escape - close form
+	if key == "esc" {
 		if p.formLiveMode {
-			// In live mode, Esc just closes (changes already applied)
 			p.close(PopupResult{Confirmed: true})
 		} else {
 			p.close(PopupResult{Confirmed: false})
 		}
 		return nil
+	}
 
-	case "enter":
+	// Handle enter
+	if key == "enter" {
 		if p.formOnButtons {
 			if p.formBtnIndex == 0 {
-				// Save/Done
 				p.close(PopupResult{Confirmed: true})
 			} else {
-				// Cancel
 				p.close(PopupResult{Confirmed: false})
 			}
 			return nil
 		}
-		// Enter on a field
+		// Enter on a field - activate editing or perform action
 		if p.formCursor < len(p.formFields) {
 			field := &p.formFields[p.formCursor]
-			if field.Type == FormFieldText {
-				// For text, move to Save button
-				p.formOnButtons = true
-				p.formBtnIndex = 0
-				p.blurAllTextInputs()
+			switch field.Type {
+			case FormFieldText:
+				// Enter edit mode for text
+				p.formFieldEditing = true
+				p.focusCurrentTextField()
 				return nil
-			} else if field.Type == FormFieldToggle {
-				// Toggle and potentially apply live
+			case FormFieldRadio:
+				// Enter edit mode for radio, set cursor to current value
+				p.formFieldEditing = true
+				p.radioOriginalValue = field.Value // Save for cancel
+				p.radioEditCursor = 0
+				for i, opt := range field.Options {
+					if opt.Value == field.Value {
+						p.radioEditCursor = i
+						break
+					}
+				}
+				return nil
+			case FormFieldColor:
+				// Enter edit mode for color
+				p.formFieldEditing = true
+				p.colorOriginalX = field.ColorX
+				p.colorOriginalY = field.ColorY
+				// Initialize screen position from current color
+				// Ellipse params must match rendering
+				radiusY := 4
+				radiusX := 9
+				whiteX, whiteY := 0.31, 0.33
+				p.colorSelRow = radiusY - int((field.ColorY-whiteY)*float64(radiusY)/0.35+0.5)
+				p.colorSelCol = radiusX + int((field.ColorX-whiteX)*float64(radiusX)/0.35+0.5)
+				// Clamp to valid range
+				if p.colorSelRow < 0 {
+					p.colorSelRow = 0
+				}
+				if p.colorSelRow > radiusY*2 {
+					p.colorSelRow = radiusY * 2
+				}
+				return nil
+			case FormFieldHSL:
+				// Enter edit mode for HSL
+				p.formFieldEditing = true
+				field.OriginalHue = field.Hue
+				field.OriginalSat = field.Saturation
+				field.OriginalLight = field.Lightness
+				field.HSLSliderFocus = 0 // Start on Hue slider
+				return nil
+			case FormFieldRGB:
+				// Enter edit mode for RGB
+				p.formFieldEditing = true
+				field.OriginalRed = field.Red
+				field.OriginalGreen = field.Green
+				field.OriginalBlue = field.Blue
+				field.RGBSliderFocus = 0 // Start on Red slider
+				return nil
+			case FormFieldToggle:
+				// Toggle immediately
 				field.Value = 1 - field.Value
 				p.notifyLiveChange(*field)
-			} else if p.formOnChange != nil {
-				// For other fields, toggle live mode
-				p.formLiveMode = !p.formLiveMode
-			}
-		}
-	}
-
-	// For text fields, pass most keys to the text input
-	if isTextFieldFocused {
-		switch key {
-		case "tab":
-			// Tab navigates to next field or buttons
-			p.blurAllTextInputs()
-			if p.formCursor < len(p.formFields)-1 {
-				p.formCursor++
-				p.focusCurrentTextField()
-			} else {
-				p.formOnButtons = true
-				p.formBtnIndex = 0
-			}
-			return nil
-		case "shift+tab":
-			// Shift+Tab navigates to previous field
-			p.blurAllTextInputs()
-			if p.formCursor > 0 {
-				p.formCursor--
-				p.focusCurrentTextField()
-			}
-			return nil
-		default:
-			// Pass to text input
-			if ti, ok := p.formTextInputs[p.formCursor]; ok {
-				var cmd tea.Cmd
-				ti, cmd = ti.Update(msg)
-				p.formTextInputs[p.formCursor] = ti
-				// Sync value back to field
-				p.formFields[p.formCursor].TextValue = ti.Value()
-				return cmd
+			case FormFieldSelect:
+				// Open dropdown
+				p.openSelectDropdown()
+				return nil
+			default:
+				// Toggle live mode for sliders etc
+				if p.formOnChange != nil {
+					p.formLiveMode = !p.formLiveMode
+				}
 			}
 		}
 		return nil
 	}
 
-	// Non-text field navigation
+	// Space on select opens dropdown, toggles for toggle fields
+	if key == " " {
+		if !p.formOnButtons && p.formCursor < len(p.formFields) {
+			field := &p.formFields[p.formCursor]
+			if field.Type == FormFieldSelect {
+				p.openSelectDropdown()
+				return nil
+			} else if field.Type == FormFieldToggle {
+				field.Value = 1 - field.Value
+				p.notifyLiveChange(*field)
+				return nil
+			}
+		}
+	}
+
+	// Standard field navigation (not in edit mode)
 	switch key {
 	case "tab", "down", "j":
 		if p.formOnButtons {
-			// Cycle between Save/Cancel
 			p.formBtnIndex = (p.formBtnIndex + 1) % 2
 		} else {
-			// Move to next field, or to buttons
 			if p.formCursor < len(p.formFields)-1 {
 				p.formCursor++
-				p.focusCurrentTextField()
 			} else {
 				p.formOnButtons = true
 				p.formBtnIndex = 0
@@ -542,25 +628,12 @@ func (p *PopupPanel) handleFormKey(msg tea.KeyMsg) tea.Cmd {
 			if p.formBtnIndex > 0 {
 				p.formBtnIndex--
 			} else {
-				// Move back to last field
 				p.formOnButtons = false
 				p.formCursor = len(p.formFields) - 1
-				p.focusCurrentTextField()
 			}
 		} else {
 			if p.formCursor > 0 {
 				p.formCursor--
-				p.focusCurrentTextField()
-			}
-		}
-
-	case " ":
-		// Space toggles boolean fields
-		if !p.formOnButtons && p.formCursor < len(p.formFields) {
-			field := &p.formFields[p.formCursor]
-			if field.Type == FormFieldToggle {
-				field.Value = 1 - field.Value
-				p.notifyLiveChange(*field)
 			}
 		}
 
@@ -574,22 +647,8 @@ func (p *PopupPanel) handleFormKey(msg tea.KeyMsg) tea.Cmd {
 					field.Value--
 					changed = true
 				}
-			case FormFieldColor:
-				// Adjust color based on mode
-				if field.ColorMode == 0 {
-					field.ColorX, field.ColorY = rotateColor(field.ColorX, field.ColorY, -0.02)
-				} else {
-					field.ColorX, field.ColorY = adjustSaturation(field.ColorX, field.ColorY, -0.02)
-				}
-				changed = true
-			case FormFieldSelect:
-				for i, opt := range field.Options {
-					if opt.Value == field.Value && i > 0 {
-						field.Value = field.Options[i-1].Value
-						changed = true
-						break
-					}
-				}
+			// Note: Color requires Enter to edit
+			// Note: Radio and Select require Enter to edit
 			}
 			if changed {
 				p.notifyLiveChange(*field)
@@ -608,21 +667,8 @@ func (p *PopupPanel) handleFormKey(msg tea.KeyMsg) tea.Cmd {
 					field.Value++
 					changed = true
 				}
-			case FormFieldColor:
-				if field.ColorMode == 0 {
-					field.ColorX, field.ColorY = rotateColor(field.ColorX, field.ColorY, 0.02)
-				} else {
-					field.ColorX, field.ColorY = adjustSaturation(field.ColorX, field.ColorY, 0.02)
-				}
-				changed = true
-			case FormFieldSelect:
-				for i, opt := range field.Options {
-					if opt.Value == field.Value && i < len(field.Options)-1 {
-						field.Value = field.Options[i+1].Value
-						changed = true
-						break
-					}
-				}
+			// Note: Color requires Enter to edit
+			// Note: Radio and Select require Enter to edit
 			}
 			if changed {
 				p.notifyLiveChange(*field)
@@ -631,20 +677,346 @@ func (p *PopupPanel) handleFormKey(msg tea.KeyMsg) tea.Cmd {
 			p.formBtnIndex = 1
 		}
 
-	case "m":
-		// Toggle color mode (hue/saturation) for color fields
-		if !p.formOnButtons && p.formCursor < len(p.formFields) {
-			field := &p.formFields[p.formCursor]
-			if field.Type == FormFieldColor {
-				field.ColorMode = 1 - field.ColorMode
-			}
-		}
 	}
 
 	return nil
 }
 
 // blurAllTextInputs removes focus from all text inputs.
+// handleFieldEditMode handles keys when a field is in edit mode.
+func (p *PopupPanel) handleFieldEditMode(msg tea.KeyMsg) tea.Cmd {
+	key := msg.String()
+	field := &p.formFields[p.formCursor]
+
+	switch field.Type {
+	case FormFieldText:
+		// Handle text editing
+		switch key {
+		case "esc", "enter":
+			// Exit edit mode for text
+			p.formFieldEditing = false
+			p.blurAllTextInputs()
+			return nil
+		case "ctrl+t":
+			if ti, ok := p.formTextInputs[p.formCursor]; ok {
+				ti.SetValue(toTitleCase(ti.Value()))
+				p.formTextInputs[p.formCursor] = ti
+				p.formFields[p.formCursor].TextValue = ti.Value()
+			}
+			return nil
+		case "ctrl+l":
+			if ti, ok := p.formTextInputs[p.formCursor]; ok {
+				ti.SetValue(toSentenceCase(ti.Value()))
+				p.formTextInputs[p.formCursor] = ti
+				p.formFields[p.formCursor].TextValue = ti.Value()
+			}
+			return nil
+		default:
+			// Pass to text input
+			if ti, ok := p.formTextInputs[p.formCursor]; ok {
+				var cmd tea.Cmd
+				ti, cmd = ti.Update(msg)
+				p.formTextInputs[p.formCursor] = ti
+				p.formFields[p.formCursor].TextValue = ti.Value()
+				return cmd
+			}
+		}
+
+	case FormFieldRadio:
+		switch key {
+		case "esc":
+			// Cancel - restore original value and exit
+			field.Value = p.radioOriginalValue
+			p.formFieldEditing = false
+			return nil
+		case "enter":
+			// Confirm - value already set, just exit
+			p.notifyLiveChange(*field)
+			p.formFieldEditing = false
+			return nil
+		case "up", "k":
+			// Move cursor up (vertical)
+			if field.Vertical && p.radioEditCursor > 0 {
+				p.radioEditCursor--
+				field.Value = field.Options[p.radioEditCursor].Value
+			}
+			return nil
+		case "down", "j":
+			// Move cursor down (vertical)
+			if field.Vertical && p.radioEditCursor < len(field.Options)-1 {
+				p.radioEditCursor++
+				field.Value = field.Options[p.radioEditCursor].Value
+			}
+			return nil
+		case "left", "h":
+			// Move cursor left (horizontal)
+			if !field.Vertical && p.radioEditCursor > 0 {
+				p.radioEditCursor--
+				field.Value = field.Options[p.radioEditCursor].Value
+			}
+			return nil
+		case "right", "l":
+			// Move cursor right (horizontal)
+			if !field.Vertical && p.radioEditCursor < len(field.Options)-1 {
+				p.radioEditCursor++
+				field.Value = field.Options[p.radioEditCursor].Value
+			}
+			return nil
+		}
+
+	case FormFieldColor:
+		// Move in screen coordinates, then derive color
+		radiusY := 4
+		radiusX := 9
+		diameterY := radiusY*2 + 1
+		// Use same overshoot as rendering for navigation bounds
+		effectiveRadiusX := float64(radiusX) + 0.5
+		hiResRadiusY := float64(radiusY * 2)
+		hiResCenterY := float64(radiusY*2) + 0.5
+		effectiveRadiusY := hiResRadiusY + 1.0
+
+		// Helper to check if a cell is inside the overshot ellipse
+		cellIsInside := func(row, col int) bool {
+			dx := col - radiusX
+			// Check both sub-pixels for this cell
+			hiResRowTop := float64(row * 2)
+			hiResRowBot := float64(row*2 + 1)
+			dyTop := hiResRowTop - hiResCenterY
+			dyBot := hiResRowBot - hiResCenterY
+			topIn := float64(dx*dx)/(effectiveRadiusX*effectiveRadiusX)+(dyTop*dyTop)/(effectiveRadiusY*effectiveRadiusY) <= 1.0
+			botIn := float64(dx*dx)/(effectiveRadiusX*effectiveRadiusX)+(dyBot*dyBot)/(effectiveRadiusY*effectiveRadiusY) <= 1.0
+			return topIn || botIn
+		}
+
+		switch key {
+		case "esc":
+			field.ColorX = p.colorOriginalX
+			field.ColorY = p.colorOriginalY
+			p.formFieldEditing = false
+			return nil
+		case "enter":
+			p.notifyLiveChange(*field)
+			p.formFieldEditing = false
+			return nil
+		case "left", "h":
+			newCol := p.colorSelCol - 1
+			if newCol >= 0 && cellIsInside(p.colorSelRow, newCol) {
+				p.colorSelCol = newCol
+			}
+		case "right", "l":
+			newCol := p.colorSelCol + 1
+			if newCol < radiusX*2+1 && cellIsInside(p.colorSelRow, newCol) {
+				p.colorSelCol = newCol
+			}
+		case "up", "k":
+			if p.colorSelRow > 0 {
+				newRow := p.colorSelRow - 1
+				if cellIsInside(newRow, p.colorSelCol) {
+					p.colorSelRow = newRow
+				} else {
+					// Try to find a valid column in the new row
+					for offset := 1; offset <= radiusX; offset++ {
+						if cellIsInside(newRow, p.colorSelCol-offset) {
+							p.colorSelRow = newRow
+							p.colorSelCol -= offset
+							break
+						}
+						if cellIsInside(newRow, p.colorSelCol+offset) {
+							p.colorSelRow = newRow
+							p.colorSelCol += offset
+							break
+						}
+					}
+				}
+			}
+		case "down", "j":
+			if p.colorSelRow < diameterY-1 {
+				newRow := p.colorSelRow + 1
+				if cellIsInside(newRow, p.colorSelCol) {
+					p.colorSelRow = newRow
+				} else {
+					// Try to find a valid column in the new row
+					for offset := 1; offset <= radiusX; offset++ {
+						if cellIsInside(newRow, p.colorSelCol-offset) {
+							p.colorSelRow = newRow
+							p.colorSelCol -= offset
+							break
+						}
+						if cellIsInside(newRow, p.colorSelCol+offset) {
+							p.colorSelRow = newRow
+							p.colorSelCol += offset
+							break
+						}
+					}
+				}
+			}
+		}
+		
+		// Derive ColorX/ColorY from screen position
+		dy := float64(p.colorSelRow - radiusY)
+		dx := float64(p.colorSelCol - radiusX)
+		xNorm := dx / float64(radiusX)
+		yNorm := dy / float64(radiusY)
+		
+		whiteX, whiteY := 0.31, 0.33
+		field.ColorX = whiteX + xNorm*0.35
+		field.ColorY = whiteY - yNorm*0.35 // Negate because screen Y is inverted
+		
+		// Clamp to valid range
+		if field.ColorX < 0.05 {
+			field.ColorX = 0.05
+		}
+		if field.ColorX > 0.65 {
+			field.ColorX = 0.65
+		}
+		if field.ColorY < 0.05 {
+			field.ColorY = 0.05
+		}
+		if field.ColorY > 0.6 {
+			field.ColorY = 0.6
+		}
+		return nil
+
+	case FormFieldHSL:
+		switch key {
+		case "esc":
+			// Cancel - restore original values
+			field.Hue = field.OriginalHue
+			field.Saturation = field.OriginalSat
+			field.Lightness = field.OriginalLight
+			p.formFieldEditing = false
+			return nil
+		case "enter":
+			// Confirm
+			p.notifyLiveChange(*field)
+			p.formFieldEditing = false
+			return nil
+		case "up", "k":
+			// Move to previous slider
+			if field.HSLSliderFocus > 0 {
+				field.HSLSliderFocus--
+			}
+			return nil
+		case "down", "j":
+			// Move to next slider
+			if field.HSLSliderFocus < 2 {
+				field.HSLSliderFocus++
+			}
+			return nil
+		case "left", "h":
+			// Decrease current slider value
+			switch field.HSLSliderFocus {
+			case 0: // Hue
+				field.Hue -= 5
+				if field.Hue < 0 {
+					field.Hue = 0
+				}
+			case 1: // Saturation
+				field.Saturation -= 5
+				if field.Saturation < 0 {
+					field.Saturation = 0
+				}
+			case 2: // Lightness
+				field.Lightness -= 5
+				if field.Lightness < 0 {
+					field.Lightness = 0
+				}
+			}
+			return nil
+		case "right", "l":
+			// Increase current slider value
+			switch field.HSLSliderFocus {
+			case 0: // Hue
+				field.Hue += 5
+				if field.Hue > 360 {
+					field.Hue = 360
+				}
+			case 1: // Saturation
+				field.Saturation += 5
+				if field.Saturation > 100 {
+					field.Saturation = 100
+				}
+			case 2: // Lightness
+				field.Lightness += 5
+				if field.Lightness > 100 {
+					field.Lightness = 100
+				}
+			}
+			return nil
+		}
+
+	case FormFieldRGB:
+		switch key {
+		case "esc":
+			// Cancel - restore original values
+			field.Red = field.OriginalRed
+			field.Green = field.OriginalGreen
+			field.Blue = field.OriginalBlue
+			p.formFieldEditing = false
+			return nil
+		case "enter":
+			// Confirm
+			p.notifyLiveChange(*field)
+			p.formFieldEditing = false
+			return nil
+		case "up", "k":
+			// Move to previous slider
+			if field.RGBSliderFocus > 0 {
+				field.RGBSliderFocus--
+			}
+			return nil
+		case "down", "j":
+			// Move to next slider
+			if field.RGBSliderFocus < 2 {
+				field.RGBSliderFocus++
+			}
+			return nil
+		case "left", "h":
+			// Decrease current slider value
+			switch field.RGBSliderFocus {
+			case 0: // Red
+				field.Red -= 5
+				if field.Red < 0 {
+					field.Red = 0
+				}
+			case 1: // Green
+				field.Green -= 5
+				if field.Green < 0 {
+					field.Green = 0
+				}
+			case 2: // Blue
+				field.Blue -= 5
+				if field.Blue < 0 {
+					field.Blue = 0
+				}
+			}
+			return nil
+		case "right", "l":
+			// Increase current slider value
+			switch field.RGBSliderFocus {
+			case 0: // Red
+				field.Red += 5
+				if field.Red > 255 {
+					field.Red = 255
+				}
+			case 1: // Green
+				field.Green += 5
+				if field.Green > 255 {
+					field.Green = 255
+				}
+			case 2: // Blue
+				field.Blue += 5
+				if field.Blue > 255 {
+					field.Blue = 255
+				}
+			}
+			return nil
+		}
+	}
+
+	return nil
+}
+
 func (p *PopupPanel) blurAllTextInputs() {
 	for i, ti := range p.formTextInputs {
 		ti.Blur()
@@ -678,6 +1050,323 @@ func (p *PopupPanel) focusCurrentTextField() {
 			p.formTextInputs[p.formCursor] = ti
 		}
 	}
+}
+
+// updateSliderFromMouse updates a slider field value based on mouse X position.
+func (p *PopupPanel) updateSliderFromMouse(field *FormField, mouseX int, valueStartX int) {
+	var sliderWidth int
+	var sliderStartX int
+
+	switch field.Type {
+	case FormFieldSlider:
+		sliderWidth = 10
+		sliderStartX = valueStartX + 1 // After "["
+	case FormFieldBrightness:
+		sliderWidth = 20
+		sliderStartX = valueStartX + 1 // After initial char
+	case FormFieldColorTemp:
+		sliderWidth = 20
+		sliderStartX = valueStartX
+	default:
+		return
+	}
+
+	// Calculate position within slider
+	clickPos := mouseX - sliderStartX
+	if clickPos < 0 {
+		clickPos = 0
+	}
+	if clickPos > sliderWidth {
+		clickPos = sliderWidth
+	}
+
+	// Map to value
+	if field.Max > field.Min {
+		field.Value = field.Min + (clickPos * (field.Max - field.Min) / sliderWidth)
+		if field.Value < field.Min {
+			field.Value = field.Min
+		}
+		if field.Value > field.Max {
+			field.Value = field.Max
+		}
+	}
+
+	if p.formLiveMode && p.formOnChange != nil {
+		p.formOnChange(*field)
+	}
+}
+
+// getFieldRowY returns the Y position of a field's first row on screen.
+func (p *PopupPanel) getFieldRowY(fieldIdx int, popupY int, startY int) int {
+	row := 0
+	for i := 0; i < fieldIdx && i < len(p.formFields); i++ {
+		row += p.fieldHeight(p.formFields[i])
+	}
+	return popupY + 1 + startY + row // +1 for border
+}
+
+// updateColorFromMouse updates a color field based on mouse position.
+func (p *PopupPanel) updateColorFromMouse(field *FormField, mouseX, mouseY, valueStartX, fieldRowY int) {
+	radiusY := 4
+	radiusX := 9
+	centerRow := radiusY
+	diameterY := radiusY*2 + 1
+	
+	// Use same overshoot as rendering
+	effectiveRadiusX := float64(radiusX) + 0.5
+	hiResRadiusY := float64(radiusY * 2)
+	hiResCenterY := float64(radiusY*2) + 0.5
+	effectiveRadiusY := hiResRadiusY + 1.0
+	
+	// Calculate clicked position relative to wheel
+	clickedCol := mouseX - valueStartX
+	clickedRow := mouseY - fieldRowY
+	
+	// Check if within bounds
+	if clickedRow < 0 || clickedRow >= diameterY {
+		return
+	}
+	
+	// Check if cell is inside the overshot ellipse
+	dx := clickedCol - radiusX
+	hiResRowTop := float64(clickedRow * 2)
+	hiResRowBot := float64(clickedRow*2 + 1)
+	dyTop := hiResRowTop - hiResCenterY
+	dyBot := hiResRowBot - hiResCenterY
+	topIn := float64(dx*dx)/(effectiveRadiusX*effectiveRadiusX)+(dyTop*dyTop)/(effectiveRadiusY*effectiveRadiusY) <= 1.0
+	botIn := float64(dx*dx)/(effectiveRadiusX*effectiveRadiusX)+(dyBot*dyBot)/(effectiveRadiusY*effectiveRadiusY) <= 1.0
+	
+	if !topIn && !botIn {
+		return
+	}
+	
+	// Update selection
+	p.colorSelRow = clickedRow
+	p.colorSelCol = clickedCol
+	
+	// Derive ColorX/ColorY
+	dxf := float64(clickedCol - radiusX)
+	dy := float64(clickedRow - centerRow)
+	xNorm := dxf / float64(radiusX)
+	yNormColor := dy / float64(radiusY)
+	
+	whiteX, whiteY := 0.31, 0.33
+	field.ColorX = whiteX + xNorm*0.35
+	field.ColorY = whiteY - yNormColor*0.35
+	
+	// Clamp
+	if field.ColorX < 0.05 {
+		field.ColorX = 0.05
+	}
+	if field.ColorX > 0.65 {
+		field.ColorX = 0.65
+	}
+	if field.ColorY < 0.05 {
+		field.ColorY = 0.05
+	}
+	if field.ColorY > 0.6 {
+		field.ColorY = 0.6
+	}
+	
+	if p.formLiveMode && p.formOnChange != nil {
+		p.formOnChange(*field)
+	}
+}
+
+// updateHSLFromMouseRow updates an HSL field for a specific slider row.
+func (p *PopupPanel) updateHSLFromMouseRow(field *FormField, mouseX, valueStartX, sliderRow int) {
+	if sliderRow < 0 || sliderRow > 2 {
+		return
+	}
+
+	sliderWidth := 20
+	sliderStartX := valueStartX + 3 // After "H: " label
+
+	// Calculate value from mouse X
+	clickPos := mouseX - sliderStartX
+	if clickPos < 0 {
+		clickPos = 0
+	}
+	if clickPos > sliderWidth {
+		clickPos = sliderWidth
+	}
+
+	// Map to value based on which slider
+	switch sliderRow {
+	case 0: // Hue (0-360)
+		field.Hue = clickPos * 360 / sliderWidth
+		field.HSLSliderFocus = 0
+	case 1: // Saturation (0-100)
+		field.Saturation = clickPos * 100 / sliderWidth
+		field.HSLSliderFocus = 1
+	case 2: // Lightness (0-100)
+		field.Lightness = clickPos * 100 / sliderWidth
+		field.HSLSliderFocus = 2
+	}
+
+	if p.formLiveMode && p.formOnChange != nil {
+		p.formOnChange(*field)
+	}
+}
+
+// updateRGBFromMouseRow updates an RGB field for a specific slider row.
+func (p *PopupPanel) updateRGBFromMouseRow(field *FormField, mouseX, valueStartX, sliderRow int) {
+	if sliderRow < 0 || sliderRow > 2 {
+		return
+	}
+
+	sliderWidth := 20
+	sliderStartX := valueStartX + 3 // After "R: " label
+
+	// Calculate value from mouse X
+	clickPos := mouseX - sliderStartX
+	if clickPos < 0 {
+		clickPos = 0
+	}
+	if clickPos > sliderWidth {
+		clickPos = sliderWidth
+	}
+
+	// Map to value (0-255)
+	value := clickPos * 255 / sliderWidth
+
+	switch sliderRow {
+	case 0: // Red
+		field.Red = value
+		field.RGBSliderFocus = 0
+	case 1: // Green
+		field.Green = value
+		field.RGBSliderFocus = 1
+	case 2: // Blue
+		field.Blue = value
+		field.RGBSliderFocus = 2
+	}
+
+	if p.formLiveMode && p.formOnChange != nil {
+		p.formOnChange(*field)
+	}
+}
+
+// openSelectDropdown opens the dropdown for the current select field.
+func (p *PopupPanel) openSelectDropdown() {
+	if p.formCursor >= len(p.formFields) {
+		return
+	}
+	field := p.formFields[p.formCursor]
+	if field.Type != FormFieldSelect || len(field.Options) == 0 {
+		return
+	}
+
+	// Find current selection index
+	p.selectDropdownCursor = 0
+	for i, opt := range field.Options {
+		if opt.Value == field.Value {
+			p.selectDropdownCursor = i
+			break
+		}
+	}
+	p.selectDropdownScroll = 0
+	p.selectDropdownOpen = true
+	p.selectDropdownJustOpened = true // Ignore next mouse event
+
+	// Ensure cursor is visible
+	p.ensureDropdownCursorVisible()
+}
+
+// closeSelectDropdown closes the dropdown without selecting.
+func (p *PopupPanel) closeSelectDropdown() {
+	p.selectDropdownOpen = false
+}
+
+// selectDropdownMaxVisible returns the max visible items in dropdown.
+func (p *PopupPanel) selectDropdownMaxVisible() int {
+	// Limit dropdown height
+	maxHeight := 8
+	contentHeight := p.contentHeight()
+	if maxHeight > contentHeight-4 {
+		maxHeight = contentHeight - 4
+	}
+	if maxHeight < 3 {
+		maxHeight = 3
+	}
+	return maxHeight
+}
+
+// ensureDropdownCursorVisible ensures the cursor is within the visible scroll area.
+func (p *PopupPanel) ensureDropdownCursorVisible() {
+	maxVisible := p.selectDropdownMaxVisible()
+	if p.selectDropdownCursor < p.selectDropdownScroll {
+		p.selectDropdownScroll = p.selectDropdownCursor
+	} else if p.selectDropdownCursor >= p.selectDropdownScroll+maxVisible {
+		p.selectDropdownScroll = p.selectDropdownCursor - maxVisible + 1
+	}
+}
+
+// handleSelectDropdownKey handles keyboard input when dropdown is open.
+func (p *PopupPanel) handleSelectDropdownKey(msg tea.KeyMsg) tea.Cmd {
+	if p.formCursor >= len(p.formFields) {
+		p.closeSelectDropdown()
+		return nil
+	}
+	field := &p.formFields[p.formCursor]
+	numOptions := len(field.Options)
+
+	switch msg.String() {
+	case "esc":
+		p.closeSelectDropdown()
+		return nil
+
+	case "enter", " ":
+		// Select current option
+		if p.selectDropdownCursor >= 0 && p.selectDropdownCursor < numOptions {
+			field.Value = field.Options[p.selectDropdownCursor].Value
+			p.notifyLiveChange(*field)
+		}
+		p.closeSelectDropdown()
+		return nil
+
+	case "up", "k":
+		if p.selectDropdownCursor > 0 {
+			p.selectDropdownCursor--
+			p.ensureDropdownCursorVisible()
+		}
+		return nil
+
+	case "down", "j":
+		if p.selectDropdownCursor < numOptions-1 {
+			p.selectDropdownCursor++
+			p.ensureDropdownCursorVisible()
+		}
+		return nil
+
+	case "home", "g":
+		p.selectDropdownCursor = 0
+		p.selectDropdownScroll = 0
+		return nil
+
+	case "end", "G":
+		p.selectDropdownCursor = numOptions - 1
+		p.ensureDropdownCursorVisible()
+		return nil
+
+	case "pgup":
+		p.selectDropdownCursor -= p.selectDropdownMaxVisible()
+		if p.selectDropdownCursor < 0 {
+			p.selectDropdownCursor = 0
+		}
+		p.ensureDropdownCursorVisible()
+		return nil
+
+	case "pgdown":
+		p.selectDropdownCursor += p.selectDropdownMaxVisible()
+		if p.selectDropdownCursor >= numOptions {
+			p.selectDropdownCursor = numOptions - 1
+		}
+		p.ensureDropdownCursorVisible()
+		return nil
+	}
+
+	return nil
 }
 
 func (p *PopupPanel) handleMouse(msg tea.MouseMsg) tea.Cmd {
@@ -765,20 +1454,66 @@ func (p *PopupPanel) handleMouse(msg tea.MouseMsg) tea.Cmd {
 		}
 
 	case PopupModeForm:
-		if msg.Type == tea.MouseLeft {
-			// Calculate popup position (centered on screen)
-			popupX := (p.screenWidth - p.width()) / 2
-			popupY := (p.screenHeight - p.height()) / 2
+		// Calculate popup position (centered on screen)
+		popupX := (p.screenWidth - p.width()) / 2
+		popupY := (p.screenHeight - p.height()) / 2
 
-			// Calculate button row position
-			contentHeight := p.contentHeight()
-			numFields := len(p.formFields)
-			totalRows := numFields + 2 // fields + blank + button row
-			startY := (contentHeight - totalRows) / 2
-			if startY < 0 {
-				startY = 0
+		// Calculate layout
+		contentHeight := p.contentHeight()
+		totalFieldRows := p.totalFormRows()
+		totalRows := totalFieldRows + 2 // fields + blank + button row
+		startY := (contentHeight - totalRows) / 2
+		if startY < 0 {
+			startY = 0
+		}
+
+		contentStartX := popupX + 2 // border + padding
+		labelWidth := 18
+		valueStartX := contentStartX + labelWidth
+
+		// Handle dropdown mouse events first
+		if p.selectDropdownOpen {
+			if cmd := p.handleDropdownMouse(msg, popupX, popupY, startY, valueStartX); cmd != nil {
+				return cmd
 			}
-			buttonRowIdx := numFields + 1
+			// If dropdown is open, consume all mouse events to prevent click-through
+			if msg.Type == tea.MouseLeft || msg.Type == tea.MouseRelease {
+				return nil
+			}
+		}
+
+		// Handle mouse release - end any capture
+		if msg.Type == tea.MouseRelease {
+			p.mouseCaptureIdx = -1
+			p.capturedSliderRow = -1
+			return nil
+		}
+
+		// Handle dragging when we have a captured field
+		// Note: Some terminals send MouseLeft repeatedly during drag, others send MouseMotion
+		if p.mouseCaptureIdx >= 0 && (msg.Type == tea.MouseMotion || msg.Type == tea.MouseLeft) {
+			field := &p.formFields[p.mouseCaptureIdx]
+			switch field.Type {
+			case FormFieldSlider, FormFieldBrightness, FormFieldColorTemp:
+				p.updateSliderFromMouse(field, msg.X, valueStartX)
+			case FormFieldColor:
+				// Calculate field's Y position for row calculation
+				fieldRowY := p.getFieldRowY(p.mouseCaptureIdx, popupY, startY)
+				p.updateColorFromMouse(field, msg.X, msg.Y, valueStartX, fieldRowY)
+			case FormFieldHSL:
+				// Use the captured slider row, not the current mouse Y
+				p.updateHSLFromMouseRow(field, msg.X, valueStartX, p.capturedSliderRow)
+			case FormFieldRGB:
+				// Use the captured slider row, not the current mouse Y
+				p.updateRGBFromMouseRow(field, msg.X, valueStartX, p.capturedSliderRow)
+			}
+			// All captured fields consume the event to prevent re-triggering
+			return nil
+		}
+
+		// Handle left click (new click, no capture active)
+		if msg.Type == tea.MouseLeft {
+			buttonRowIdx := totalFieldRows + 1
 			buttonRowY := popupY + 1 + startY + buttonRowIdx // +1 for top border
 
 			// Check if click is on button row
@@ -810,13 +1545,292 @@ func (p *PopupPanel) handleMouse(msg tea.MouseMsg) tea.Cmd {
 				}
 			}
 
-			// Check if click is on a form field
-			for i := range p.formFields {
-				fieldY := popupY + 1 + startY + i // +1 for top border
+			// Check if click is on a form field row
+			for visualRow := 0; visualRow < totalFieldRows; visualRow++ {
+				fieldY := popupY + 1 + startY + visualRow // +1 for top border
 				if msg.Y == fieldY && msg.X > popupX && msg.X < popupX+p.width()-1 {
-					p.formCursor = i
+					// Map visual row to field index and subrow
+					fieldIdx, subRow := p.fieldAtRow(visualRow)
+					if fieldIdx < 0 || fieldIdx >= len(p.formFields) {
+						continue
+					}
+
+					wasAlreadySelected := p.formCursor == fieldIdx && !p.formOnButtons
+
+					// Select this field
+					p.formCursor = fieldIdx
 					p.formOnButtons = false
 					p.focusCurrentTextField()
+
+					field := &p.formFields[fieldIdx]
+
+					// Always capture mouse to prevent repeated actions during drag
+					p.mouseCaptureIdx = fieldIdx
+					p.mouseCaptureType = field.Type
+
+					switch field.Type {
+					case FormFieldToggle:
+						// Only toggle if clicking on an already-selected field
+						if wasAlreadySelected && msg.X >= valueStartX {
+							if field.Value != 0 {
+								field.Value = 0
+							} else {
+								field.Value = 1
+							}
+							if p.formLiveMode && p.formOnChange != nil {
+								p.formOnChange(*field)
+							}
+						}
+
+					case FormFieldSlider, FormFieldBrightness, FormFieldColorTemp:
+						// Set initial value from click position
+						p.updateSliderFromMouse(field, msg.X, valueStartX)
+
+					case FormFieldColor:
+						// Click on color wheel to select color
+						radiusY := 4
+						radiusX := 9
+						centerRow := radiusY
+						effectiveRadiusY := float64(radiusY) + 0.5
+						
+						// Calculate clicked position
+						clickedCol := msg.X - valueStartX
+						clickedRow := subRow
+						
+						// Check if click is within the ellipse
+						dy := float64(clickedRow - centerRow)
+						yNorm := dy / effectiveRadiusY
+						if yNorm*yNorm <= 1.0 {
+							halfWidth := int(float64(radiusX) * sqrt(1.0-yNorm*yNorm))
+							minCol := radiusX - halfWidth
+							maxCol := radiusX + halfWidth
+							
+							if clickedCol >= minCol && clickedCol <= maxCol {
+								// Valid click - update selection
+								p.colorSelRow = clickedRow
+								p.colorSelCol = clickedCol
+								
+								// Derive ColorX/ColorY from clicked position
+								dx := float64(clickedCol - radiusX)
+								xNorm := dx / float64(radiusX)
+								yNormColor := dy / float64(radiusY)
+								
+								whiteX, whiteY := 0.31, 0.33
+								field.ColorX = whiteX + xNorm*0.35
+								field.ColorY = whiteY - yNormColor*0.35
+								
+								// Clamp
+								if field.ColorX < 0.05 {
+									field.ColorX = 0.05
+								}
+								if field.ColorX > 0.65 {
+									field.ColorX = 0.65
+								}
+								if field.ColorY < 0.05 {
+									field.ColorY = 0.05
+								}
+								if field.ColorY > 0.6 {
+									field.ColorY = 0.6
+								}
+								
+								// Enter edit mode if not already
+								if !p.formFieldEditing {
+									p.formFieldEditing = true
+									p.colorOriginalX = p.formFields[p.formCursor].ColorX
+									p.colorOriginalY = p.formFields[p.formCursor].ColorY
+								}
+								
+								if p.formLiveMode && p.formOnChange != nil {
+									p.formOnChange(*field)
+								}
+								
+								// Set mouse capture for dragging
+								p.mouseCaptureIdx = p.formCursor
+								p.mouseCaptureType = FormFieldColor
+							}
+						}
+
+					case FormFieldHSL:
+						// Click on HSL sliders
+						// subRow tells us which slider (0=H, 1=S, 2=L) was clicked
+						p.capturedSliderRow = subRow
+						p.updateHSLFromMouseRow(field, msg.X, valueStartX, subRow)
+						// Enter edit mode
+						if !p.formFieldEditing {
+							p.formFieldEditing = true
+							field.OriginalHue = field.Hue
+							field.OriginalSat = field.Saturation
+							field.OriginalLight = field.Lightness
+						}
+						// Capture for dragging
+						p.mouseCaptureIdx = p.formCursor
+						p.mouseCaptureType = FormFieldHSL
+
+					case FormFieldRGB:
+						// Click on RGB sliders
+						// subRow tells us which slider (0=R, 1=G, 2=B) was clicked
+						p.capturedSliderRow = subRow
+						p.updateRGBFromMouseRow(field, msg.X, valueStartX, subRow)
+						// Enter edit mode
+						if !p.formFieldEditing {
+							p.formFieldEditing = true
+							field.OriginalRed = field.Red
+							field.OriginalGreen = field.Green
+							field.OriginalBlue = field.Blue
+						}
+						// Capture for dragging
+						p.mouseCaptureIdx = p.formCursor
+						p.mouseCaptureType = FormFieldRGB
+
+					case FormFieldSelect:
+						// Click opens dropdown
+						if msg.X >= valueStartX && len(field.Options) > 0 {
+							p.openSelectDropdown()
+						}
+
+					case FormFieldRadio:
+						// Click on radio button
+						if msg.X >= valueStartX && len(field.Options) > 0 {
+							if field.Vertical {
+								// Vertical: subRow corresponds to option index
+								if subRow < len(field.Options) {
+									opt := field.Options[subRow]
+									if field.Value != opt.Value {
+										field.Value = opt.Value
+										if p.formLiveMode && p.formOnChange != nil {
+											p.formOnChange(*field)
+										}
+									}
+								}
+							} else {
+								// Horizontal: calculate option positions
+								clickX := msg.X - valueStartX
+								currentX := 0
+								for _, opt := range field.Options {
+									// Each option: "○ Label" + "  " spacing
+									optWidth := 2 + len(opt.Label) + 2 // indicator + space + label + spacing
+									if clickX >= currentX && clickX < currentX+optWidth-2 {
+										if field.Value != opt.Value {
+											field.Value = opt.Value
+											if p.formLiveMode && p.formOnChange != nil {
+												p.formOnChange(*field)
+											}
+										}
+										break
+									}
+									currentX += optWidth
+								}
+							}
+						}
+
+					case FormFieldText:
+						// Position cursor at click location
+						if ti, ok := p.formTextInputs[fieldIdx]; ok {
+							// Calculate cursor position from click
+							// Text starts at valueStartX
+							clickOffset := msg.X - valueStartX
+							if clickOffset < 0 {
+								clickOffset = 0
+							}
+							textLen := len(ti.Value())
+							cursorPos := clickOffset
+							if cursorPos > textLen {
+								cursorPos = textLen
+							}
+							ti.SetCursor(cursorPos)
+							p.formTextInputs[fieldIdx] = ti
+						}
+					}
+					return nil
+				}
+			}
+		}
+
+		// Handle scroll wheel on focused field
+		if (msg.Type == tea.MouseWheelUp || msg.Type == tea.MouseWheelDown) && !p.formOnButtons {
+			if p.formCursor >= 0 && p.formCursor < len(p.formFields) {
+				field := &p.formFields[p.formCursor]
+				delta := 1
+				if msg.Type == tea.MouseWheelDown {
+					delta = -1
+				}
+
+				switch field.Type {
+				case FormFieldSlider, FormFieldBrightness:
+					step := max(1, (field.Max-field.Min)/20)
+					field.Value += delta * step
+					if field.Value < field.Min {
+						field.Value = field.Min
+					}
+					if field.Value > field.Max {
+						field.Value = field.Max
+					}
+					if p.formLiveMode && p.formOnChange != nil {
+						p.formOnChange(*field)
+					}
+					return nil
+
+				case FormFieldColorTemp:
+					step := max(1, (field.Max-field.Min)/20)
+					field.Value += delta * step
+					if field.Value < field.Min {
+						field.Value = field.Min
+					}
+					if field.Value > field.Max {
+						field.Value = field.Max
+					}
+					if p.formLiveMode && p.formOnChange != nil {
+						p.formOnChange(*field)
+					}
+					return nil
+
+				case FormFieldSelect, FormFieldRadio:
+					if len(field.Options) > 0 {
+						currentIdx := 0
+						for idx, opt := range field.Options {
+							if opt.Value == field.Value {
+								currentIdx = idx
+								break
+							}
+						}
+						newIdx := currentIdx - delta
+						if newIdx < 0 {
+							newIdx = len(field.Options) - 1
+						} else if newIdx >= len(field.Options) {
+							newIdx = 0
+						}
+						field.Value = field.Options[newIdx].Value
+						if p.formLiveMode && p.formOnChange != nil {
+							p.formOnChange(*field)
+						}
+						return nil
+					}
+
+				case FormFieldColor:
+					// Adjust hue or saturation based on mode
+					step := 0.02
+					if field.ColorMode == 0 {
+						// Adjust hue (X coordinate)
+						field.ColorX += float64(delta) * step
+						if field.ColorX < 0 {
+							field.ColorX = 0
+						}
+						if field.ColorX > 1 {
+							field.ColorX = 1
+						}
+					} else {
+						// Adjust saturation (Y coordinate)
+						field.ColorY += float64(delta) * step
+						if field.ColorY < 0 {
+							field.ColorY = 0
+						}
+						if field.ColorY > 1 {
+							field.ColorY = 1
+						}
+					}
+					if p.formLiveMode && p.formOnChange != nil {
+						p.formOnChange(*field)
+					}
 					return nil
 				}
 			}
@@ -1008,12 +2022,61 @@ func (p *PopupPanel) renderSelectContent(width, height int) []string {
 	return lines
 }
 
+// fieldHeight returns the number of visual rows a field takes.
+func (p *PopupPanel) fieldHeight(field FormField) int {
+	if field.Type == FormFieldRadio && field.Vertical {
+		return len(field.Options)
+	}
+	if field.Type == FormFieldColor {
+		// radiusY=4 means diameterY=9 (2*R+1)
+		return 9
+	}
+	if field.Type == FormFieldHSL {
+		return 3 // Hue, Saturation, Lightness
+	}
+	if field.Type == FormFieldRGB {
+		return 3 // Red, Green, Blue
+	}
+	return 1
+}
+
+// totalFormRows returns the total visual rows for all fields.
+func (p *PopupPanel) totalFormRows() int {
+	total := 0
+	for _, f := range p.formFields {
+		total += p.fieldHeight(f)
+	}
+	return total
+}
+
+// fieldAtRow returns the field index and sub-row within that field for a given visual row.
+func (p *PopupPanel) fieldAtRow(row int) (fieldIdx int, subRow int) {
+	currentRow := 0
+	for i, f := range p.formFields {
+		h := p.fieldHeight(f)
+		if row < currentRow+h {
+			return i, row - currentRow
+		}
+		currentRow += h
+	}
+	return -1, 0
+}
+
+// rowForField returns the starting visual row for a field.
+func (p *PopupPanel) rowForField(fieldIdx int) int {
+	row := 0
+	for i := 0; i < fieldIdx && i < len(p.formFields); i++ {
+		row += p.fieldHeight(p.formFields[i])
+	}
+	return row
+}
+
 func (p *PopupPanel) renderFormContent(width, height int) []string {
 	lines := make([]string, height)
 
 	// Calculate layout: fields + blank line + buttons
-	numFields := len(p.formFields)
-	totalRows := numFields + 2 // fields + blank + button row
+	totalFieldRows := p.totalFormRows()
+	totalRows := totalFieldRows + 2 // fields + blank + button row
 	startY := (height - totalRows) / 2
 	if startY < 0 {
 		startY = 0
@@ -1025,14 +2088,23 @@ func (p *PopupPanel) renderFormContent(width, height int) []string {
 	for i := 0; i < height; i++ {
 		rowIdx := i - startY
 
-		if rowIdx >= 0 && rowIdx < numFields {
-			// Render a form field
-			field := p.formFields[rowIdx]
-			isFocused := !p.formOnButtons && p.formCursor == rowIdx
+		if rowIdx >= 0 && rowIdx < totalFieldRows {
+			// Find which field this row belongs to
+			fieldIdx, subRow := p.fieldAtRow(rowIdx)
+			if fieldIdx < 0 || fieldIdx >= len(p.formFields) {
+				lines[i] = strings.Repeat(" ", width)
+				continue
+			}
 
+			field := p.formFields[fieldIdx]
+			isFocused := !p.formOnButtons && p.formCursor == fieldIdx
+
+			// For multi-row fields, only show label on first row
 			prefix := "  "
-			if isFocused {
+			if isFocused && subRow == 0 {
 				prefix = "> "
+			} else if isFocused {
+				prefix = "  " // Subsequent rows of focused field
 			}
 
 			var valueStr string
@@ -1056,9 +2128,11 @@ func (p *PopupPanel) renderFormContent(width, height int) []string {
 				}
 			case FormFieldText:
 				// Render text input - handle separately due to ANSI codes
-				label := fmt.Sprintf("%s%-15s ", prefix, field.Label+":")
+				var label string
 				if isFocused {
-					label = accentStyle.Render(prefix) + fmt.Sprintf("%-15s ", field.Label+":")
+					label = accentStyle.Render(fmt.Sprintf("%s%-15s ", prefix, field.Label+":"))
+				} else {
+					label = fmt.Sprintf("%s%-15s ", prefix, field.Label+":")
 				}
 				labelWidth := lipgloss.Width(label)
 
@@ -1118,8 +2192,8 @@ func (p *PopupPanel) renderFormContent(width, height int) []string {
 				if pos < 0 {
 					pos = 0
 				}
-				if pos > sliderWidth {
-					pos = sliderWidth
+				if pos >= sliderWidth {
+					pos = sliderWidth - 1
 				}
 
 				// Build gradient bar from warm (left) to cool (right)
@@ -1143,24 +2217,125 @@ func (p *PopupPanel) renderFormContent(width, height int) []string {
 				valueStr = bar + fmt.Sprintf(" %dK", kelvin)
 
 			case FormFieldColor:
-				// Render color picker - show current color swatch and XY values
-				// Convert XY to approximate RGB for display
-				r, g, b := xyToRGB(field.ColorX, field.ColorY, 1.0)
-				colorSwatch := lipgloss.NewStyle().
-					Background(lipgloss.Color(fmt.Sprintf("#%02x%02x%02x", r, g, b))).
-					Render("      ")
-				if isFocused {
-					modeStr := "hue"
-					if field.ColorMode == 1 {
-						modeStr = "sat"
-					}
-					valueStr = colorSwatch + fmt.Sprintf(" [%s] ←→ adjust", modeStr)
+				// Color wheel using 2x vertical resolution for smooth edges
+				radiusY := 4
+				radiusX := 9
+				diameterY := 2*radiusY + 1
+				centerRow := radiusY
+				
+				// High-res parameters (2x vertical) with overshoot for rounder appearance
+				hiResRadiusY := float64(radiusY * 2)
+				// Center is between sub-rows, so use 0.5 offset for symmetry
+				hiResCenterY := float64(radiusY*2) + 0.5
+				// Overshoot: make effective radii larger for rounder edges
+				effectiveRadiusX := float64(radiusX) + 0.5
+				effectiveRadiusY := hiResRadiusY + 1.0
+				
+				// Calculate selection position
+				var selRow, selCol int
+				if p.formFieldEditing {
+					selRow = p.colorSelRow
+					selCol = p.colorSelCol
 				} else {
-					valueStr = colorSwatch + fmt.Sprintf(" (%.2f, %.2f)", field.ColorX, field.ColorY)
+					whiteX, whiteY := 0.31, 0.33
+					selCol = radiusX + int((field.ColorX-whiteX)*float64(radiusX)/0.35+0.5)
+					selRow = centerRow - int((field.ColorY-whiteY)*float64(radiusY)/0.35+0.5)
+					if selRow < 0 {
+						selRow = 0
+					}
+					if selRow >= diameterY {
+						selRow = diameterY - 1
+					}
+				}
+				
+				if subRow < diameterY {
+					maxCells := radiusX*2 + 1
+					valueStr = ""
+					
+					// For each column, check both sub-pixels (top half and bottom half)
+					for col := 0; col < maxCells; col++ {
+						dx := col - radiusX // distance from center column
+						
+						// Check top sub-pixel (subRow*2)
+						hiResRowTop := float64(subRow*2)
+						dyTop := hiResRowTop - hiResCenterY
+						// Ellipse equation with overshoot: (dx/rx)^2 + (dy/ry)^2 <= 1
+						topInside := float64(dx*dx)/(effectiveRadiusX*effectiveRadiusX)+(dyTop*dyTop)/(effectiveRadiusY*effectiveRadiusY) <= 1.0
+						
+						// Check bottom sub-pixel (subRow*2 + 1)
+						hiResRowBot := float64(subRow*2 + 1)
+						dyBot := hiResRowBot - hiResCenterY
+						botInside := float64(dx*dx)/(effectiveRadiusX*effectiveRadiusX)+(dyBot*dyBot)/(effectiveRadiusY*effectiveRadiusY) <= 1.0
+						
+						if !topInside && !botInside {
+							// Neither half is inside - empty
+							valueStr += " "
+						} else {
+							// Calculate color for this cell
+							// Use the sub-pixel that's farther from center (more saturated)
+							var useY float64
+							if topInside && botInside {
+								// Both inside - use average Y for color calculation
+								useY = float64(subRow - centerRow)
+							} else if topInside {
+								useY = float64(dyTop) / 2.0 // Scale back to normal resolution
+							} else {
+								useY = float64(dyBot) / 2.0
+							}
+							
+							xNorm := float64(dx) / float64(radiusX)
+							yNorm := useY / float64(radiusY)
+							dist := sqrt(xNorm*xNorm + yNorm*yNorm)
+							
+							angle := atan2(yNorm, xNorm)
+							blockHue := int((angle)*180/3.14159) + 180
+							blockHue = ((blockHue % 360) + 360) % 360
+							
+							blockSat := int(dist * 100)
+							if blockSat > 100 {
+								blockSat = 100
+							}
+							
+							cr, cg, cb := hsvToRGB(blockHue, blockSat, 100)
+							blockColor := fmt.Sprintf("#%02X%02X%02X", cr, cg, cb)
+							
+							// Check if this is the selected cell
+							isSelected := subRow == selRow && col == selCol
+							
+							if isSelected {
+								if topInside && botInside {
+									// Full block selected - use circle indicator
+									style := lipgloss.NewStyle().Background(lipgloss.Color(blockColor))
+									valueStr += style.Foreground(lipgloss.Color("#000000")).Bold(true).Render("○")
+								} else if topInside {
+									// Top half selected - show top half colored, bottom half as white indicator
+									style := lipgloss.NewStyle().
+										Foreground(lipgloss.Color(blockColor)).
+										Background(lipgloss.Color("#FFFFFF"))
+									valueStr += style.Render("▀")
+								} else {
+									// Bottom half selected - show bottom half colored, top half as white indicator
+									style := lipgloss.NewStyle().
+										Foreground(lipgloss.Color(blockColor)).
+										Background(lipgloss.Color("#FFFFFF"))
+									valueStr += style.Render("▄")
+								}
+							} else if topInside && botInside {
+								// Both halves inside - full block
+								valueStr += lipgloss.NewStyle().Background(lipgloss.Color(blockColor)).Render(" ")
+							} else if topInside {
+								// Only top half inside
+								valueStr += lipgloss.NewStyle().Foreground(lipgloss.Color(blockColor)).Render("▀")
+							} else {
+								// Only bottom half inside
+								valueStr += lipgloss.NewStyle().Foreground(lipgloss.Color(blockColor)).Render("▄")
+							}
+						}
+					}
 				}
 
 			case FormFieldSelect:
-				// Render select dropdown - show current selection
+				// Render select - show current selection with dropdown indicator
 				currentLabel := "---"
 				for _, opt := range field.Options {
 					if opt.Value == field.Value {
@@ -1168,20 +2343,195 @@ func (p *PopupPanel) renderFormContent(width, height int) []string {
 						break
 					}
 				}
-				valueStr = fmt.Sprintf("[%s] ←→", currentLabel)
+				if isFocused {
+					valueStr = fmt.Sprintf("[%s] ▼", currentLabel)
+				} else {
+					valueStr = fmt.Sprintf("[%s]", currentLabel)
+				}
+
+			case FormFieldRadio:
+				if field.Vertical {
+					// Vertical: each subRow is one option
+					if subRow < len(field.Options) {
+						opt := field.Options[subRow]
+						indicator := "○"
+						if opt.Value == field.Value {
+							indicator = "●"
+						}
+						optStr := fmt.Sprintf("%s %s", indicator, opt.Label)
+						// Highlight selected option when in edit mode
+						if isFocused && p.formFieldEditing && opt.Value == field.Value {
+							optStr = accentStyle.Render(optStr)
+						}
+						valueStr = optStr
+					}
+				} else {
+					// Horizontal: render all options inline
+					var parts []string
+					for _, opt := range field.Options {
+						indicator := "○"
+						if opt.Value == field.Value {
+							indicator = "●"
+						}
+						optStr := fmt.Sprintf("%s %s", indicator, opt.Label)
+						// Highlight selected option when in edit mode
+						if isFocused && p.formFieldEditing && opt.Value == field.Value {
+							optStr = accentStyle.Render(optStr)
+						}
+						parts = append(parts, optStr)
+					}
+					valueStr = strings.Join(parts, "  ")
+				}
+
+			case FormFieldHSL:
+				// HSL picker - 3 rows: Hue, Saturation, Lightness
+				sliderWidth := 20
+				rowLabels := []string{"H", "S", "L"}
+				rowValues := []int{field.Hue, field.Saturation, field.Lightness}
+				rowMaxes := []int{360, 100, 100}
+
+				if subRow < 3 {
+					rowVal := rowValues[subRow]
+					rowMax := rowMaxes[subRow]
+					pos := rowVal * sliderWidth / max(1, rowMax)
+					if pos >= sliderWidth {
+						pos = sliderWidth - 1
+					}
+
+					var bar string
+					if subRow == 0 {
+						// Hue - rainbow gradient
+						for j := 0; j < sliderWidth; j++ {
+							h := j * 360 / sliderWidth
+							r, g, b := hsvToRGB(h, 100, 100)
+							char := "─"
+							if j == pos {
+								char = "●"
+							}
+							bar += lipgloss.NewStyle().Foreground(lipgloss.Color(fmt.Sprintf("#%02x%02x%02x", r, g, b))).Render(char)
+						}
+					} else if subRow == 1 {
+						// Saturation - gray to full color
+						for j := 0; j < sliderWidth; j++ {
+							s := j * 100 / sliderWidth
+							r, g, b := hsvToRGB(field.Hue, s, 100)
+							char := "─"
+							if j == pos {
+								char = "●"
+							}
+							bar += lipgloss.NewStyle().Foreground(lipgloss.Color(fmt.Sprintf("#%02x%02x%02x", r, g, b))).Render(char)
+						}
+					} else {
+						// Lightness - black to white through color
+						for j := 0; j < sliderWidth; j++ {
+							l := j * 100 / sliderWidth
+							r, g, b := hsvToRGB(field.Hue, field.Saturation, l)
+							char := "─"
+							if j == pos {
+								char = "●"
+							}
+							bar += lipgloss.NewStyle().Foreground(lipgloss.Color(fmt.Sprintf("#%02x%02x%02x", r, g, b))).Render(char)
+						}
+					}
+
+					// Row highlight when editing
+					rowLabel := rowLabels[subRow]
+					if isFocused && p.formFieldEditing && field.HSLSliderFocus == subRow {
+						rowLabel = accentStyle.Render(rowLabel)
+					}
+					valueStr = fmt.Sprintf("%s: %s %3d", rowLabel, bar, rowVal)
+
+					// Show color preview as vertical stripe with rounded corners
+					pr, pg, pb := hsvToRGB(field.Hue, field.Saturation, field.Lightness)
+					colorHex := fmt.Sprintf("#%02x%02x%02x", pr, pg, pb)
+					colorStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(colorHex))
+					bgStyle := lipgloss.NewStyle().Background(lipgloss.Color(colorHex))
+					var preview string
+					switch subRow {
+					case 0: // Top row - rounded corners
+						preview = " " + colorStyle.Render("▄▄") + " "
+					case 2: // Bottom row - rounded corners
+						preview = " " + colorStyle.Render("▀▀") + " "
+					default: // Middle row - full block
+						preview = bgStyle.Render("    ")
+					}
+					valueStr += " " + preview
+				}
+
+			case FormFieldRGB:
+				// RGB picker - 3 rows: Red, Green, Blue
+				sliderWidth := 20
+				rowLabels := []string{"R", "G", "B"}
+				rowValues := []int{field.Red, field.Green, field.Blue}
+
+				if subRow < 3 {
+					rowVal := rowValues[subRow]
+					pos := rowVal * sliderWidth / 255
+					if pos >= sliderWidth {
+						pos = sliderWidth - 1
+					}
+
+					var bar string
+					for j := 0; j < sliderWidth; j++ {
+						intensity := j * 255 / sliderWidth
+						var r, g, b int
+						switch subRow {
+						case 0: // Red slider
+							r, g, b = intensity, 0, 0
+						case 1: // Green slider
+							r, g, b = 0, intensity, 0
+						case 2: // Blue slider
+							r, g, b = 0, 0, intensity
+						}
+						char := "─"
+						if j == pos {
+							char = "●"
+						}
+						bar += lipgloss.NewStyle().Foreground(lipgloss.Color(fmt.Sprintf("#%02x%02x%02x", r, g, b))).Render(char)
+					}
+
+					// Row highlight when editing
+					rowLabel := rowLabels[subRow]
+					if isFocused && p.formFieldEditing && field.RGBSliderFocus == subRow {
+						rowLabel = accentStyle.Render(rowLabel)
+					}
+					valueStr = fmt.Sprintf("%s: %s %3d", rowLabel, bar, rowVal)
+
+					// Show color preview as vertical stripe with rounded corners
+					colorHex := fmt.Sprintf("#%02x%02x%02x", field.Red, field.Green, field.Blue)
+					colorStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(colorHex))
+					bgStyle := lipgloss.NewStyle().Background(lipgloss.Color(colorHex))
+					var preview string
+					switch subRow {
+					case 0: // Top row - rounded corners
+						preview = " " + colorStyle.Render("▄▄") + " "
+					case 2: // Bottom row - rounded corners
+						preview = " " + colorStyle.Render("▀▀") + " "
+					default: // Middle row - full block
+						preview = bgStyle.Render("    ")
+					}
+					valueStr += " " + preview
+				}
 			}
 
-			label := fmt.Sprintf("%s%-15s ", prefix, field.Label+":")
-			if isFocused {
-				label = accentStyle.Render(label)
+			// Build label - only show on first row of multi-row fields
+			var label string
+			if subRow == 0 {
+				label = fmt.Sprintf("%s%-15s ", prefix, field.Label+":")
+				if isFocused {
+					label = accentStyle.Render(label)
+				}
+			} else {
+				// Subsequent rows: just indent to match label width
+				label = strings.Repeat(" ", 18)
 			}
 			lines[i] = p.padRight(label+valueStr, width)
 
-		} else if rowIdx == numFields {
+		} else if rowIdx == totalFieldRows {
 			// Blank line before buttons
 			lines[i] = strings.Repeat(" ", width)
 
-		} else if rowIdx == numFields+1 {
+		} else if rowIdx == totalFieldRows+1 {
 			// Render Save/Cancel buttons
 			saveStyle := lipgloss.NewStyle()
 			cancelStyle := lipgloss.NewStyle()
@@ -1219,6 +2569,206 @@ func (p *PopupPanel) renderFormContent(width, height int) []string {
 			lines[i] = strings.Repeat(" ", width)
 		}
 	}
+
+	// Overlay dropdown if open
+	if p.selectDropdownOpen && p.formCursor < len(p.formFields) {
+		field := p.formFields[p.formCursor]
+		if field.Type == FormFieldSelect && len(field.Options) > 0 {
+			lines = p.overlayDropdown(lines, width, startY)
+		}
+	}
+
+	return lines
+}
+
+// handleDropdownMouse handles mouse events when the dropdown is open.
+func (p *PopupPanel) handleDropdownMouse(msg tea.MouseMsg, popupX, popupY, startY, valueStartX int) tea.Cmd {
+	if p.formCursor >= len(p.formFields) {
+		return nil
+	}
+	field := &p.formFields[p.formCursor]
+	numOptions := len(field.Options)
+	if numOptions == 0 {
+		return nil
+	}
+
+	// Ignore mouse events immediately after opening (prevents open-then-close on same click)
+	if p.selectDropdownJustOpened {
+		if msg.Type == tea.MouseLeft || msg.Type == tea.MouseRelease {
+			p.selectDropdownJustOpened = false
+			return func() tea.Msg { return nil } // Consume the event
+		}
+	}
+
+	// Calculate dropdown position
+	fieldRow := p.rowForField(p.formCursor)
+	dropdownStartRow := startY + fieldRow + 1
+	dropdownStartY := popupY + 1 + dropdownStartRow // +1 for top border
+	maxVisible := p.selectDropdownMaxVisible()
+	if maxVisible > numOptions {
+		maxVisible = numOptions
+	}
+
+	switch msg.Type {
+	case tea.MouseWheelUp:
+		if p.selectDropdownCursor > 0 {
+			p.selectDropdownCursor--
+			p.ensureDropdownCursorVisible()
+		}
+		return func() tea.Msg { return nil } // Return non-nil to indicate handled
+
+	case tea.MouseWheelDown:
+		if p.selectDropdownCursor < numOptions-1 {
+			p.selectDropdownCursor++
+			p.ensureDropdownCursorVisible()
+		}
+		return func() tea.Msg { return nil }
+
+	case tea.MouseLeft:
+		// Check if click is on a dropdown option
+		for i := 0; i < maxVisible; i++ {
+			optIdx := p.selectDropdownScroll + i
+			if optIdx >= numOptions {
+				break
+			}
+			optionY := dropdownStartY + i
+			if msg.Y == optionY && msg.X >= valueStartX {
+				// Select this option
+				field.Value = field.Options[optIdx].Value
+				p.notifyLiveChange(*field)
+				p.closeSelectDropdown()
+				return func() tea.Msg { return nil }
+			}
+		}
+
+		// Click outside dropdown - close it
+		p.closeSelectDropdown()
+		return func() tea.Msg { return nil }
+	}
+
+	return nil
+}
+
+// overlayDropdown renders the dropdown options over the form lines.
+func (p *PopupPanel) overlayDropdown(lines []string, width int, startY int) []string {
+	if p.formCursor >= len(p.formFields) {
+		return lines
+	}
+	field := p.formFields[p.formCursor]
+	numOptions := len(field.Options)
+	if numOptions == 0 {
+		return lines
+	}
+
+	// Calculate dropdown position (below the select field)
+	fieldRow := p.rowForField(p.formCursor)
+	dropdownStartRow := startY + fieldRow + 1
+	maxVisible := p.selectDropdownMaxVisible()
+	if maxVisible > numOptions {
+		maxVisible = numOptions
+	}
+
+	// Calculate label width to align dropdown with value area
+	labelWidth := 18 // "  " + "%-15s " = 2 + 15 + 1 = 18
+
+	// Dropdown box styling
+	borderColor := p.styles.Theme.Primary
+	bgStyle := lipgloss.NewStyle().Background(lipgloss.Color("#1a1a2e"))
+	selectedStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("#ffffff")).
+		Background(p.styles.Theme.Accent).
+		Bold(true)
+
+	// Calculate dropdown width
+	maxLabelLen := 0
+	for _, opt := range field.Options {
+		if len(opt.Label) > maxLabelLen {
+			maxLabelLen = len(opt.Label)
+		}
+	}
+	dropdownWidth := maxLabelLen + 4 // padding
+	if dropdownWidth > width-labelWidth-3 { // -3 for borders and scrollbar
+		dropdownWidth = width - labelWidth - 3
+	}
+
+	// Calculate scrollbar position if needed
+	needsScrollbar := numOptions > maxVisible
+	var scrollThumbStart, scrollThumbSize int
+	if needsScrollbar {
+		// Calculate thumb size (minimum 1)
+		scrollThumbSize = max(1, maxVisible*maxVisible/numOptions)
+		// Calculate thumb position
+		scrollRange := numOptions - maxVisible
+		thumbRange := maxVisible - scrollThumbSize
+		if scrollRange > 0 && thumbRange > 0 {
+			scrollThumbStart = p.selectDropdownScroll * thumbRange / scrollRange
+		}
+	}
+
+	// Render dropdown options
+	for i := 0; i < maxVisible; i++ {
+		optIdx := p.selectDropdownScroll + i
+		if optIdx >= numOptions {
+			break
+		}
+
+		lineIdx := dropdownStartRow + i
+		if lineIdx >= len(lines) {
+			break
+		}
+
+		opt := field.Options[optIdx]
+		optLabel := opt.Label
+		if len(optLabel) > dropdownWidth-2 {
+			optLabel = optLabel[:dropdownWidth-3] + "…"
+		}
+
+		// Pad the option label
+		paddedLabel := fmt.Sprintf(" %-*s", dropdownWidth-2, optLabel)
+
+		// Apply styling
+		var styledOption string
+		if optIdx == p.selectDropdownCursor {
+			styledOption = selectedStyle.Render(paddedLabel)
+		} else {
+			styledOption = bgStyle.Foreground(lipgloss.Color("#cccccc")).Render(paddedLabel)
+		}
+
+		// Build the dropdown border
+		leftBorder := lipgloss.NewStyle().Foreground(borderColor).Render("│")
+
+		// Right border with scrollbar
+		var rightBorder string
+		if needsScrollbar {
+			// Determine if this row is part of the scrollbar thumb
+			if i >= scrollThumbStart && i < scrollThumbStart+scrollThumbSize {
+				rightBorder = lipgloss.NewStyle().Foreground(p.styles.Theme.Accent).Render("┃")
+			} else {
+				rightBorder = lipgloss.NewStyle().Foreground(p.styles.Theme.Muted).Render("│")
+			}
+		} else {
+			rightBorder = lipgloss.NewStyle().Foreground(borderColor).Render("│")
+		}
+
+		// Overlay on the line
+		line := lines[lineIdx]
+		// Keep the label portion, overlay the dropdown
+		labelPart := ""
+		if len(line) >= labelWidth {
+			labelPart = line[:labelWidth]
+		} else {
+			labelPart = p.padRight(line, labelWidth)
+		}
+
+		// Build new line with dropdown
+		dropdownContent := leftBorder + styledOption + rightBorder
+		remainingWidth := width - labelWidth - lipgloss.Width(dropdownContent)
+		if remainingWidth < 0 {
+			remainingWidth = 0
+		}
+		lines[lineIdx] = labelPart + dropdownContent + strings.Repeat(" ", remainingWidth)
+	}
+
 	return lines
 }
 
@@ -1260,12 +2810,50 @@ func (p *PopupPanel) getHints() string {
 	case PopupModeSelect:
 		hint = " ↑↓:select  Enter:confirm  Esc:cancel "
 	case PopupModeForm:
-		if p.formLiveMode {
-			hint = " ←→:adjust  Enter:toggle live  Esc:done "
-		} else if p.formOnChange != nil {
-			hint = " ←→:adjust  Enter:live mode  Tab:next  Esc:cancel "
+		// Check if dropdown is open
+		if p.selectDropdownOpen {
+			hint = " ↑↓:select  Enter:confirm  Esc:close "
+		} else if p.formFieldEditing {
+			// In edit mode
+			isTextFocused := p.formCursor < len(p.formFields) &&
+				p.formFields[p.formCursor].Type == FormFieldText
+			isRadio := p.formCursor < len(p.formFields) &&
+				p.formFields[p.formCursor].Type == FormFieldRadio
+			isVerticalRadio := isRadio && p.formFields[p.formCursor].Vertical
+			isColor := p.formCursor < len(p.formFields) &&
+				p.formFields[p.formCursor].Type == FormFieldColor
+			if isTextFocused {
+				hint = " ^T:Title  ^L:sentence  Enter/Esc:done "
+			} else if isVerticalRadio {
+				hint = " ↑↓:select  Enter:confirm  Esc:cancel "
+			} else if isRadio {
+				hint = " ←→:select  Enter:confirm  Esc:cancel "
+			} else if isColor {
+				hint = " ←→↑↓:move  Enter:confirm  Esc:cancel "
+			} else {
+				hint = " Enter/Esc:done "
+			}
 		} else {
-			hint = " ←→:adjust  Tab:next  Enter:save  Esc:cancel "
+			// Not editing - normal navigation
+			isSelectFocused := !p.formOnButtons && p.formCursor < len(p.formFields) &&
+				p.formFields[p.formCursor].Type == FormFieldSelect
+			isTextFocused := !p.formOnButtons && p.formCursor < len(p.formFields) &&
+				p.formFields[p.formCursor].Type == FormFieldText
+			isRadioFocused := !p.formOnButtons && p.formCursor < len(p.formFields) &&
+				p.formFields[p.formCursor].Type == FormFieldRadio
+			isColorFocused := !p.formOnButtons && p.formCursor < len(p.formFields) &&
+				p.formFields[p.formCursor].Type == FormFieldColor
+			if isSelectFocused {
+				hint = " Enter/Space:open  ↑↓:navigate  Esc:cancel "
+			} else if isTextFocused || isRadioFocused || isColorFocused {
+				hint = " Enter:edit  ↑↓:navigate  Esc:cancel "
+			} else if p.formLiveMode {
+				hint = " ←→:adjust  Enter:toggle live  Esc:done "
+			} else if p.formOnChange != nil {
+				hint = " ←→:adjust  Enter:live mode  ↑↓:navigate  Esc:cancel "
+			} else {
+				hint = " ←→:adjust  ↑↓:navigate  Enter:save  Esc:cancel "
+			}
 		}
 	}
 	return p.colorize(hint, p.styles.Theme.Muted)
@@ -1309,6 +2897,89 @@ func (p *PopupPanel) centerText(s string, width int) string {
 
 // Color helper functions for CIE XY color space
 // Note: xyToRGB is defined in entities.go
+
+// hsvToRGB converts HSV (hue 0-360, sat 0-100, val 0-100) to RGB.
+func hsvToRGB(h, s, v int) (r, g, b uint8) {
+	if s == 0 {
+		gray := uint8(v * 255 / 100)
+		return gray, gray, gray
+	}
+	
+	hf := float64(h) / 60.0
+	sf := float64(s) / 100.0
+	vf := float64(v) / 100.0
+	
+	i := int(hf) % 6
+	f := hf - float64(int(hf))
+	p := vf * (1 - sf)
+	q := vf * (1 - sf*f)
+	t := vf * (1 - sf*(1-f))
+	
+	var rf, gf, bf float64
+	switch i {
+	case 0:
+		rf, gf, bf = vf, t, p
+	case 1:
+		rf, gf, bf = q, vf, p
+	case 2:
+		rf, gf, bf = p, vf, t
+	case 3:
+		rf, gf, bf = p, q, vf
+	case 4:
+		rf, gf, bf = t, p, vf
+	case 5:
+		rf, gf, bf = vf, p, q
+	}
+	
+	return uint8(rf * 255), uint8(gf * 255), uint8(bf * 255)
+}
+
+// xyToHueSat converts XY color to hue (0-360) and saturation (0-100).
+func xyToHueSat(x, y float64) (hue int, sat int) {
+	whiteX, whiteY := 0.3127, 0.329
+	dx := x - whiteX
+	dy := y - whiteY
+	radius := sqrt(dx*dx + dy*dy)
+	angle := atan2(dy, dx)
+
+	// Convert angle to degrees (0-360)
+	hue = int(angle * 180 / 3.14159)
+	if hue < 0 {
+		hue += 360
+	}
+
+	// Convert radius to saturation percentage (0-100)
+	// Max radius is about 0.4 for fully saturated colors
+	sat = int(radius / 0.4 * 100)
+	if sat > 100 {
+		sat = 100
+	}
+	if sat < 0 {
+		sat = 0
+	}
+
+	return hue, sat
+}
+
+// hueSatToXY converts hue (0-360) and saturation (0-100) to XY color.
+func hueSatToXY(hue, sat int) (x, y float64) {
+	whiteX, whiteY := 0.3127, 0.329
+
+	// Convert hue to radians
+	angle := float64(hue) * 3.14159 / 180
+
+	// Convert saturation to radius (max ~0.4)
+	radius := float64(sat) / 100 * 0.4
+
+	x = whiteX + radius*cos(angle)
+	y = whiteY + radius*sin(angle)
+
+	// Clamp to valid range
+	x = clampFloat(x, 0.0, 1.0)
+	y = clampFloat(y, 0.0, 1.0)
+
+	return x, y
+}
 
 // rotateColor rotates a color around the color wheel by delta radians.
 func rotateColor(x, y, delta float64) (newX, newY float64) {
@@ -1425,4 +3096,38 @@ func atan(x float64) float64 {
 	}
 	// Taylor series for |x| <= 1
 	return x - (x*x*x)/3 + (x*x*x*x*x)/5
+}
+
+// Text transformation functions
+
+// toTitleCase capitalizes the first letter of every word.
+func toTitleCase(s string) string {
+	words := strings.Fields(s)
+	for i, word := range words {
+		if len(word) > 0 {
+			runes := []rune(word)
+			runes[0] = unicode.ToUpper(runes[0])
+			for j := 1; j < len(runes); j++ {
+				runes[j] = unicode.ToLower(runes[j])
+			}
+			words[i] = string(runes)
+		}
+	}
+	return strings.Join(words, " ")
+}
+
+// toSentenceCase lowercases everything except the first letter of the first word.
+func toSentenceCase(s string) string {
+	if len(s) == 0 {
+		return s
+	}
+	runes := []rune(strings.ToLower(s))
+	// Find first letter and capitalize it
+	for i, r := range runes {
+		if unicode.IsLetter(r) {
+			runes[i] = unicode.ToUpper(r)
+			break
+		}
+	}
+	return string(runes)
 }

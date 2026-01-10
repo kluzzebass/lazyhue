@@ -3,6 +3,7 @@ package app
 import (
 	"fmt"
 	"sort"
+	"time"
 
 	"github.com/kluzzebass/lazyhue/internal/hue"
 	"github.com/kluzzebass/lazyhue/internal/ui"
@@ -312,7 +313,24 @@ func (m *Model) restoreExpandedState(bridgeID string) {
 func (m *Model) setStatus(msg string, isError bool) {
 	m.statusMsg = msg
 	m.isError = isError
+	m.statusExpiry = time.Time{} // No auto-clear
 	m.statusBar.SetMessage(msg, isError)
+}
+
+// setStatusTemporary sets a status message that auto-clears after a duration.
+func (m *Model) setStatusTemporary(msg string, isError bool, duration time.Duration) {
+	m.statusMsg = msg
+	m.isError = isError
+	m.statusExpiry = time.Now().Add(duration)
+	m.statusBar.SetMessage(msg, isError)
+}
+
+// checkStatusExpiry clears the status if it has expired.
+func (m *Model) checkStatusExpiry() {
+	if !m.statusExpiry.IsZero() && time.Now().After(m.statusExpiry) {
+		m.clearStatus()
+		m.statusExpiry = time.Time{}
+	}
 }
 
 func (m *Model) clearStatus() {

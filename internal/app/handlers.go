@@ -8,6 +8,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/kluzzebass/lazyhue/internal/config"
 	"github.com/kluzzebass/lazyhue/internal/hue"
+	"github.com/kluzzebass/lazyhue/internal/hueclient"
 	"github.com/kluzzebass/lazyhue/internal/ui"
 	"github.com/kluzzebass/lazyhue/internal/ui/panels"
 )
@@ -248,7 +249,7 @@ func (m *Model) handlePairingSuccess(msg PairingSuccessMsg) {
 		ApiKey:    msg.ApiKey,
 	})
 	_ = m.credentials.Save()
-	m.setStatus("Pairing successful!", false)
+	m.setStatusTemporary("Pairing successful!", false, 3*time.Second)
 }
 
 func (m *Model) startBridgePairing() tea.Cmd {
@@ -260,7 +261,7 @@ func (m *Model) startBridgePairing() tea.Cmd {
 	if m.focusedPanelID() == PanelIDBridges {
 		if selected := m.bridgePanel().SelectedBridge(); selected != nil {
 			if selected.IsConnected() {
-				m.setStatus("Bridge already connected", false)
+				m.setStatusTemporary("Bridge already connected", false, 3*time.Second)
 				return nil
 			}
 			bridgeInfo = selected.Info
@@ -330,7 +331,7 @@ func (m *Model) forgetSelectedBridge() tea.Cmd {
 
 	// Only connected bridges can be forgotten (they have saved credentials)
 	if !bridge.IsConnected() {
-		m.setStatus("Bridge is not connected", false)
+		m.setStatusTemporary("Bridge is not connected", false, 3*time.Second)
 		return nil
 	}
 
@@ -373,7 +374,7 @@ func (m *Model) doForgetBridge(bridgeID, bridgeName string) {
 	m.hierarchyPanel().Clear()
 
 	m.updateBridgePanel()
-	m.setStatus("Forgot bridge: "+bridgeName, false)
+	m.setStatusTemporary("Forgot bridge: "+bridgeName, false, 3*time.Second)
 }
 
 // showDeviceEditPopup shows a configuration popup for the selected device.
@@ -384,7 +385,7 @@ func (m *Model) showDeviceEditPopup() tea.Cmd {
 	}
 
 	if m.selectedItem.Type != panels.EntityDevice {
-		m.setStatus("Select a device to edit", false)
+		m.setStatusTemporary("Select a device to edit", false, 3*time.Second)
 		return nil
 	}
 
@@ -399,7 +400,7 @@ func (m *Model) showDeviceEditPopup() tea.Cmd {
 	// Check if this device has a motion sensor
 	motionID, motion, hasMotion := state.GetDeviceMotionSensor(device)
 	if !hasMotion {
-		m.setStatus("No editable features for this device", false)
+		m.setStatusTemporary("No editable features for this device", false, 3*time.Second)
 		return nil
 	}
 
@@ -468,7 +469,7 @@ func (m *Model) showDeviceEditPopup() tea.Cmd {
 			}
 		}
 
-		m.setStatus("Settings saved", false)
+		m.setStatusTemporary("Settings saved", false, 3*time.Second)
 		m.refreshHierarchyPanel()
 		m.updateDetailPanel()
 	})
@@ -484,37 +485,57 @@ func (m *Model) showRenamePopup() tea.Cmd {
 	}
 
 	currentName := m.selectedItem.Name
-	entityType := ""
-	canRename := false
-
-	switch m.selectedItem.Type {
-	case panels.EntityDevice:
-		entityType = "device"
-		canRename = true
-	case panels.EntityRoom:
-		entityType = "room"
-		canRename = true
-	case panels.EntityZone:
-		entityType = "zone"
-		canRename = true
-	case panels.EntityScene:
-		entityType = "scene"
-		canRename = true
-	case panels.EntityLight:
-		// Lights are renamed via their parent device
-		m.setStatus("Rename the device to rename this light", false)
-		return nil
-	default:
-		m.setStatus("This item cannot be renamed", false)
-		return nil
-	}
-
-	if !canRename {
-		return nil
-	}
-
 	itemID := m.selectedItem.ID
 	itemType := m.selectedItem.Type
+	entityType := ""
+
+	switch m.selectedItem.Type {
+	case panels.EntityBridge:
+		// Bridges are renamed via their device
+		state := bridge.GetState()
+		bridgeDevice, ok := state.GetBridgeDevice()
+		if !ok || bridgeDevice.Id == nil {
+			m.setStatusTemporary("Cannot find bridge device", false, 3*time.Second)
+			return nil
+		}
+		itemID = *bridgeDevice.Id
+		itemType = panels.EntityDevice
+		if bridgeDevice.Metadata != nil && bridgeDevice.Metadata.Name != nil {
+			currentName = *bridgeDevice.Metadata.Name
+		}
+		entityType = "bridge"
+	case panels.EntityDevice:
+		entityType = "device"
+	case panels.EntityRoom:
+		entityType = "room"
+	case panels.EntityZone:
+		entityType = "zone"
+	case panels.EntityScene:
+		entityType = "scene"
+	case panels.EntityLight:
+		// Lights are renamed via their parent device - find and rename it
+		light, ok := m.selectedItem.RawPtr.(hueclient.LightGet)
+		if !ok || light.Owner == nil || light.Owner.Rid == nil {
+			m.setStatusTemporary("Cannot find parent device", false, 3*time.Second)
+			return nil
+		}
+		// Get the device and rename it instead
+		state := bridge.GetState()
+		device, ok := state.GetDevice(*light.Owner.Rid)
+		if !ok {
+			m.setStatusTemporary("Cannot find parent device", false, 3*time.Second)
+			return nil
+		}
+		itemID = *light.Owner.Rid
+		itemType = panels.EntityDevice
+		if device.Metadata != nil && device.Metadata.Name != nil {
+			currentName = *device.Metadata.Name
+		}
+		entityType = "device"
+	default:
+		m.setStatusTemporary("This item cannot be renamed", false, 3*time.Second)
+		return nil
+	}
 
 	fields := []panels.FormField{
 		{
@@ -564,7 +585,7 @@ func (m *Model) showRenamePopup() tea.Cmd {
 		}
 
 		m.logPanel.AddEntry("request", fmt.Sprintf("%s: renamed to \"%s\"", currentName, newName))
-		m.setStatus(fmt.Sprintf("Renamed to \"%s\"", newName), false)
+		m.setStatusTemporary(fmt.Sprintf("Renamed to \"%s\"", newName), false, 3*time.Second)
 
 		// Trigger a full state sync to get the new name
 		go func() {
@@ -576,6 +597,166 @@ func (m *Model) showRenamePopup() tea.Cmd {
 		m.refreshHierarchyPanel()
 		m.updateDetailPanel()
 	})
+
+	return nil
+}
+
+// showTestForm displays a demo form with all available field types.
+func (m *Model) showTestForm() tea.Cmd {
+	fields := []panels.FormField{
+		{
+			ID:    "toggle",
+			Label: "Toggle",
+			Type:  panels.FormFieldToggle,
+			Value: 1,
+		},
+		{
+			ID:    "slider",
+			Label: "Slider",
+			Type:  panels.FormFieldSlider,
+			Value: 5,
+			Min:   0,
+			Max:   10,
+		},
+		{
+			ID:    "brightness",
+			Label: "Brightness",
+			Type:  panels.FormFieldBrightness,
+			Value: 75,
+			Min:   0,
+			Max:   100,
+		},
+		{
+			ID:    "colortemp",
+			Label: "Color Temp",
+			Type:  panels.FormFieldColorTemp,
+			Value: 326, // Mirek value (warm-ish)
+			Min:   153, // Cool (6500K)
+			Max:   500, // Warm (2000K)
+		},
+		{
+			ID:     "color",
+			Label:  "Color",
+			Type:   panels.FormFieldColor,
+			ColorX: 0.5,
+			ColorY: 0.3,
+		},
+		{
+			ID:    "select",
+			Label: "Select",
+			Type:  panels.FormFieldSelect,
+			Value: 13, // M
+			Options: []panels.FormSelectOption{
+				{Label: "Alpha", Value: 1},
+				{Label: "Bravo", Value: 2},
+				{Label: "Charlie", Value: 3},
+				{Label: "Delta", Value: 4},
+				{Label: "Echo", Value: 5},
+				{Label: "Foxtrot", Value: 6},
+				{Label: "Golf", Value: 7},
+				{Label: "Hotel", Value: 8},
+				{Label: "India", Value: 9},
+				{Label: "Juliet", Value: 10},
+				{Label: "Kilo", Value: 11},
+				{Label: "Lima", Value: 12},
+				{Label: "Mike", Value: 13},
+				{Label: "November", Value: 14},
+				{Label: "Oscar", Value: 15},
+				{Label: "Papa", Value: 16},
+				{Label: "Quebec", Value: 17},
+				{Label: "Romeo", Value: 18},
+				{Label: "Sierra", Value: 19},
+				{Label: "Tango", Value: 20},
+				{Label: "Uniform", Value: 21},
+				{Label: "Victor", Value: 22},
+				{Label: "Whiskey", Value: 23},
+				{Label: "X-ray", Value: 24},
+				{Label: "Yankee", Value: 25},
+				{Label: "Zulu", Value: 26},
+			},
+		},
+		{
+			ID:        "text",
+			Label:     "Text",
+			Type:      panels.FormFieldText,
+			TextValue: "Hello World",
+		},
+		{
+			ID:    "radio",
+			Label: "Radio (horiz)",
+			Type:  panels.FormFieldRadio,
+			Value: 2,
+			Options: []panels.FormSelectOption{
+				{Label: "Small", Value: 1},
+				{Label: "Medium", Value: 2},
+				{Label: "Large", Value: 3},
+			},
+			Vertical: false,
+		},
+		{
+			ID:    "radio_vert",
+			Label: "Radio (vert)",
+			Type:  panels.FormFieldRadio,
+			Value: 2,
+			Options: []panels.FormSelectOption{
+				{Label: "Low", Value: 1},
+				{Label: "Medium", Value: 2},
+				{Label: "High", Value: 3},
+				{Label: "Ultra", Value: 4},
+			},
+			Vertical: true,
+		},
+		{
+			ID:         "hsl",
+			Label:      "HSL Color",
+			Type:       panels.FormFieldHSL,
+			Hue:        180,
+			Saturation: 75,
+			Lightness:  50,
+		},
+		{
+			ID:    "rgb",
+			Label: "RGB Color",
+			Type:  panels.FormFieldRGB,
+			Red:   100,
+			Green: 150,
+			Blue:  200,
+		},
+	}
+
+	m.popupPanel.SetRatio(0.6, 0.6)
+	m.popupPanel.ShowFormLive("Form Field Demo", fields,
+		func(result panels.PopupResult, finalFields []panels.FormField) {
+			if result.Confirmed {
+				m.setStatusTemporary("Form saved!", false, 3*time.Second)
+			} else {
+				m.setStatusTemporary("Form cancelled", false, 3*time.Second)
+			}
+		},
+		func(field panels.FormField) {
+			// Live mode callback - log changes
+			var value string
+			switch field.Type {
+			case panels.FormFieldToggle:
+				if field.Value != 0 {
+					value = "on"
+				} else {
+					value = "off"
+				}
+			case panels.FormFieldColor:
+				value = fmt.Sprintf("(%.2f, %.2f)", field.ColorX, field.ColorY)
+			case panels.FormFieldHSL:
+				value = fmt.Sprintf("H:%d S:%d L:%d", field.Hue, field.Saturation, field.Lightness)
+			case panels.FormFieldRGB:
+				value = fmt.Sprintf("R:%d G:%d B:%d", field.Red, field.Green, field.Blue)
+			case panels.FormFieldText:
+				value = field.TextValue
+			default:
+				value = fmt.Sprintf("%d", field.Value)
+			}
+			m.logPanel.AddEntry("live", fmt.Sprintf("%s: %s", field.Label, value))
+		},
+	)
 
 	return nil
 }
