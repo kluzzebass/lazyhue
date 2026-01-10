@@ -164,3 +164,76 @@ func (b *Bridge) RecallScene(sceneID string) error {
 	})
 	return err
 }
+
+// isMotionEnabled checks if a motion sensor is enabled.
+func isMotionEnabled(motion hueclient.MotionGet) bool {
+	return motion.Enabled != nil && *motion.Enabled
+}
+
+// ToggleMotionSensor toggles a motion sensor's enabled state.
+func (b *Bridge) ToggleMotionSensor(motionID string) error {
+	b.mu.RLock()
+	client := b.client
+	b.mu.RUnlock()
+
+	if client == nil {
+		return ErrAuthFailed
+	}
+
+	motion, ok := b.state.GetMotionSensor(motionID)
+	if !ok {
+		return ErrAuthFailed
+	}
+
+	newState := !isMotionEnabled(motion)
+
+	// Optimistic update
+	b.state.SetMotionSensorEnabled(motionID, newState)
+
+	_, err := client.UpdateMotionSensor(context.Background(), motionID, hueclient.UpdateMotionSensorJSONRequestBody{
+		Enabled: &newState,
+	})
+	return err
+}
+
+// SetMotionSensorEnabled sets a motion sensor's enabled state.
+func (b *Bridge) SetMotionSensorEnabled(motionID string, enabled bool) error {
+	b.mu.RLock()
+	client := b.client
+	b.mu.RUnlock()
+
+	if client == nil {
+		return ErrAuthFailed
+	}
+
+	// Optimistic update
+	b.state.SetMotionSensorEnabled(motionID, enabled)
+
+	_, err := client.UpdateMotionSensor(context.Background(), motionID, hueclient.UpdateMotionSensorJSONRequestBody{
+		Enabled: &enabled,
+	})
+	return err
+}
+
+// SetMotionSensorSensitivity sets a motion sensor's sensitivity (0 to sensitivity_max).
+func (b *Bridge) SetMotionSensorSensitivity(motionID string, sensitivity int) error {
+	b.mu.RLock()
+	client := b.client
+	b.mu.RUnlock()
+
+	if client == nil {
+		return ErrAuthFailed
+	}
+
+	// Optimistic update
+	b.state.SetMotionSensorSensitivity(motionID, sensitivity)
+
+	_, err := client.UpdateMotionSensor(context.Background(), motionID, hueclient.UpdateMotionSensorJSONRequestBody{
+		Sensitivity: &struct {
+			Sensitivity *int `json:"sensitivity,omitempty"`
+		}{
+			Sensitivity: &sensitivity,
+		},
+	})
+	return err
+}

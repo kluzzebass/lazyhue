@@ -323,36 +323,43 @@ func (m *Model) updateStatusContext() {
 
 // filterBindingsForSelection returns only relevant bindings for the current selection.
 func (m *Model) filterBindingsForSelection(bindings []ui.Binding) []ui.Binding {
+	// Check if we're on the tree view (tab 0) - only then show expand/collapse
+	onTreeView := m.hierarchyPanel().ActiveTabIndex() == 0
+
+	// Helper to conditionally add tree actions
+	withTreeActions := func(actions ...ui.Action) []ui.Action {
+		if onTreeView {
+			actions = append(actions, ui.ActionExpand, ui.ActionCollapse)
+		}
+		return actions
+	}
+
 	// If on a group node (no item selected), only show navigation
 	if m.selectedItem == nil {
-		return filterBindingsByAction(bindings,
-			ui.ActionSelect, ui.ActionExpand, ui.ActionCollapse)
+		return filterBindingsByAction(bindings, withTreeActions(ui.ActionSelect)...)
 	}
 
 	switch m.selectedItem.Type {
 	case panels.EntityLight:
 		// Lights: toggle, on/off, brightness
-		return filterBindingsByAction(bindings,
+		return filterBindingsByAction(bindings, withTreeActions(
 			ui.ActionSelect, ui.ActionToggle, ui.ActionTurnOn, ui.ActionTurnOff,
-			ui.ActionBrightnessUp, ui.ActionBrightnessDown,
-			ui.ActionExpand, ui.ActionCollapse)
+			ui.ActionBrightnessUp, ui.ActionBrightnessDown)...)
 
 	case panels.EntityScene:
 		// Scenes: activate only
-		return filterBindingsByAction(bindings,
-			ui.ActionSelect, ui.ActionExpand, ui.ActionCollapse)
+		return filterBindingsByAction(bindings, withTreeActions(ui.ActionSelect)...)
 
 	case panels.EntityDevice:
-		// Devices: just select (view details)
-		return filterBindingsByAction(bindings,
-			ui.ActionSelect, ui.ActionExpand, ui.ActionCollapse)
+		// Devices: select (view details), edit
+		return filterBindingsByAction(bindings, withTreeActions(
+			ui.ActionSelect, ui.ActionEditDevice)...)
 
 	case panels.EntityRoom, panels.EntityZone:
 		// Rooms/Zones: toggle (grouped light), brightness
-		return filterBindingsByAction(bindings,
+		return filterBindingsByAction(bindings, withTreeActions(
 			ui.ActionSelect, ui.ActionToggle,
-			ui.ActionBrightnessUp, ui.ActionBrightnessDown,
-			ui.ActionExpand, ui.ActionCollapse)
+			ui.ActionBrightnessUp, ui.ActionBrightnessDown)...)
 
 	default:
 		return bindings

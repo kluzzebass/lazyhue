@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"fmt"
 	"sync"
 	"time"
 
@@ -203,63 +204,155 @@ func startPairing(ctx context.Context, info hue.BridgeInfo) tea.Cmd {
 
 func toggleLight(bridge *hue.Bridge, lightID string) tea.Cmd {
 	return func() tea.Msg {
+		// Get light name before toggle
+		lightName := lightID
+		if light, ok := bridge.GetState().GetLight(lightID); ok {
+			lightName = bridge.GetState().GetLightName(light)
+		}
 		if err := bridge.ToggleLight(lightID); err != nil {
 			return ActionErrorMsg{Action: "toggle light", Err: err}
 		}
-		return LightsSyncedMsg{BridgeID: bridge.Info.ID}
+		return LightsSyncedMsg{BridgeID: bridge.Info.ID, Action: "toggle", Target: lightName}
 	}
 }
 
 func toggleGroupedLight(bridge *hue.Bridge, groupID string) tea.Cmd {
 	return func() tea.Msg {
+		// Get group name
+		groupName := bridge.GetState().GetGroupedLightName(groupID)
+		if groupName == "" {
+			groupName = groupID
+		}
 		if err := bridge.ToggleGroupedLight(groupID); err != nil {
 			return ActionErrorMsg{Action: "toggle group", Err: err}
 		}
-		return LightsSyncedMsg{BridgeID: bridge.Info.ID}
+		return LightsSyncedMsg{BridgeID: bridge.Info.ID, Action: "toggle", Target: groupName}
 	}
 }
 
 func setLightOn(bridge *hue.Bridge, lightID string, on bool) tea.Cmd {
 	return func() tea.Msg {
+		lightName := lightID
+		if light, ok := bridge.GetState().GetLight(lightID); ok {
+			lightName = bridge.GetState().GetLightName(light)
+		}
 		if err := bridge.SetLightOn(lightID, on); err != nil {
 			return ActionErrorMsg{Action: "set light", Err: err}
 		}
-		return LightsSyncedMsg{BridgeID: bridge.Info.ID}
+		action := "turn on"
+		if !on {
+			action = "turn off"
+		}
+		return LightsSyncedMsg{BridgeID: bridge.Info.ID, Action: action, Target: lightName}
 	}
 }
 
 func setGroupedLightOn(bridge *hue.Bridge, groupID string, on bool) tea.Cmd {
 	return func() tea.Msg {
+		groupName := bridge.GetState().GetGroupedLightName(groupID)
+		if groupName == "" {
+			groupName = groupID
+		}
 		if err := bridge.SetGroupedLightOn(groupID, on); err != nil {
 			return ActionErrorMsg{Action: "set group", Err: err}
 		}
-		return LightsSyncedMsg{BridgeID: bridge.Info.ID}
+		action := "turn on"
+		if !on {
+			action = "turn off"
+		}
+		return LightsSyncedMsg{BridgeID: bridge.Info.ID, Action: action, Target: groupName}
 	}
 }
 
 func setLightBrightness(bridge *hue.Bridge, lightID string, brightness float64) tea.Cmd {
 	return func() tea.Msg {
+		lightName := lightID
+		if light, ok := bridge.GetState().GetLight(lightID); ok {
+			lightName = bridge.GetState().GetLightName(light)
+		}
 		if err := bridge.SetLightBrightness(lightID, brightness); err != nil {
 			return ActionErrorMsg{Action: "set brightness", Err: err}
 		}
-		return LightsSyncedMsg{BridgeID: bridge.Info.ID}
+		return LightsSyncedMsg{
+			BridgeID: bridge.Info.ID,
+			Action:   fmt.Sprintf("brightness %.0f%%", brightness),
+			Target:   lightName,
+		}
 	}
 }
 
 func setGroupedLightBrightness(bridge *hue.Bridge, groupID string, brightness float64) tea.Cmd {
 	return func() tea.Msg {
+		groupName := bridge.GetState().GetGroupedLightName(groupID)
+		if groupName == "" {
+			groupName = groupID
+		}
 		if err := bridge.SetGroupedLightBrightness(groupID, brightness); err != nil {
 			return ActionErrorMsg{Action: "set brightness", Err: err}
 		}
-		return LightsSyncedMsg{BridgeID: bridge.Info.ID}
+		return LightsSyncedMsg{
+			BridgeID: bridge.Info.ID,
+			Action:   fmt.Sprintf("brightness %.0f%%", brightness),
+			Target:   groupName,
+		}
 	}
 }
 
 func recallScene(bridge *hue.Bridge, sceneID string) tea.Cmd {
 	return func() tea.Msg {
+		sceneName := sceneID
+		if scene, ok := bridge.GetState().GetScene(sceneID); ok {
+			if scene.Metadata != nil && scene.Metadata.Name != nil {
+				sceneName = *scene.Metadata.Name
+			}
+		}
 		if err := bridge.RecallScene(sceneID); err != nil {
 			return ActionErrorMsg{Action: "recall scene", Err: err}
 		}
-		return LightsSyncedMsg{BridgeID: bridge.Info.ID}
+		return LightsSyncedMsg{BridgeID: bridge.Info.ID, Action: "activate", Target: sceneName}
+	}
+}
+
+// Motion sensor control commands
+
+func toggleMotionSensor(bridge *hue.Bridge, motionID string) tea.Cmd {
+	return func() tea.Msg {
+		sensorName := motionID
+		if motion, ok := bridge.GetState().GetMotionSensor(motionID); ok {
+			if motion.Owner != nil && motion.Owner.Rid != nil {
+				if device, ok := bridge.GetState().GetDevice(*motion.Owner.Rid); ok {
+					if device.Metadata != nil && device.Metadata.Name != nil {
+						sensorName = *device.Metadata.Name
+					}
+				}
+			}
+		}
+		if err := bridge.ToggleMotionSensor(motionID); err != nil {
+			return ActionErrorMsg{Action: "toggle motion sensor", Err: err}
+		}
+		return MotionSensorsSyncedMsg{BridgeID: bridge.Info.ID, Action: "toggle sensor", Target: sensorName}
+	}
+}
+
+func setMotionSensorSensitivity(bridge *hue.Bridge, motionID string, sensitivity int) tea.Cmd {
+	return func() tea.Msg {
+		sensorName := motionID
+		if motion, ok := bridge.GetState().GetMotionSensor(motionID); ok {
+			if motion.Owner != nil && motion.Owner.Rid != nil {
+				if device, ok := bridge.GetState().GetDevice(*motion.Owner.Rid); ok {
+					if device.Metadata != nil && device.Metadata.Name != nil {
+						sensorName = *device.Metadata.Name
+					}
+				}
+			}
+		}
+		if err := bridge.SetMotionSensorSensitivity(motionID, sensitivity); err != nil {
+			return ActionErrorMsg{Action: "set motion sensitivity", Err: err}
+		}
+		return MotionSensorsSyncedMsg{
+			BridgeID: bridge.Info.ID,
+			Action:   fmt.Sprintf("sensitivity %d", sensitivity),
+			Target:   sensorName,
+		}
 	}
 }

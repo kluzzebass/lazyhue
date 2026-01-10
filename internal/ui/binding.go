@@ -40,6 +40,11 @@ const (
 	ActionNextTab Action = "next_tab"
 	ActionPrevTab Action = "prev_tab"
 
+	// Device/Sensor actions
+	ActionEditDevice        Action = "edit_device"
+	ActionToggleMotion      Action = "toggle_motion"
+	ActionMotionSensitivity Action = "motion_sensitivity"
+
 	// Global
 	ActionHelp      Action = "help"
 	ActionQuit      Action = "quit"

@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -375,5 +376,103 @@ func (m *Model) doForgetBridge(bridgeID, bridgeName string) {
 	m.setStatus("Forgot bridge: "+bridgeName, false)
 }
 
+// showDeviceEditPopup shows a configuration popup for the selected device.
+func (m *Model) showDeviceEditPopup() tea.Cmd {
+	bridge := m.manager.GetActiveBridge()
+	if bridge == nil || m.selectedItem == nil {
+		return nil
+	}
 
+	if m.selectedItem.Type != panels.EntityDevice {
+		m.setStatus("Select a device to edit", false)
+		return nil
+	}
+
+	device, ok := panels.GetDeviceFromItem(*m.selectedItem)
+	if !ok {
+		return nil
+	}
+
+	deviceName := m.selectedItem.Name
+	state := bridge.GetState()
+
+	// Check if this device has a motion sensor
+	motionID, motion, hasMotion := state.GetDeviceMotionSensor(device)
+	if !hasMotion {
+		m.setStatus("No editable features for this device", false)
+		return nil
+	}
+
+	// Build form fields for motion sensor
+	fields := []panels.FormField{}
+
+	// Enabled toggle
+	enabled := 0
+	if motion.Enabled != nil && *motion.Enabled {
+		enabled = 1
+	}
+	fields = append(fields, panels.FormField{
+		ID:    "enabled",
+		Label: "Motion sensor",
+		Type:  panels.FormFieldToggle,
+		Value: enabled,
+	})
+
+	// Sensitivity slider
+	if motion.Sensitivity != nil && motion.Sensitivity.SensitivityMax != nil {
+		currentSens := 0
+		if motion.Sensitivity.Sensitivity != nil {
+			currentSens = *motion.Sensitivity.Sensitivity
+		}
+		fields = append(fields, panels.FormField{
+			ID:    "sensitivity",
+			Label: "Sensitivity",
+			Type:  panels.FormFieldSlider,
+			Value: currentSens,
+			Min:   0,
+			Max:   *motion.Sensitivity.SensitivityMax,
+		})
+	}
+
+	// Show the form popup
+	m.popupPanel.SetRatio(0.45, 0.35)
+	m.popupPanel.ShowForm("Configure: "+deviceName, fields, func(result panels.PopupResult, finalFields []panels.FormField) {
+		if !result.Confirmed {
+			return
+		}
+
+		// Apply changes for fields that were modified
+		for _, field := range finalFields {
+			if field.Value == field.Original {
+				continue // No change
+			}
+
+			switch field.ID {
+			case "enabled":
+				newEnabled := field.Value != 0
+				if err := bridge.SetMotionSensorEnabled(motionID, newEnabled); err != nil {
+					m.setStatus("Failed to update sensor: "+err.Error(), true)
+				} else {
+					action := "sensor disabled"
+					if newEnabled {
+						action = "sensor enabled"
+					}
+					m.logPanel.AddEntry("request", deviceName+": "+action)
+				}
+			case "sensitivity":
+				if err := bridge.SetMotionSensorSensitivity(motionID, field.Value); err != nil {
+					m.setStatus("Failed to update sensitivity: "+err.Error(), true)
+				} else {
+					m.logPanel.AddEntry("request", fmt.Sprintf("%s: sensitivity %d", deviceName, field.Value))
+				}
+			}
+		}
+
+		m.setStatus("Settings saved", false)
+		m.refreshHierarchyPanel()
+		m.updateDetailPanel()
+	})
+
+	return nil
+}
 

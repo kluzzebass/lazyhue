@@ -458,6 +458,41 @@ func (s *BridgeState) GetDeviceMotionState(device hueclient.DeviceGet) (hasMotio
 	return false, false
 }
 
+// GetDeviceMotionSensor returns the motion sensor resource for a device if it has one.
+// Returns the motion sensor ID and the full MotionGet struct.
+func (s *BridgeState) GetDeviceMotionSensor(device hueclient.DeviceGet) (motionID string, motion hueclient.MotionGet, found bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	deviceID := ""
+	if device.Id != nil {
+		deviceID = *device.Id
+	}
+
+	// First, try to find via device services
+	if device.Services != nil {
+		for _, svc := range *device.Services {
+			if svc.Rtype != nil && *svc.Rtype == hueclient.ResourceIdentifierRtypeMotion && svc.Rid != nil {
+				if m, ok := s.MotionSensors[*svc.Rid]; ok {
+					return *svc.Rid, m, true
+				}
+				return *svc.Rid, hueclient.MotionGet{}, true
+			}
+		}
+	}
+
+	// Fallback: check if any motion sensor is owned by this device
+	if deviceID != "" {
+		for id, m := range s.MotionSensors {
+			if m.Owner != nil && m.Owner.Rid != nil && *m.Owner.Rid == deviceID {
+				return id, m, true
+			}
+		}
+	}
+
+	return "", hueclient.MotionGet{}, false
+}
+
 // GetDeviceTemperature returns the temperature reading for a device if it has a temperature service.
 func (s *BridgeState) GetDeviceTemperature(device hueclient.DeviceGet) (hasTemp bool, tempC float32) {
 	s.mu.RLock()
@@ -923,6 +958,35 @@ func (s *BridgeState) SetGroupedLightOn(id string, on bool) {
 		}
 		gl.On.On = &on
 		s.GroupedLights[id] = gl
+	}
+}
+
+// SetMotionSensorEnabled optimistically updates a motion sensor's enabled state in the cache.
+func (s *BridgeState) SetMotionSensorEnabled(id string, enabled bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if motion, ok := s.MotionSensors[id]; ok {
+		motion.Enabled = &enabled
+		s.MotionSensors[id] = motion
+	}
+}
+
+// SetMotionSensorSensitivity optimistically updates a motion sensor's sensitivity in the cache.
+func (s *BridgeState) SetMotionSensorSensitivity(id string, sensitivity int) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if motion, ok := s.MotionSensors[id]; ok {
+		if motion.Sensitivity == nil {
+			motion.Sensitivity = &struct {
+				Sensitivity    *int                                  `json:"sensitivity,omitempty"`
+				SensitivityMax *int                                  `json:"sensitivity_max,omitempty"`
+				Status         *hueclient.MotionGetSensitivityStatus `json:"status,omitempty"`
+			}{}
+		}
+		motion.Sensitivity.Sensitivity = &sensitivity
+		s.MotionSensors[id] = motion
 	}
 }
 

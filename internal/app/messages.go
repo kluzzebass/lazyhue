@@ -66,6 +66,15 @@ type StateSyncErrorMsg struct {
 // LightsSyncedMsg is sent when only lights are refreshed.
 type LightsSyncedMsg struct {
 	BridgeID string
+	Action   string // Optional: what action was performed (for logging)
+	Target   string // Optional: target resource name
+}
+
+// MotionSensorsSyncedMsg is sent when motion sensors are updated.
+type MotionSensorsSyncedMsg struct {
+	BridgeID string
+	Action   string // Optional: what action was performed (for logging)
+	Target   string // Optional: target resource name
 }
 
 // SyncTickMsg triggers periodic state sync.

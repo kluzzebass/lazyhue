@@ -74,6 +74,10 @@ func (m *Model) dispatch(action ui.Action) tea.Cmd {
 			m.syncSelectionFromFocusedPanel()
 		}
 
+	// Device editing
+	case ui.ActionEditDevice:
+		return m.showDeviceEditPopup()
+
 	// Global
 	case ui.ActionHelp:
 		m.toggleHelp()

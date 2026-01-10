@@ -333,9 +333,24 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case LightsSyncedMsg:
 		m.bridgePanel().SetPolling("", false)
+		// Log the request if action info is provided
+		if msg.Action != "" {
+			m.logPanel.AddEntry("request", msg.Target+": "+msg.Action)
+		}
 		// Refresh hierarchy only if this bridge is being displayed
 		// (or if BridgeID is empty for batch sync and we're displaying a connected bridge)
 		if msg.BridgeID == m.displayedBridgeID || (msg.BridgeID == "" && m.displayedBridgeID != "") {
+			m.refreshHierarchyPanel()
+			m.updateDetailPanel()
+		}
+
+	case MotionSensorsSyncedMsg:
+		// Log the request if action info is provided
+		if msg.Action != "" {
+			m.logPanel.AddEntry("request", msg.Target+": "+msg.Action)
+		}
+		// Refresh UI when motion sensor state changes
+		if msg.BridgeID == m.displayedBridgeID {
 			m.refreshHierarchyPanel()
 			m.updateDetailPanel()
 		}

@@ -77,12 +77,44 @@ func (p *DetailsPanel) buildDeviceView(deviceAny interface{}) *details.View {
 	if p.state != nil {
 		sensors := details.NewFields()
 
-		if hasMotion, isDetecting := p.state.GetDeviceMotionState(device); hasMotion {
+		// Motion sensor with enabled/sensitivity info
+		if motionID, motion, found := p.state.GetDeviceMotionSensor(device); found {
+			_ = motionID // Used for toggle action
+
+			// Detection status
+			isDetecting := false
+			if motion.Motion != nil {
+				if motion.Motion.MotionReport != nil && motion.Motion.MotionReport.Motion != nil {
+					isDetecting = *motion.Motion.MotionReport.Motion
+				} else if motion.Motion.Motion != nil {
+					isDetecting = *motion.Motion.Motion
+				}
+			}
 			status := "none"
 			if isDetecting {
 				status = "detected"
 			}
 			sensors.Add("Motion", fmt.Sprintf("%s %s", p.styles.OnOffIndicator(isDetecting), status))
+
+			// Enabled status
+			enabled := motion.Enabled != nil && *motion.Enabled
+			enabledStyle := p.styles.Success
+			enabledText := "enabled"
+			if !enabled {
+				enabledStyle = p.styles.Muted
+				enabledText = "disabled"
+			}
+			sensors.AddStyled("Sensor", enabledText, enabledStyle)
+
+			// Sensitivity
+			if motion.Sensitivity != nil && motion.Sensitivity.Sensitivity != nil {
+				sens := *motion.Sensitivity.Sensitivity
+				maxSens := 4 // Default max
+				if motion.Sensitivity.SensitivityMax != nil {
+					maxSens = *motion.Sensitivity.SensitivityMax
+				}
+				sensors.Add("Sensitivity", fmt.Sprintf("%d/%d", sens, maxSens))
+			}
 		}
 		if hasTemp, tempC := p.state.GetDeviceTemperature(device); hasTemp {
 			sensors.Add("Temperature", fmt.Sprintf("%.1f°C", tempC))
