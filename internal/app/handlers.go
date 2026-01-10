@@ -474,7 +474,7 @@ func (m *Model) showDeviceEditPopup() tea.Cmd {
 		m.updateDetailPanel()
 	})
 
-	return nil
+	return startBlinkTicker()
 }
 
 // showRenamePopup shows an input popup to rename the selected entity.
@@ -598,7 +598,7 @@ func (m *Model) showRenamePopup() tea.Cmd {
 		m.updateDetailPanel()
 	})
 
-	return nil
+	return startBlinkTicker()
 }
 
 // showTestForm displays a demo form with all available field types.
@@ -758,6 +758,13 @@ func (m *Model) showTestForm() tea.Cmd {
 		},
 	)
 
-	return nil
+	return startBlinkTicker()
+}
+
+// startBlinkTicker returns a command that starts the blink animation ticker.
+func startBlinkTicker() tea.Cmd {
+	return tea.Tick(400*time.Millisecond, func(t time.Time) tea.Msg {
+		return blinkTickMsg{}
+	})
 }
 

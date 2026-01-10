@@ -417,6 +417,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Check if status message should be cleared
 		m.checkStatusExpiry()
 
+	case blinkTickMsg:
+		// Toggle color wheel blink state and continue ticking while popup is visible
+		m.popupPanel.ToggleBlink()
+		if m.popupPanel.IsVisible() {
+			cmds = append(cmds, tea.Tick(400*time.Millisecond, func(t time.Time) tea.Msg {
+				return blinkTickMsg{}
+			}))
+		}
+
 	case PairingTickMsg:
 		// Update the pairing panel and continue ticking while pairing is active
 		if m.pairing {

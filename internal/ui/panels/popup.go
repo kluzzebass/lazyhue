@@ -154,6 +154,7 @@ type PopupPanel struct {
 	colorOriginalY float64 // Original Y before editing (for cancel)
 	colorSelRow    int     // Selected row on disc (screen coordinates)
 	colorSelCol    int     // Selected column on disc (screen coordinates)
+	colorBlinkOn   bool    // Blink state for color wheel indicator
 
 	// HSL/RGB slider capture state
 	capturedSliderRow int // Which sub-slider (0,1,2) is captured during drag (-1 = none)
@@ -327,6 +328,11 @@ func (p *PopupPanel) SetSize(width, height int) {
 func (p *PopupPanel) SetRatio(widthRatio, heightRatio float64) {
 	p.widthRatio = widthRatio
 	p.heightRatio = heightRatio
+}
+
+// ToggleBlink toggles the blink state for color wheel indicator.
+func (p *PopupPanel) ToggleBlink() {
+	p.colorBlinkOn = !p.colorBlinkOn
 }
 
 func (p *PopupPanel) width() int {
@@ -2303,22 +2309,28 @@ func (p *PopupPanel) renderFormContent(width, height int) []string {
 							isSelected := subRow == selRow && col == selCol
 							
 							if isSelected {
-								if topInside && botInside {
-									// Full block selected - use circle indicator
-									style := lipgloss.NewStyle().Background(lipgloss.Color(blockColor))
-									valueStr += style.Foreground(lipgloss.Color("#000000")).Bold(true).Render("○")
-								} else if topInside {
-									// Top half selected - show top half colored, bottom half as white indicator
-									style := lipgloss.NewStyle().
-										Foreground(lipgloss.Color(blockColor)).
-										Background(lipgloss.Color("#FFFFFF"))
-									valueStr += style.Render("▀")
+								// Blink the selected cell - alternate between color and background
+								bgColor := "#1F2937" // Theme background color
+								if p.colorBlinkOn {
+									// Blink ON - show the color
+									if topInside && botInside {
+										valueStr += lipgloss.NewStyle().Background(lipgloss.Color(blockColor)).Render(" ")
+									} else if topInside {
+										valueStr += lipgloss.NewStyle().Foreground(lipgloss.Color(blockColor)).Render("▀")
+									} else {
+										valueStr += lipgloss.NewStyle().Foreground(lipgloss.Color(blockColor)).Render("▄")
+									}
 								} else {
-									// Bottom half selected - show bottom half colored, top half as white indicator
-									style := lipgloss.NewStyle().
-										Foreground(lipgloss.Color(blockColor)).
-										Background(lipgloss.Color("#FFFFFF"))
-									valueStr += style.Render("▄")
+									// Blink OFF - show background color (hide the selection)
+									if topInside && botInside {
+										valueStr += lipgloss.NewStyle().Background(lipgloss.Color(bgColor)).Render(" ")
+									} else if topInside {
+										// Top half was color, now show bg; bottom is already bg
+										valueStr += lipgloss.NewStyle().Foreground(lipgloss.Color(bgColor)).Render("▀")
+									} else {
+										// Bottom half was color, now show bg; top is already bg
+										valueStr += lipgloss.NewStyle().Foreground(lipgloss.Color(bgColor)).Render("▄")
+									}
 								}
 							} else if topInside && botInside {
 								// Both halves inside - full block

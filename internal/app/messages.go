@@ -100,6 +100,9 @@ type BridgeEventMsg struct {
 // indicatorRefreshMsg triggers a redraw to update activity indicators.
 type indicatorRefreshMsg struct{}
 
+// blinkTickMsg triggers the blink state toggle for color wheel indicator.
+type blinkTickMsg struct{}
+
 // Action result messages
 
 // LightToggledMsg is sent after toggling a light.
