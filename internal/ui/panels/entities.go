@@ -4,8 +4,8 @@ package panels
 import (
 	"fmt"
 	"io"
-	"math"
 	"sort"
+	"strings"
 
 	"github.com/charmbracelet/bubbles/list"
 	tea "github.com/charmbracelet/bubbletea"
@@ -1083,60 +1083,219 @@ func brightnessIndicator(brightness float64) string {
 //
 // Returns the styled indicator string.
 func RenderEntityIndicator(item EntityItem, styles ui.Styles, selected bool) string {
+	// Helper to apply selection background if needed
+	withSelectionBg := func(style lipgloss.Style) lipgloss.Style {
+		if selected {
+			return style.Background(styles.SelectedItem.GetBackground())
+		}
+		return style
+	}
+
 	switch item.Type {
 	case EntityLight:
 		return renderLightIndicator(item, styles, selected)
 	case EntityDevice:
 		// Devices with motion show on/off, others show neutral bullet
 		if item.IsOn {
-			return lipgloss.NewStyle().Foreground(styles.Theme.OnColor).Render(IndicatorOn)
+			style := withSelectionBg(lipgloss.NewStyle().Foreground(styles.Theme.OnColor))
+			return style.Render(IndicatorOn)
 		}
 		// Check if it's a motion sensor
 		if device, ok := item.RawPtr.(hueclient.DeviceGet); ok {
 			if device.Services != nil {
 				for _, svc := range *device.Services {
 					if svc.Rtype != nil && *svc.Rtype == "motion" {
-						return styles.Muted.Render(IndicatorOff) // Motion sensor, not detecting
+						style := withSelectionBg(lipgloss.NewStyle().Foreground(styles.Theme.Muted))
+						return style.Render(IndicatorOff) // Motion sensor, not detecting
 					}
 				}
 			}
 		}
-		return IndicatorNeutral // Non-motion device
+		style := withSelectionBg(lipgloss.NewStyle().Foreground(styles.Theme.Foreground))
+		return style.Render(IndicatorNeutral) // Non-motion device
 	case EntityScene:
 		if item.IsOn {
 			// Use colored brightness indicator if available (from scene's room average)
 			indicatorChar := brightnessIndicator(item.Brightness)
 			if item.IndicatorColor != "" {
-				indicatorStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(item.IndicatorColor))
-				if selected {
-					indicatorStyle = indicatorStyle.Background(styles.SelectedItem.GetBackground())
-				}
-				return indicatorStyle.Render(indicatorChar)
+				style := withSelectionBg(lipgloss.NewStyle().Foreground(lipgloss.Color(item.IndicatorColor)))
+				return style.Render(indicatorChar)
 			}
-			return lipgloss.NewStyle().Foreground(styles.Theme.OnColor).Render(indicatorChar)
+			style := withSelectionBg(lipgloss.NewStyle().Foreground(styles.Theme.OnColor))
+			return style.Render(indicatorChar)
 		}
-		return styles.Muted.Render(IndicatorOff)
+		style := withSelectionBg(lipgloss.NewStyle().Foreground(styles.Theme.Muted))
+		return style.Render(IndicatorOff)
 	case EntityRoom, EntityZone:
 		if item.IsOn {
-			return styles.OnIndicator.String()
+			style := withSelectionBg(lipgloss.NewStyle().Foreground(styles.Theme.OnColor))
+			return style.Render(IndicatorOn)
 		}
-		return styles.OffIndicator.String()
+		style := withSelectionBg(lipgloss.NewStyle().Foreground(styles.Theme.OffColor))
+		return style.Render(IndicatorOff)
 	case EntityEntertainment:
 		if item.IsOn {
-			return lipgloss.NewStyle().Foreground(styles.Theme.Success).Render(IndicatorOn)
+			style := withSelectionBg(lipgloss.NewStyle().Foreground(styles.Theme.Success))
+			return style.Render(IndicatorOn)
 		}
-		return styles.Muted.Render(IndicatorOff)
+		style := withSelectionBg(lipgloss.NewStyle().Foreground(styles.Theme.Muted))
+		return style.Render(IndicatorOff)
 	default:
 		if item.IsOn {
-			return IndicatorOn
+			style := withSelectionBg(lipgloss.NewStyle().Foreground(styles.Theme.OnColor))
+			return style.Render(IndicatorOn)
 		}
-		return styles.Muted.Render(IndicatorOff)
+		style := withSelectionBg(lipgloss.NewStyle().Foreground(styles.Theme.Muted))
+		return style.Render(IndicatorOff)
 	}
+}
+
+// RenderEntityLine renders a complete entity line with indicator, name, and proper width handling.
+// This is the centralized function for rendering list items across all panels.
+// Parameters:
+//   - item: the entity to render
+//   - width: total available width for the line
+//   - selected: whether this item is currently selected
+//   - active: whether the panel is active (focused)
+//   - styles: UI styles for colors
+//
+// Returns the fully styled line string.
+func RenderEntityLine(item EntityItem, width int, selected, active bool, styles ui.Styles) string {
+	isSelectedActive := selected && active
+
+	// Get the indicator with proper selection background
+	indicator := RenderEntityIndicator(item, styles, isSelectedActive)
+	indicatorWidth := lipgloss.Width(indicator)
+
+	// Calculate available width for the rest of the line (space + name + padding)
+	restWidth := width - indicatorWidth
+	if restWidth < 1 {
+		restWidth = 1
+	}
+
+	// Build name portion
+	name := item.Name
+	nameWithSpace := " " + name
+
+	// Truncate name if needed
+	if lipgloss.Width(nameWithSpace) > restWidth {
+		availableForName := restWidth - 2 // space + ellipsis
+		if availableForName > 0 {
+			name = ui.TruncateString(name, availableForName) + "…"
+			nameWithSpace = " " + name
+		}
+	}
+
+	// Pad to fill remaining width
+	currentWidth := lipgloss.Width(nameWithSpace)
+	if currentWidth < restWidth {
+		nameWithSpace = nameWithSpace + strings.Repeat(" ", restWidth-currentWidth)
+	}
+
+	// Apply style to the rest (indicator already has its own styling)
+	var style lipgloss.Style
+	if isSelectedActive {
+		style = styles.SelectedItem
+	} else {
+		style = styles.ListItem
+	}
+	styledRest := style.Render(nameWithSpace)
+
+	return indicator + styledRest
+}
+
+// RenderTreeLine renders a tree node line with indentation, expand indicator, entity indicator, and name.
+// This handles the extra complexity of tree views (depth, expand/collapse).
+func RenderTreeLine(node *TreeNode, depth int, width int, selected, active bool, styles ui.Styles) string {
+	isSelectedActive := selected && active
+	lineWidth := max(1, width)
+
+	// Build indentation prefix
+	prefix := strings.Repeat("  ", depth)
+
+	// Expand indicator for groups
+	expandIndicator := "  "
+	if len(node.Children) > 0 {
+		if node.Expanded {
+			expandIndicator = "▼ "
+		} else {
+			expandIndicator = "▶ "
+		}
+	}
+
+	// If this is an entity item, use centralized indicator
+	if node.Item != nil {
+		indicator := RenderEntityIndicator(*node.Item, styles, isSelectedActive)
+		indicatorWidth := lipgloss.Width(indicator)
+
+		// Calculate available width for prefix + expand + indicator + space + name
+		prefixPart := prefix + expandIndicator
+		prefixWidth := lipgloss.Width(prefixPart)
+		restWidth := lineWidth - prefixWidth - indicatorWidth
+		if restWidth < 1 {
+			restWidth = 1
+		}
+
+		name := node.Item.Name
+		nameWithSpace := " " + name
+
+		// Truncate name if needed
+		if lipgloss.Width(nameWithSpace) > restWidth {
+			availableForName := restWidth - 2 // space + ellipsis
+			if availableForName > 0 {
+				name = ui.TruncateString(name, availableForName) + "…"
+				nameWithSpace = " " + name
+			}
+		}
+
+		// Pad to fill remaining width
+		currentWidth := lipgloss.Width(nameWithSpace)
+		if currentWidth < restWidth {
+			nameWithSpace = nameWithSpace + strings.Repeat(" ", restWidth-currentWidth)
+		}
+
+		// Apply style
+		var style lipgloss.Style
+		if isSelectedActive {
+			style = styles.SelectedItem
+		} else {
+			style = styles.ListItem
+		}
+
+		styledPrefix := style.Render(prefixPart)
+		styledRest := style.Render(nameWithSpace)
+
+		return styledPrefix + indicator + styledRest
+	}
+
+	// Non-entity node (folder/group header)
+	line := prefix + expandIndicator + node.Label
+	visibleWidth := lipgloss.Width(line)
+	if visibleWidth < lineWidth {
+		line = line + strings.Repeat(" ", lineWidth-visibleWidth)
+	}
+
+	// Style for folders
+	var style lipgloss.Style
+	if isSelectedActive {
+		style = styles.SelectedItem
+	} else {
+		style = styles.Muted.Bold(true)
+	}
+
+	return style.Render(line)
 }
 
 // renderLightIndicator renders a colored brightness indicator for a light.
 func renderLightIndicator(item EntityItem, styles ui.Styles, selected bool) string {
 	if !item.IsOn {
+		if selected {
+			// Add selection background to off indicator
+			return lipgloss.NewStyle().
+				Foreground(styles.Theme.OffColor).
+				Background(styles.SelectedItem.GetBackground()).
+				Render(IndicatorOff)
+		}
 		return styles.OffIndicator.String()
 	}
 
@@ -1258,95 +1417,9 @@ func PlainEntityIndicator(item EntityItem) string {
 	}
 }
 
-// xyToRGB converts CIE XY color coordinates to RGB.
-// Based on the standard conversion formula for Hue lights.
-func xyToRGB(x, y, brightness float64) (r, g, b uint8) {
-	// Avoid division by zero
-	if y == 0 {
-		y = 0.00001
-	}
-
-	// Calculate XYZ
-	Y := brightness / 100.0
-	X := (Y / y) * x
-	Z := (Y / y) * (1.0 - x - y)
-
-	// Convert to RGB using Wide RGB D65 matrix
-	rFloat := X*1.656492 - Y*0.354851 - Z*0.255038
-	gFloat := -X*0.707196 + Y*1.655397 + Z*0.036152
-	bFloat := X*0.051713 - Y*0.121364 + Z*1.011530
-
-	// Apply reverse gamma correction
-	applyGamma := func(v float64) float64 {
-		if v <= 0.0031308 {
-			return 12.92 * v
-		}
-		return 1.055*math.Pow(v, 1.0/2.4) - 0.055
-	}
-
-	rFloat = applyGamma(rFloat)
-	gFloat = applyGamma(gFloat)
-	bFloat = applyGamma(bFloat)
-
-	// Clamp and convert to 0-255
-	clamp := func(v float64) uint8 {
-		if v < 0 {
-			return 0
-		}
-		if v > 1 {
-			return 255
-		}
-		return uint8(v * 255)
-	}
-
-	return clamp(rFloat), clamp(gFloat), clamp(bFloat)
-}
-
-// mirekToRGB converts color temperature in mirek to RGB.
-// Mirek range is typically 153 (cool/6500K) to 500 (warm/2000K).
-func mirekToRGB(mirek int) (r, g, b uint8) {
-	// Convert mirek to Kelvin: K = 1,000,000 / mirek
-	kelvin := 1000000.0 / float64(mirek)
-
-	// Approximate RGB from color temperature
-	var rFloat, gFloat, bFloat float64
-
-	// Red
-	if kelvin <= 6600 {
-		rFloat = 255
-	} else {
-		rFloat = 329.698727446 * math.Pow(kelvin/100-60, -0.1332047592)
-	}
-
-	// Green
-	if kelvin <= 6600 {
-		gFloat = 99.4708025861*math.Log(kelvin/100) - 161.1195681661
-	} else {
-		gFloat = 288.1221695283 * math.Pow(kelvin/100-60, -0.0755148492)
-	}
-
-	// Blue
-	if kelvin >= 6600 {
-		bFloat = 255
-	} else if kelvin <= 1900 {
-		bFloat = 0
-	} else {
-		bFloat = 138.5177312231*math.Log(kelvin/100-10) - 305.0447927307
-	}
-
-	// Clamp to 0-255
-	clamp := func(v float64) uint8 {
-		if v < 0 {
-			return 0
-		}
-		if v > 255 {
-			return 255
-		}
-		return uint8(v)
-	}
-
-	return clamp(rFloat), clamp(gFloat), clamp(bFloat)
-}
+// Color conversion functions moved to internal/ui/color.go:
+// - ui.XyToRGB
+// - ui.MirekToRGB
 
 // GetLightColor extracts the RGB color from a light.
 func GetLightColor(light hueclient.LightGet) lipgloss.Color {
@@ -1360,7 +1433,7 @@ func GetLightColor(light hueclient.LightGet) lipgloss.Color {
 		if light.Color.Xy.X != nil && light.Color.Xy.Y != nil {
 			x := float64(*light.Color.Xy.X)
 			y := float64(*light.Color.Xy.Y)
-			r, g, b := xyToRGB(x, y, brightness)
+			r, g, b := ui.XyToRGB(x, y, brightness)
 			return lipgloss.Color(fmt.Sprintf("#%02x%02x%02x", r, g, b))
 		}
 	}
@@ -1368,7 +1441,7 @@ func GetLightColor(light hueclient.LightGet) lipgloss.Color {
 	// Try color temperature (white ambiance lights)
 	if light.ColorTemperature != nil && light.ColorTemperature.Mirek != nil {
 		if light.ColorTemperature.MirekValid == nil || *light.ColorTemperature.MirekValid {
-			r, g, b := mirekToRGB(*light.ColorTemperature.Mirek)
+			r, g, b := ui.MirekToRGB(*light.ColorTemperature.Mirek)
 			return lipgloss.Color(fmt.Sprintf("#%02x%02x%02x", r, g, b))
 		}
 	}

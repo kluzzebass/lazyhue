@@ -19,11 +19,10 @@ type TabData struct {
 
 // TabbedPanel provides a panel with multiple tabs, each containing a scrollable list.
 type TabbedPanel struct {
+	ScrollState        // Embedded for width/height and helper methods
 	tabs       []TabData
 	activeTab  int
 	styles     ui.Styles
-	width      int
-	height     int
 	panelTitle string
 	panelKey   string
 }
@@ -45,17 +44,6 @@ func NewTabbedPanel(styles ui.Styles, panelTitle, panelKey string, tabTitles []s
 		panelTitle: panelTitle,
 		panelKey:   panelKey,
 	}
-}
-
-// SetSize updates the panel dimensions.
-func (p *TabbedPanel) SetSize(width, height int) {
-	p.width = width
-	p.height = height
-}
-
-// viewHeight returns the number of visible lines.
-func (p *TabbedPanel) viewHeight() int {
-	return max(1, p.height-2)
 }
 
 // SetItems sets items for a specific tab by index.
@@ -85,14 +73,14 @@ func (p *TabbedPanel) clampTab(tabIndex int) {
 		tab.Offset = 0
 	} else if tab.Cursor >= len(tab.Items) {
 		tab.Cursor = len(tab.Items) - 1
-		p.ensureCursorVisible(tabIndex)
+		p.ensureTabCursorVisible(tabIndex)
 	}
 }
 
-// ensureCursorVisible adjusts scroll offset for a tab.
-func (p *TabbedPanel) ensureCursorVisible(tabIndex int) {
+// ensureTabCursorVisible adjusts scroll offset for a tab.
+func (p *TabbedPanel) ensureTabCursorVisible(tabIndex int) {
 	tab := &p.tabs[tabIndex]
-	viewHeight := p.viewHeight()
+	viewHeight := p.ViewHeight()
 
 	if tab.Cursor < tab.Offset {
 		tab.Offset = tab.Cursor
@@ -127,7 +115,7 @@ func (p *TabbedPanel) moveCursor(delta int) {
 	if tab.Cursor >= len(tab.Items) {
 		tab.Cursor = len(tab.Items) - 1
 	}
-	p.ensureCursorVisible(p.activeTab)
+	p.ensureTabCursorVisible(p.activeTab)
 }
 
 // ActiveTabID returns the ID of the currently active tab.
@@ -175,7 +163,7 @@ func (p *TabbedPanel) SelectedItem() (EntityItem, bool) {
 
 // Update handles input for the tabbed panel.
 func (p *TabbedPanel) Update(msg tea.Msg) tea.Cmd {
-	viewHeight := p.viewHeight()
+	viewHeight := p.ViewHeight()
 
 	switch msg := msg.(type) {
 	case tea.MouseMsg:
@@ -213,7 +201,7 @@ func (p *TabbedPanel) Update(msg tea.Msg) tea.Cmd {
 			if p.activeTab >= 0 && p.activeTab < len(p.tabs) {
 				tab := &p.tabs[p.activeTab]
 				tab.Cursor = max(0, len(tab.Items)-1)
-				p.ensureCursorVisible(p.activeTab)
+				p.ensureTabCursorVisible(p.activeTab)
 			}
 		}
 	}
@@ -247,8 +235,8 @@ func (p *TabbedPanel) SelectedEntity() (*EntityItem, bool) {
 
 // View renders the tabbed panel.
 func (p *TabbedPanel) View(active bool) string {
-	contentHeight := p.viewHeight()
-	contentWidth := max(1, p.width-2)
+	contentHeight := p.ViewHeight()
+	contentWidth := p.ContentWidth()
 
 	var lines []string
 	itemCount := 0
@@ -298,7 +286,7 @@ func (p *TabbedPanel) View(active bool) string {
 		ViewHeight:  contentHeight,
 	}
 
-	return ui.RenderBorderedPanel(content, p.width, p.height, active, p.styles, cfg)
+	return ui.RenderBorderedPanel(content, p.Width(), p.Height(), active, p.styles, cfg)
 }
 
 // renderItem renders a single list item.
@@ -307,27 +295,7 @@ func (p *TabbedPanel) renderItem(item list.Item, selected, active bool, width in
 	if !ok {
 		return ""
 	}
-
-	// Use centralized indicator rendering
-	indicator := RenderEntityIndicator(ei, p.styles, selected && active)
-
-	name := ei.Name
-	line := indicator + " " + name
-
-	// Truncate if needed
-	if lipgloss.Width(line) > width {
-		line = line[:width-1] + "…"
-	}
-
-	// Style with full-width background
-	var style lipgloss.Style
-	if selected && active {
-		style = p.styles.SelectedItem.Width(width)
-	} else {
-		style = p.styles.ListItem.Width(width)
-	}
-
-	return style.Render(line)
+	return RenderEntityLine(ei, width, selected, active, p.styles)
 }
 
 // HasItems returns true if the active tab has any items.

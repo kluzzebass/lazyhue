@@ -15,15 +15,12 @@ const minIndicatorVisible = 250 * time.Millisecond
 
 // BridgePanel shows the list of bridges with custom scrolling.
 type BridgePanel struct {
+	ScrollState          // Embedded scroll state for cursor/offset management
 	bridges      []*hue.Bridge
 	styles       ui.Styles
-	width        int
-	height       int
 	activeBridge string
 	panelKey     string
 	panelTitle   string
-	cursor       int
-	offset       int
 	selectedID   string // Track selection by bridge ID for stability across list changes
 	// Polling indicator per bridge: brief flash for minIndicatorVisible
 	pollingUntil map[string]time.Time
@@ -52,8 +49,8 @@ func (p *BridgePanel) SetBridges(bridges []*hue.Bridge, activeBridgeID string) {
 	p.activeBridge = activeBridgeID
 
 	if len(p.bridges) == 0 {
-		p.cursor = 0
-		p.offset = 0
+		p.SetCursor(0)
+		p.SetOffset(0)
 		p.selectedID = ""
 		return
 	}
@@ -62,22 +59,29 @@ func (p *BridgePanel) SetBridges(bridges []*hue.Bridge, activeBridgeID string) {
 	if p.selectedID != "" {
 		for i, bridge := range p.bridges {
 			if bridge.Info.ID == p.selectedID {
-				p.cursor = i
-				p.ensureCursorVisible()
+				p.SetCursor(i)
+				p.EnsureCursorVisible(len(p.bridges))
 				return
 			}
 		}
 	}
 
 	// selectedID not found or empty - clamp cursor and set selectedID
-	if p.cursor >= len(p.bridges) {
-		p.cursor = len(p.bridges) - 1
+	p.ClampCursor(len(p.bridges))
+	cursor := p.Cursor()
+	if cursor >= 0 && cursor < len(p.bridges) {
+		p.selectedID = p.bridges[cursor].Info.ID
 	}
-	if p.cursor < 0 {
-		p.cursor = 0
+}
+
+// moveCursor moves the cursor by delta and updates selectedID.
+func (p *BridgePanel) moveCursor(delta int) {
+	p.MoveCursor(delta, len(p.bridges))
+	// Update selectedID for sticky selection
+	cursor := p.Cursor()
+	if cursor >= 0 && cursor < len(p.bridges) {
+		p.selectedID = p.bridges[cursor].Info.ID
 	}
-	p.selectedID = p.bridges[p.cursor].Info.ID
-	p.ensureCursorVisible()
 }
 
 // SetPolling triggers a brief polling indicator flash for a specific bridge.
@@ -104,78 +108,29 @@ func (p *BridgePanel) SetDiscovering(discovering bool) {
 	}
 }
 
-// isPollingVisible returns true if polling indicator should show for a specific bridge.
+// isPollingVisible returns true if a bridge's polling indicator should still be shown.
 func (p *BridgePanel) isPollingVisible(bridgeID string) bool {
-	if until, ok := p.pollingUntil[bridgeID]; ok {
-		return time.Now().Before(until)
-	}
-	return false
+	until, ok := p.pollingUntil[bridgeID]
+	return ok && time.Now().Before(until)
 }
 
-// isDiscoveringVisible returns true if discovery indicator should show (brief flash).
+// isDiscoveringVisible returns true if the discovery indicator should still be shown.
 func (p *BridgePanel) isDiscoveringVisible() bool {
 	return time.Now().Before(p.discoveringUntil)
 }
 
-// SetSize updates the panel dimensions.
-func (p *BridgePanel) SetSize(width, height int) {
-	p.width = width
-	p.height = height
-}
-
-// viewHeight returns the number of visible lines.
-func (p *BridgePanel) viewHeight() int {
-	return max(1, p.height-2)
-}
-
-// moveCursor moves the cursor by delta and updates selectedID.
-func (p *BridgePanel) moveCursor(delta int) {
-	if len(p.bridges) == 0 {
-		return
-	}
-	p.cursor += delta
-	if p.cursor < 0 {
-		p.cursor = 0
-	}
-	if p.cursor >= len(p.bridges) {
-		p.cursor = len(p.bridges) - 1
-	}
-	// Update selectedID for sticky selection
-	p.selectedID = p.bridges[p.cursor].Info.ID
-	p.ensureCursorVisible()
-}
-
-// ensureCursorVisible adjusts scroll offset.
-func (p *BridgePanel) ensureCursorVisible() {
-	viewHeight := p.viewHeight()
-
-	if p.cursor < p.offset {
-		p.offset = p.cursor
-	}
-	if p.cursor >= p.offset+viewHeight {
-		p.offset = p.cursor - viewHeight + 1
-	}
-
-	maxOffset := max(0, len(p.bridges)-viewHeight)
-	if p.offset > maxOffset {
-		p.offset = maxOffset
-	}
-	if p.offset < 0 {
-		p.offset = 0
-	}
-}
-
 // SelectedBridge returns the currently selected bridge.
 func (p *BridgePanel) SelectedBridge() *hue.Bridge {
-	if p.cursor >= 0 && p.cursor < len(p.bridges) {
-		return p.bridges[p.cursor]
+	cursor := p.Cursor()
+	if cursor >= 0 && cursor < len(p.bridges) {
+		return p.bridges[cursor]
 	}
 	return nil
 }
 
 // Update handles input for the bridge panel.
 func (p *BridgePanel) Update(msg tea.Msg) tea.Cmd {
-	viewHeight := p.viewHeight()
+	itemCount := len(p.bridges)
 
 	switch msg := msg.(type) {
 	case tea.MouseMsg:
@@ -195,20 +150,18 @@ func (p *BridgePanel) Update(msg tea.Msg) tea.Cmd {
 		case key.Matches(msg, key.NewBinding(key.WithKeys("down", "j"))):
 			p.moveCursor(1)
 		case key.Matches(msg, key.NewBinding(key.WithKeys("pgup"))):
-			p.moveCursor(-viewHeight)
+			p.moveCursor(-p.ViewHeight())
 		case key.Matches(msg, key.NewBinding(key.WithKeys("pgdown"))):
-			p.moveCursor(viewHeight)
+			p.moveCursor(p.ViewHeight())
 		case key.Matches(msg, key.NewBinding(key.WithKeys("home", "g"))):
-			p.cursor = 0
-			p.offset = 0
-			if len(p.bridges) > 0 {
+			p.MoveToStart()
+			if itemCount > 0 {
 				p.selectedID = p.bridges[0].Info.ID
 			}
 		case key.Matches(msg, key.NewBinding(key.WithKeys("end", "G"))):
-			p.cursor = max(0, len(p.bridges)-1)
-			p.ensureCursorVisible()
-			if len(p.bridges) > 0 {
-				p.selectedID = p.bridges[p.cursor].Info.ID
+			p.MoveToEnd(itemCount)
+			if itemCount > 0 {
+				p.selectedID = p.bridges[p.Cursor()].Info.ID
 			}
 		}
 	}
@@ -217,8 +170,8 @@ func (p *BridgePanel) Update(msg tea.Msg) tea.Cmd {
 
 // View renders the bridge panel.
 func (p *BridgePanel) View(active bool) string {
-	contentHeight := p.viewHeight()
-	contentWidth := max(1, p.width-2)
+	contentHeight := p.ViewHeight()
+	contentWidth := p.ContentWidth()
 
 	var lines []string
 
@@ -227,10 +180,10 @@ func (p *BridgePanel) View(active bool) string {
 		lines = append(lines, "")
 		lines = append(lines, p.styles.Muted.Render("Press P to pair"))
 	} else {
-		endIdx := min(p.offset+contentHeight, len(p.bridges))
-		for i := p.offset; i < endIdx; i++ {
+		start, end := p.VisibleRange(len(p.bridges))
+		for i := start; i < end; i++ {
 			bridge := p.bridges[i]
-			selected := i == p.cursor
+			selected := i == p.Cursor()
 			line := p.renderBridge(bridge, selected, active, contentWidth)
 			lines = append(lines, line)
 		}
@@ -255,14 +208,14 @@ func (p *BridgePanel) View(active bool) string {
 		PanelKey:       p.panelKey,
 		Title:          p.panelTitle,
 		TitleIndicator: discoverIndicator,
-		ItemIndex:      p.cursor,
+		ItemIndex:      p.Cursor(),
 		ItemCount:      len(p.bridges),
-		ScrollPos:      p.offset,
+		ScrollPos:      p.Offset(),
 		TotalHeight:    len(p.bridges),
 		ViewHeight:     contentHeight,
 	}
 
-	return ui.RenderBorderedPanel(content, p.width, p.height, active, p.styles, cfg)
+	return ui.RenderBorderedPanel(content, p.Width(), p.Height(), active, p.styles, cfg)
 }
 
 // renderBridge renders a single bridge item.
@@ -386,21 +339,14 @@ func (p *BridgePanel) HasBridges() bool {
 
 // Index returns the current cursor position.
 func (p *BridgePanel) Index() int {
-	return p.cursor
+	return p.Cursor()
 }
 
 // HandleClick handles a mouse click at relative coordinates within the panel.
 func (p *BridgePanel) HandleClick(relX, relY int) {
-	// Content starts at y=1 (after top border)
-	if relY < 1 {
-		return
-	}
-
-	// Calculate which bridge was clicked
-	itemIndex := p.offset + (relY - 1)
-	if itemIndex >= 0 && itemIndex < len(p.bridges) {
-		p.cursor = itemIndex
+	idx := p.ScrollState.HandleClick(relY, len(p.bridges))
+	if idx >= 0 {
 		// Update selectedID for sticky selection
-		p.selectedID = p.bridges[p.cursor].Info.ID
+		p.selectedID = p.bridges[idx].Info.ID
 	}
 }

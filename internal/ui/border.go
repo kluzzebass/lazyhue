@@ -48,15 +48,17 @@ func RenderBorderedPanel(content string, width, height int, active bool, styles 
 	// Pad/truncate content to fit
 	lines := strings.Split(content, "\n")
 	paddedLines := make([]string, contentHeight)
+	ansiReset := "\033[0m"
 	for i := range contentHeight {
 		if i < len(lines) {
 			// Truncate or pad line to content width
 			line := lines[i]
 			lineWidth := lipgloss.Width(line)
 			if lineWidth > contentWidth {
-				line = truncateString(line, contentWidth)
+				line = TruncateString(line, contentWidth)
 			} else if lineWidth < contentWidth {
-				line = line + strings.Repeat(" ", contentWidth-lineWidth)
+				// Reset styles before padding to prevent background bleed
+				line = line + ansiReset + strings.Repeat(" ", contentWidth-lineWidth)
 			}
 			paddedLines[i] = line
 		} else {
@@ -291,15 +293,17 @@ func calculateScrollThumb(scrollPos, totalHeight, viewHeight, borderHeight int) 
 	return thumbPos, thumbPos + thumbSize
 }
 
-func truncateString(s string, maxWidth int) string {
+// TruncateString truncates a string (including ANSI-styled strings) to a maximum visual width.
+// It ensures proper ANSI reset after truncation to prevent color bleed.
+func TruncateString(s string, maxWidth int) string {
 	if lipgloss.Width(s) <= maxWidth {
 		return s
 	}
-	// Simple truncation - for ANSI strings this might cut mid-sequence
-	// A proper implementation would use lipgloss or similar
+	// Progressively trim runes until we fit within maxWidth
 	runes := []rune(s)
 	for len(runes) > 0 && lipgloss.Width(string(runes)) > maxWidth {
 		runes = runes[:len(runes)-1]
 	}
-	return string(runes)
+	// Append ANSI reset to prevent color/style bleed after truncation
+	return string(runes) + "\033[0m"
 }

@@ -1,8 +1,6 @@
 package panels
 
 import (
-	"strings"
-
 	"github.com/charmbracelet/bubbles/key"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -19,17 +17,14 @@ type TreeNode struct {
 
 // TreePanel displays a hierarchical tree of items.
 type TreePanel struct {
+	ScrollState        // Embedded scroll state for cursor/offset management
 	styles     ui.Styles
-	width      int
-	height     int
 	panelKey   string
 	panelTitle string
 
 	// Tree data
 	roots    []*TreeNode
 	flatList []*TreeNode // Flattened visible nodes for navigation
-	cursor   int
-	offset   int // Scroll offset (first visible item index)
 }
 
 // NewTreePanel creates a new tree panel.
@@ -39,12 +34,6 @@ func NewTreePanel(styles ui.Styles, title, panelKey string) *TreePanel {
 		panelTitle: title,
 		panelKey:   panelKey,
 	}
-}
-
-// SetSize updates the panel dimensions.
-func (p *TreePanel) SetSize(width, height int) {
-	p.width = width
-	p.height = height
 }
 
 // SetRoots sets the tree data, preserving expanded state from previous tree.
@@ -58,10 +47,6 @@ func (p *TreePanel) SetRoots(roots []*TreeNode) {
 	p.restoreExpandedState(expandedState)
 
 	p.rebuildFlatList()
-	// Keep cursor in bounds
-	if p.cursor >= len(p.flatList) {
-		p.cursor = max(0, len(p.flatList)-1)
-	}
 }
 
 // nodeKey returns a stable key for a node (entity ID if available, otherwise label).
@@ -163,51 +148,47 @@ func (p *TreePanel) rebuildFlatList() {
 	}
 	walk(p.roots)
 
-	// Clamp cursor and offset to new list size
-	if len(p.flatList) == 0 {
-		p.cursor = 0
-		p.offset = 0
-	} else {
-		if p.cursor >= len(p.flatList) {
-			p.cursor = len(p.flatList) - 1
-		}
-		p.ensureCursorVisible()
-	}
+	// Clamp cursor to new list size
+	p.ClampCursor(len(p.flatList))
+}
+
+// itemCount returns the number of items in the flat list.
+func (p *TreePanel) itemCount() int {
+	return len(p.flatList)
 }
 
 // Update handles input.
 func (p *TreePanel) Update(msg tea.Msg) tea.Cmd {
-	viewHeight := p.viewHeight()
+	itemCount := p.itemCount()
 
 	switch msg := msg.(type) {
 	case tea.MouseMsg:
 		switch msg.Button {
 		case tea.MouseButtonWheelUp:
-			p.moveCursor(-1)
+			p.MoveCursor(-1, itemCount)
 		case tea.MouseButtonWheelDown:
-			p.moveCursor(1)
+			p.MoveCursor(1, itemCount)
 		}
 
 	case tea.KeyMsg:
 		switch {
 		case key.Matches(msg, key.NewBinding(key.WithKeys("up", "k"))):
-			p.moveCursor(-1)
+			p.MoveCursor(-1, itemCount)
 		case key.Matches(msg, key.NewBinding(key.WithKeys("down", "j"))):
-			p.moveCursor(1)
+			p.MoveCursor(1, itemCount)
 		case key.Matches(msg, key.NewBinding(key.WithKeys("pgup"))):
-			p.moveCursor(-viewHeight)
+			p.PageUp(itemCount)
 		case key.Matches(msg, key.NewBinding(key.WithKeys("pgdown"))):
-			p.moveCursor(viewHeight)
+			p.PageDown(itemCount)
 		case key.Matches(msg, key.NewBinding(key.WithKeys("home"))):
-			p.cursor = 0
-			p.offset = 0
+			p.MoveToStart()
 		case key.Matches(msg, key.NewBinding(key.WithKeys("end"))):
-			p.cursor = max(0, len(p.flatList)-1)
-			p.ensureCursorVisible()
+			p.MoveToEnd(itemCount)
 		case key.Matches(msg, key.NewBinding(key.WithKeys("right", "l"))):
 			// Expand only (not toggle)
-			if p.cursor < len(p.flatList) {
-				node := p.flatList[p.cursor]
+			cursor := p.Cursor()
+			if cursor < len(p.flatList) {
+				node := p.flatList[cursor]
 				if len(node.Children) > 0 && !node.Expanded {
 					node.Expanded = true
 					p.rebuildFlatList()
@@ -215,8 +196,9 @@ func (p *TreePanel) Update(msg tea.Msg) tea.Cmd {
 			}
 		case key.Matches(msg, key.NewBinding(key.WithKeys("left", "h"))):
 			// Collapse only
-			if p.cursor < len(p.flatList) {
-				node := p.flatList[p.cursor]
+			cursor := p.Cursor()
+			if cursor < len(p.flatList) {
+				node := p.flatList[cursor]
 				if node.Expanded && len(node.Children) > 0 {
 					node.Expanded = false
 					p.rebuildFlatList()
@@ -227,65 +209,20 @@ func (p *TreePanel) Update(msg tea.Msg) tea.Cmd {
 	return nil
 }
 
-// viewHeight returns the number of visible lines.
-func (p *TreePanel) viewHeight() int {
-	return max(1, p.height-2)
-}
-
-// moveCursor moves the cursor by delta, adjusting scroll as needed.
-func (p *TreePanel) moveCursor(delta int) {
-	if len(p.flatList) == 0 {
-		return
-	}
-
-	// Move cursor
-	p.cursor += delta
-	if p.cursor < 0 {
-		p.cursor = 0
-	}
-	if p.cursor >= len(p.flatList) {
-		p.cursor = len(p.flatList) - 1
-	}
-
-	p.ensureCursorVisible()
-}
-
-// ensureCursorVisible adjusts the scroll offset to keep cursor in view.
-func (p *TreePanel) ensureCursorVisible() {
-	viewHeight := p.viewHeight()
-
-	// Scroll up if cursor is above visible area
-	if p.cursor < p.offset {
-		p.offset = p.cursor
-	}
-
-	// Scroll down if cursor is below visible area
-	if p.cursor >= p.offset+viewHeight {
-		p.offset = p.cursor - viewHeight + 1
-	}
-
-	// Clamp offset
-	maxOffset := max(0, len(p.flatList)-viewHeight)
-	if p.offset > maxOffset {
-		p.offset = maxOffset
-	}
-	if p.offset < 0 {
-		p.offset = 0
-	}
-}
-
 // IsGroupSelected returns true if the cursor is on a group (not a leaf).
 func (p *TreePanel) IsGroupSelected() bool {
-	if p.cursor < len(p.flatList) {
-		return len(p.flatList[p.cursor].Children) > 0
+	cursor := p.Cursor()
+	if cursor < len(p.flatList) {
+		return len(p.flatList[cursor].Children) > 0
 	}
 	return false
 }
 
 // ToggleSelected toggles expand/collapse if on a group node.
 func (p *TreePanel) ToggleSelected() {
-	if p.cursor < len(p.flatList) {
-		node := p.flatList[p.cursor]
+	cursor := p.Cursor()
+	if cursor < len(p.flatList) {
+		node := p.flatList[cursor]
 		if len(node.Children) > 0 {
 			node.Expanded = !node.Expanded
 			p.rebuildFlatList()
@@ -295,20 +232,18 @@ func (p *TreePanel) ToggleSelected() {
 
 // View renders the tree panel.
 func (p *TreePanel) View(active bool) string {
-	contentHeight := p.viewHeight()
-	contentWidth := max(1, p.width-2)
+	contentHeight := p.ViewHeight()
+	contentWidth := p.ContentWidth()
 
 	// Build visible content using scroll offset
 	var lines []string
-	endIdx := min(p.offset+contentHeight, len(p.flatList))
+	start, end := p.VisibleRange(len(p.flatList))
 
-	for i := p.offset; i < endIdx; i++ {
+	for i := start; i < end; i++ {
 		node := p.flatList[i]
-		line := p.renderNode(node, i == p.cursor, active)
-		// Truncate to width
-		if lipgloss.Width(line) > contentWidth {
-			line = line[:contentWidth]
-		}
+		line := p.renderNode(node, i == p.Cursor(), active)
+		// Truncate to width using proper visual width handling
+		line = ui.TruncateString(line, contentWidth)
 		lines = append(lines, line)
 	}
 
@@ -322,106 +257,21 @@ func (p *TreePanel) View(active bool) string {
 	cfg := ui.BorderConfig{
 		PanelKey:    p.panelKey,
 		Title:       p.panelTitle,
-		ItemIndex:   p.cursor,
+		ItemIndex:   p.Cursor(),
 		ItemCount:   len(p.flatList),
-		ScrollPos:   p.offset,
+		ScrollPos:   p.Offset(),
 		TotalHeight: len(p.flatList),
 		ViewHeight:  contentHeight,
 	}
 
-	return ui.RenderBorderedPanel(content, p.width, p.height, active, p.styles, cfg)
+	return ui.RenderBorderedPanel(content, p.Width(), p.Height(), active, p.styles, cfg)
 }
 
 // renderNode renders a single node line.
 func (p *TreePanel) renderNode(node *TreeNode, selected, active bool) string {
-	// Find depth
 	depth := p.nodeDepth(node)
-
-	// Build prefix
-	prefix := ""
-	for i := 0; i < depth; i++ {
-		prefix += "  "
-	}
-
-	// Expand indicator for groups
-	expandIndicator := "  "
-	if len(node.Children) > 0 {
-		if node.Expanded {
-			expandIndicator = "▼ "
-		} else {
-			expandIndicator = "▶ "
-		}
-	}
-
-	// Build the line content
-	label := node.Label
-	lineWidth := max(1, p.width-2)
-
-	// If this is a light with a color, we need to render the indicator separately
-	var line string
-	if node.Item != nil && node.Item.IndicatorColor != "" && len(label) > 0 {
-		// Split off the first character (brightness indicator) and color it
-		runes := []rune(label)
-		indicator := string(runes[0])
-		rest := string(runes[1:])
-
-		// Build line with colored indicator
-		plainLine := prefix + expandIndicator + indicator + rest
-		visibleWidth := lipgloss.Width(plainLine)
-		padding := ""
-		if visibleWidth < lineWidth {
-			padding = strings.Repeat(" ", lineWidth-visibleWidth)
-		}
-
-		// Apply selection style to everything except the colored indicator
-		var style lipgloss.Style
-		if selected && active {
-			style = p.styles.SelectedItem
-		} else {
-			style = p.styles.ListItem
-		}
-
-		// For the colored indicator, keep its foreground but inherit background from selection
-		indicatorStyle := lipgloss.NewStyle().
-			Foreground(lipgloss.Color(node.Item.IndicatorColor))
-		if selected && active {
-			// Copy the background from SelectedItem style
-			indicatorStyle = indicatorStyle.Background(p.styles.SelectedItem.GetBackground())
-		}
-		coloredIndicator := indicatorStyle.Render(indicator)
-
-		// Render: prefix + expandIndicator styled, then colored indicator, then rest + padding styled
-		styledPrefix := style.Render(prefix + expandIndicator)
-		styledRest := style.Render(rest + padding)
-		line = styledPrefix + coloredIndicator + styledRest
-	} else {
-		// No special coloring needed
-		line = prefix + expandIndicator + label
-		visibleWidth := lipgloss.Width(line)
-		if visibleWidth < lineWidth {
-			line = line + strings.Repeat(" ", lineWidth-visibleWidth)
-		}
-
-		// Determine if this is a leaf node (light, device, scene, etc.) or a folder
-		isLeaf := node.Item != nil && (node.Item.Type == EntityLight ||
-			node.Item.Type == EntityDevice ||
-			node.Item.Type == EntityScene ||
-			node.Item.Type == EntityBridge ||
-			node.Item.Type == EntityEntertainment)
-
-		var style lipgloss.Style
-		if selected && active {
-			style = p.styles.SelectedItem
-		} else if !isLeaf {
-			// Folders/groups are muted
-			style = p.styles.Muted.Bold(true)
-		} else {
-			style = p.styles.ListItem
-		}
-		line = style.Render(line)
-	}
-
-	return line
+	lineWidth := p.ContentWidth()
+	return RenderTreeLine(node, depth, lineWidth, selected, active, p.styles)
 }
 
 // nodeDepth finds the depth of a node.
@@ -459,8 +309,9 @@ func (p *TreePanel) Title() string {
 
 // SelectedEntity returns the currently selected entity (skips group headers).
 func (p *TreePanel) SelectedEntity() (*EntityItem, bool) {
-	if p.cursor < len(p.flatList) {
-		node := p.flatList[p.cursor]
+	cursor := p.Cursor()
+	if cursor < len(p.flatList) {
+		node := p.flatList[cursor]
 		if node.Item != nil {
 			return node.Item, true
 		}
@@ -470,8 +321,9 @@ func (p *TreePanel) SelectedEntity() (*EntityItem, bool) {
 
 // SelectedNode returns the currently selected node.
 func (p *TreePanel) SelectedNode() *TreeNode {
-	if p.cursor < len(p.flatList) {
-		return p.flatList[p.cursor]
+	cursor := p.Cursor()
+	if cursor < len(p.flatList) {
+		return p.flatList[cursor]
 	}
 	return nil
 }
@@ -484,12 +336,25 @@ func (p *TreePanel) SelectByID(id string) bool {
 	}
 	for i, node := range p.flatList {
 		if node.Item != nil && node.Item.ID == id {
-			p.cursor = i
-			p.ensureCursorVisible()
+			p.SetCursor(i)
+			p.EnsureCursorVisible(len(p.flatList))
 			return true
 		}
 	}
 	return false
+}
+
+// FlatListLen returns the number of items in the flattened tree.
+func (p *TreePanel) FlatListLen() int {
+	return len(p.flatList)
+}
+
+// FlatListItem returns the node at the given index in the flat list.
+func (p *TreePanel) FlatListItem(index int) *TreeNode {
+	if index >= 0 && index < len(p.flatList) {
+		return p.flatList[index]
+	}
+	return nil
 }
 
 // HandleClick handles a mouse click at relative coordinates within the panel.
@@ -500,11 +365,11 @@ func (p *TreePanel) HandleClick(relX, relY int) {
 	}
 
 	// Calculate which item was clicked
-	itemIndex := p.offset + (relY - 1)
+	itemIndex := p.Offset() + (relY - 1)
 	if itemIndex >= 0 && itemIndex < len(p.flatList) {
 		node := p.flatList[itemIndex]
-		wasAlreadySelected := (itemIndex == p.cursor)
-		p.cursor = itemIndex
+		wasAlreadySelected := (itemIndex == p.Cursor())
+		p.SetCursor(itemIndex)
 
 		// Toggle expand/collapse if:
 		// 1. Click is on the expand/collapse indicator, OR

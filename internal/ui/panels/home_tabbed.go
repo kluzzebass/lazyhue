@@ -1,8 +1,6 @@
 package panels
 
 import (
-	"strings"
-
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/list"
 	tea "github.com/charmbracelet/bubbletea"
@@ -12,9 +10,8 @@ import (
 
 // HomeTabbedPanel is the second column panel with Home (tree), Lights, Devices, and Scenes tabs.
 type HomeTabbedPanel struct {
+	ScrollState       // Embedded for width/height and helper methods
 	styles   ui.Styles
-	width    int
-	height   int
 	panelKey string
 
 	// Tabs
@@ -24,16 +21,13 @@ type HomeTabbedPanel struct {
 	// Home tab uses the embedded tree panel
 	treePanel *TreePanel
 
-	// Lights, Devices and Scenes tabs use flat lists
-	lights        []list.Item
-	devices       []list.Item
-	scenes        []list.Item
-	lightsCursor  int
-	lightsOffset  int
-	devicesCursor int
-	devicesOffset int
-	scenesCursor  int
-	scenesOffset  int
+	// Lights, Devices and Scenes tabs use flat lists with their own scroll state
+	lights   []list.Item
+	devices  []list.Item
+	scenes   []list.Item
+	lightsScroll  ScrollState
+	devicesScroll ScrollState
+	scenesScroll  ScrollState
 }
 
 // NewHomeTabbedPanel creates a new home tabbed panel.
@@ -48,15 +42,13 @@ func NewHomeTabbedPanel(styles ui.Styles, panelKey string) *HomeTabbedPanel {
 
 // SetSize updates the panel dimensions.
 func (p *HomeTabbedPanel) SetSize(width, height int) {
-	p.width = width
-	p.height = height
-	// Pass size to tree panel (subtract 1 for tabs header)
+	p.ScrollState.SetSize(width, height)
+	// Pass size to tree panel
 	p.treePanel.SetSize(width, height)
-}
-
-// viewHeight returns the number of visible lines for content.
-func (p *HomeTabbedPanel) viewHeight() int {
-	return max(1, p.height-2)
+	// Update scroll states for other tabs
+	p.lightsScroll.SetSize(width, height)
+	p.devicesScroll.SetSize(width, height)
+	p.scenesScroll.SetSize(width, height)
 }
 
 // SetRoots sets the tree data (for Home tab).
@@ -67,88 +59,19 @@ func (p *HomeTabbedPanel) SetRoots(roots []*TreeNode) {
 // SetLights sets the lights list.
 func (p *HomeTabbedPanel) SetLights(items []list.Item) {
 	p.lights = items
-	p.clampLights()
+	p.lightsScroll.ClampCursor(len(p.lights))
 }
 
 // SetDevices sets the devices list.
 func (p *HomeTabbedPanel) SetDevices(items []list.Item) {
 	p.devices = items
-	p.clampDevices()
+	p.devicesScroll.ClampCursor(len(p.devices))
 }
 
 // SetScenes sets the scenes list.
 func (p *HomeTabbedPanel) SetScenes(items []list.Item) {
 	p.scenes = items
-	p.clampScenes()
-}
-
-func (p *HomeTabbedPanel) clampLights() {
-	if len(p.lights) == 0 {
-		p.lightsCursor = 0
-		p.lightsOffset = 0
-	} else if p.lightsCursor >= len(p.lights) {
-		p.lightsCursor = len(p.lights) - 1
-	}
-}
-
-func (p *HomeTabbedPanel) clampDevices() {
-	if len(p.devices) == 0 {
-		p.devicesCursor = 0
-		p.devicesOffset = 0
-	} else if p.devicesCursor >= len(p.devices) {
-		p.devicesCursor = len(p.devices) - 1
-	}
-}
-
-func (p *HomeTabbedPanel) clampScenes() {
-	if len(p.scenes) == 0 {
-		p.scenesCursor = 0
-		p.scenesOffset = 0
-	} else if p.scenesCursor >= len(p.scenes) {
-		p.scenesCursor = len(p.scenes) - 1
-	}
-}
-
-func (p *HomeTabbedPanel) ensureLightsVisible() {
-	viewHeight := p.viewHeight()
-	if p.lightsCursor < p.lightsOffset {
-		p.lightsOffset = p.lightsCursor
-	}
-	if p.lightsCursor >= p.lightsOffset+viewHeight {
-		p.lightsOffset = p.lightsCursor - viewHeight + 1
-	}
-	maxOffset := max(0, len(p.lights)-viewHeight)
-	if p.lightsOffset > maxOffset {
-		p.lightsOffset = maxOffset
-	}
-}
-
-func (p *HomeTabbedPanel) ensureDevicesVisible() {
-	viewHeight := p.viewHeight()
-	if p.devicesCursor < p.devicesOffset {
-		p.devicesOffset = p.devicesCursor
-	}
-	if p.devicesCursor >= p.devicesOffset+viewHeight {
-		p.devicesOffset = p.devicesCursor - viewHeight + 1
-	}
-	maxOffset := max(0, len(p.devices)-viewHeight)
-	if p.devicesOffset > maxOffset {
-		p.devicesOffset = maxOffset
-	}
-}
-
-func (p *HomeTabbedPanel) ensureScenesVisible() {
-	viewHeight := p.viewHeight()
-	if p.scenesCursor < p.scenesOffset {
-		p.scenesOffset = p.scenesCursor
-	}
-	if p.scenesCursor >= p.scenesOffset+viewHeight {
-		p.scenesOffset = p.scenesCursor - viewHeight + 1
-	}
-	maxOffset := max(0, len(p.scenes)-viewHeight)
-	if p.scenesOffset > maxOffset {
-		p.scenesOffset = maxOffset
-	}
+	p.scenesScroll.ClampCursor(len(p.scenes))
 }
 
 // ActiveTabIndex returns the active tab index.
@@ -175,7 +98,7 @@ func (p *HomeTabbedPanel) PrevTab() {
 
 // Update handles input for the panel.
 func (p *HomeTabbedPanel) Update(msg tea.Msg) tea.Cmd {
-	viewHeight := p.viewHeight()
+	viewHeight := p.ViewHeight()
 
 	switch msg := msg.(type) {
 	case tea.MouseMsg:
@@ -231,85 +154,39 @@ func (p *HomeTabbedPanel) Update(msg tea.Msg) tea.Cmd {
 func (p *HomeTabbedPanel) moveCursor(delta int) {
 	switch p.activeTab {
 	case 0: // Home (tree)
-		p.treePanel.moveCursor(delta)
+		p.treePanel.MoveCursor(delta, p.treePanel.FlatListLen())
 	case 1: // Lights
-		if len(p.lights) == 0 {
-			return
-		}
-		p.lightsCursor += delta
-		if p.lightsCursor < 0 {
-			p.lightsCursor = 0
-		}
-		if p.lightsCursor >= len(p.lights) {
-			p.lightsCursor = len(p.lights) - 1
-		}
-		p.ensureLightsVisible()
+		p.lightsScroll.MoveCursor(delta, len(p.lights))
 	case 2: // Devices
-		if len(p.devices) == 0 {
-			return
-		}
-		p.devicesCursor += delta
-		if p.devicesCursor < 0 {
-			p.devicesCursor = 0
-		}
-		if p.devicesCursor >= len(p.devices) {
-			p.devicesCursor = len(p.devices) - 1
-		}
-		p.ensureDevicesVisible()
+		p.devicesScroll.MoveCursor(delta, len(p.devices))
 	case 3: // Scenes
-		if len(p.scenes) == 0 {
-			return
-		}
-		p.scenesCursor += delta
-		if p.scenesCursor < 0 {
-			p.scenesCursor = 0
-		}
-		if p.scenesCursor >= len(p.scenes) {
-			p.scenesCursor = len(p.scenes) - 1
-		}
-		p.ensureScenesVisible()
+		p.scenesScroll.MoveCursor(delta, len(p.scenes))
 	}
 }
 
 func (p *HomeTabbedPanel) moveCursorToStart() {
 	switch p.activeTab {
 	case 0:
-		p.treePanel.cursor = 0
-		p.treePanel.offset = 0
+		p.treePanel.MoveToStart()
 	case 1:
-		p.lightsCursor = 0
-		p.lightsOffset = 0
+		p.lightsScroll.MoveToStart()
 	case 2:
-		p.devicesCursor = 0
-		p.devicesOffset = 0
+		p.devicesScroll.MoveToStart()
 	case 3:
-		p.scenesCursor = 0
-		p.scenesOffset = 0
+		p.scenesScroll.MoveToStart()
 	}
 }
 
 func (p *HomeTabbedPanel) moveCursorToEnd() {
 	switch p.activeTab {
 	case 0:
-		if len(p.treePanel.flatList) > 0 {
-			p.treePanel.cursor = len(p.treePanel.flatList) - 1
-			p.treePanel.ensureCursorVisible()
-		}
+		p.treePanel.MoveToEnd(p.treePanel.FlatListLen())
 	case 1:
-		if len(p.lights) > 0 {
-			p.lightsCursor = len(p.lights) - 1
-			p.ensureLightsVisible()
-		}
+		p.lightsScroll.MoveToEnd(len(p.lights))
 	case 2:
-		if len(p.devices) > 0 {
-			p.devicesCursor = len(p.devices) - 1
-			p.ensureDevicesVisible()
-		}
+		p.devicesScroll.MoveToEnd(len(p.devices))
 	case 3:
-		if len(p.scenes) > 0 {
-			p.scenesCursor = len(p.scenes) - 1
-			p.ensureScenesVisible()
-		}
+		p.scenesScroll.MoveToEnd(len(p.scenes))
 	}
 }
 
@@ -319,20 +196,23 @@ func (p *HomeTabbedPanel) SelectedEntity() (*EntityItem, bool) {
 	case 0: // Home (tree)
 		return p.treePanel.SelectedEntity()
 	case 1: // Lights
-		if p.lightsCursor >= 0 && p.lightsCursor < len(p.lights) {
-			if ei, ok := p.lights[p.lightsCursor].(EntityItem); ok {
+		cursor := p.lightsScroll.Cursor()
+		if cursor >= 0 && cursor < len(p.lights) {
+			if ei, ok := p.lights[cursor].(EntityItem); ok {
 				return &ei, true
 			}
 		}
 	case 2: // Devices
-		if p.devicesCursor >= 0 && p.devicesCursor < len(p.devices) {
-			if ei, ok := p.devices[p.devicesCursor].(EntityItem); ok {
+		cursor := p.devicesScroll.Cursor()
+		if cursor >= 0 && cursor < len(p.devices) {
+			if ei, ok := p.devices[cursor].(EntityItem); ok {
 				return &ei, true
 			}
 		}
 	case 3: // Scenes
-		if p.scenesCursor >= 0 && p.scenesCursor < len(p.scenes) {
-			if ei, ok := p.scenes[p.scenesCursor].(EntityItem); ok {
+		cursor := p.scenesScroll.Cursor()
+		if cursor >= 0 && cursor < len(p.scenes) {
+			if ei, ok := p.scenes[cursor].(EntityItem); ok {
 				return &ei, true
 			}
 		}
@@ -353,24 +233,24 @@ func (p *HomeTabbedPanel) SelectByID(id string) bool {
 	case 1: // Lights
 		for i, item := range p.lights {
 			if ei, ok := item.(EntityItem); ok && ei.ID == id {
-				p.lightsCursor = i
-				p.ensureLightsVisible()
+				p.lightsScroll.SetCursor(i)
+				p.lightsScroll.EnsureCursorVisible(len(p.lights))
 				return true
 			}
 		}
 	case 2: // Devices
 		for i, item := range p.devices {
 			if ei, ok := item.(EntityItem); ok && ei.ID == id {
-				p.devicesCursor = i
-				p.ensureDevicesVisible()
+				p.devicesScroll.SetCursor(i)
+				p.devicesScroll.EnsureCursorVisible(len(p.devices))
 				return true
 			}
 		}
 	case 3: // Scenes
 		for i, item := range p.scenes {
 			if ei, ok := item.(EntityItem); ok && ei.ID == id {
-				p.scenesCursor = i
-				p.ensureScenesVisible()
+				p.scenesScroll.SetCursor(i)
+				p.scenesScroll.EnsureCursorVisible(len(p.scenes))
 				return true
 			}
 		}
@@ -390,8 +270,8 @@ func (p *HomeTabbedPanel) Title() string {
 
 // View renders the panel.
 func (p *HomeTabbedPanel) View(active bool) string {
-	contentHeight := p.viewHeight()
-	contentWidth := max(1, p.width-2)
+	contentHeight := p.ViewHeight()
+	contentWidth := p.ContentWidth()
 
 	var lines []string
 	var itemCount, itemIndex, scrollOffset int
@@ -399,8 +279,8 @@ func (p *HomeTabbedPanel) View(active bool) string {
 	switch p.activeTab {
 	case 0: // Home (tree)
 		// Use tree panel's rendering but extract content
-		itemCount = len(p.treePanel.flatList)
-		scrollOffset = p.treePanel.offset
+		itemCount = p.treePanel.FlatListLen()
+		scrollOffset = p.treePanel.Offset()
 		// Show last visible line, not cursor position
 		lastVisible := scrollOffset + contentHeight
 		if lastVisible > itemCount {
@@ -416,8 +296,8 @@ func (p *HomeTabbedPanel) View(active bool) string {
 		} else {
 			endIdx := min(scrollOffset+contentHeight, itemCount)
 			for i := scrollOffset; i < endIdx; i++ {
-				node := p.treePanel.flatList[i]
-				selected := i == p.treePanel.cursor
+				node := p.treePanel.FlatListItem(i)
+				selected := i == p.treePanel.Cursor()
 				line := p.treePanel.renderNode(node, selected, active)
 				lines = append(lines, line)
 			}
@@ -425,7 +305,7 @@ func (p *HomeTabbedPanel) View(active bool) string {
 
 	case 1: // Lights
 		itemCount = len(p.lights)
-		scrollOffset = p.lightsOffset
+		scrollOffset = p.lightsScroll.Offset()
 		// Show last visible line
 		lastVisible := scrollOffset + contentHeight
 		if lastVisible > itemCount {
@@ -441,7 +321,7 @@ func (p *HomeTabbedPanel) View(active bool) string {
 		} else {
 			endIdx := min(scrollOffset+contentHeight, itemCount)
 			for i := scrollOffset; i < endIdx; i++ {
-				selected := i == p.lightsCursor
+				selected := i == p.lightsScroll.Cursor()
 				line := p.renderListItem(p.lights[i], selected, active, contentWidth)
 				lines = append(lines, line)
 			}
@@ -449,7 +329,7 @@ func (p *HomeTabbedPanel) View(active bool) string {
 
 	case 2: // Devices
 		itemCount = len(p.devices)
-		scrollOffset = p.devicesOffset
+		scrollOffset = p.devicesScroll.Offset()
 		// Show last visible line
 		lastVisible := scrollOffset + contentHeight
 		if lastVisible > itemCount {
@@ -465,7 +345,7 @@ func (p *HomeTabbedPanel) View(active bool) string {
 		} else {
 			endIdx := min(scrollOffset+contentHeight, itemCount)
 			for i := scrollOffset; i < endIdx; i++ {
-				selected := i == p.devicesCursor
+				selected := i == p.devicesScroll.Cursor()
 				line := p.renderListItem(p.devices[i], selected, active, contentWidth)
 				lines = append(lines, line)
 			}
@@ -473,7 +353,7 @@ func (p *HomeTabbedPanel) View(active bool) string {
 
 	case 3: // Scenes
 		itemCount = len(p.scenes)
-		scrollOffset = p.scenesOffset
+		scrollOffset = p.scenesScroll.Offset()
 		// Show last visible line
 		lastVisible := scrollOffset + contentHeight
 		if lastVisible > itemCount {
@@ -489,7 +369,7 @@ func (p *HomeTabbedPanel) View(active bool) string {
 		} else {
 			endIdx := min(scrollOffset+contentHeight, itemCount)
 			for i := scrollOffset; i < endIdx; i++ {
-				selected := i == p.scenesCursor
+				selected := i == p.scenesScroll.Cursor()
 				line := p.renderListItem(p.scenes[i], selected, active, contentWidth)
 				lines = append(lines, line)
 			}
@@ -514,7 +394,7 @@ func (p *HomeTabbedPanel) View(active bool) string {
 		ViewHeight:  contentHeight,
 	}
 
-	return ui.RenderBorderedPanel(content, p.width, p.height, active, p.styles, cfg)
+	return ui.RenderBorderedPanel(content, p.Width(), p.Height(), active, p.styles, cfg)
 }
 
 // renderListItem renders a flat list item with type-appropriate indicators.
@@ -523,48 +403,14 @@ func (p *HomeTabbedPanel) renderListItem(item list.Item, selected, active bool, 
 	if !ok {
 		return ""
 	}
-
-	var style lipgloss.Style
-	if selected && active {
-		style = p.styles.SelectedItem.Width(width)
-	} else {
-		style = p.styles.ListItem.Width(width)
-	}
-
-	// Use centralized indicator rendering
-	indicatorStr := RenderEntityIndicator(ei, p.styles, selected && active)
-
-	name := ei.Name
-	plainLine := indicatorStr + " " + name
-
-	// Calculate visible width for truncation
-	visibleWidth := lipgloss.Width(plainLine)
-	if visibleWidth > width {
-		// Need to truncate the name
-		availableForName := width - lipgloss.Width(indicatorStr) - 2 // space + ellipsis
-		if availableForName > 0 && len(name) > availableForName {
-			name = name[:availableForName] + "…"
-		}
-	}
-
-	// Build the styled line
-	styledRest := style.Render(" " + name)
-
-	// Pad to full width
-	lineWidth := lipgloss.Width(indicatorStr + styledRest)
-	padding := ""
-	if lineWidth < width {
-		padding = style.Render(strings.Repeat(" ", width-lineWidth))
-	}
-
-	return indicatorStr + styledRest + padding
+	return RenderEntityLine(ei, width, selected, active, p.styles)
 }
 
 // HasItems returns true if the active tab has any items.
 func (p *HomeTabbedPanel) HasItems() bool {
 	switch p.activeTab {
 	case 0:
-		return len(p.treePanel.flatList) > 0
+		return p.treePanel.FlatListLen() > 0
 	case 1:
 		return len(p.lights) > 0
 	case 2:
@@ -598,20 +444,11 @@ func (p *HomeTabbedPanel) HandleClick(relX, relY int) {
 		case 0:
 			p.treePanel.HandleClick(relX, relY)
 		case 1:
-			itemIndex := p.lightsOffset + (relY - 1)
-			if itemIndex >= 0 && itemIndex < len(p.lights) {
-				p.lightsCursor = itemIndex
-			}
+			p.lightsScroll.HandleClick(relY, len(p.lights))
 		case 2:
-			itemIndex := p.devicesOffset + (relY - 1)
-			if itemIndex >= 0 && itemIndex < len(p.devices) {
-				p.devicesCursor = itemIndex
-			}
+			p.devicesScroll.HandleClick(relY, len(p.devices))
 		case 3:
-			itemIndex := p.scenesOffset + (relY - 1)
-			if itemIndex >= 0 && itemIndex < len(p.scenes) {
-				p.scenesCursor = itemIndex
-			}
+			p.scenesScroll.HandleClick(relY, len(p.scenes))
 		}
 	}
 }
@@ -632,12 +469,9 @@ func (p *HomeTabbedPanel) Clear() {
 	p.lights = nil
 	p.devices = nil
 	p.scenes = nil
-	p.lightsCursor = 0
-	p.lightsOffset = 0
-	p.devicesCursor = 0
-	p.devicesOffset = 0
-	p.scenesCursor = 0
-	p.scenesOffset = 0
+	p.lightsScroll = ScrollState{}
+	p.devicesScroll = ScrollState{}
+	p.scenesScroll = ScrollState{}
 }
 
 // IsGroupSelected returns true if a group node is selected (Home tab only).

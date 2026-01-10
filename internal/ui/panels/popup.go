@@ -3,8 +3,8 @@ package panels
 
 import (
 	"fmt"
+	"math"
 	"strings"
-	"unicode"
 
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
@@ -705,14 +705,14 @@ func (p *PopupPanel) handleFieldEditMode(msg tea.KeyMsg) tea.Cmd {
 			return nil
 		case "ctrl+t":
 			if ti, ok := p.formTextInputs[p.formCursor]; ok {
-				ti.SetValue(toTitleCase(ti.Value()))
+				ti.SetValue(ui.ToTitleCase(ti.Value()))
 				p.formTextInputs[p.formCursor] = ti
 				p.formFields[p.formCursor].TextValue = ti.Value()
 			}
 			return nil
 		case "ctrl+l":
 			if ti, ok := p.formTextInputs[p.formCursor]; ok {
-				ti.SetValue(toSentenceCase(ti.Value()))
+				ti.SetValue(ui.ToSentenceCase(ti.Value()))
 				p.formTextInputs[p.formCursor] = ti
 				p.formFields[p.formCursor].TextValue = ti.Value()
 			}
@@ -1607,7 +1607,7 @@ func (p *PopupPanel) handleMouse(msg tea.MouseMsg) tea.Cmd {
 						dy := float64(clickedRow - centerRow)
 						yNorm := dy / effectiveRadiusY
 						if yNorm*yNorm <= 1.0 {
-							halfWidth := int(float64(radiusX) * sqrt(1.0-yNorm*yNorm))
+							halfWidth := int(float64(radiusX) * math.Sqrt(1.0-yNorm*yNorm))
 							minCol := radiusX - halfWidth
 							maxCol := radiusX + halfWidth
 							
@@ -2291,9 +2291,9 @@ func (p *PopupPanel) renderFormContent(width, height int) []string {
 							
 							xNorm := float64(dx) / float64(radiusX)
 							yNorm := useY / float64(radiusY)
-							dist := sqrt(xNorm*xNorm + yNorm*yNorm)
+							dist := math.Sqrt(xNorm*xNorm + yNorm*yNorm)
 							
-							angle := atan2(yNorm, xNorm)
+							angle := math.Atan2(yNorm, xNorm)
 							blockHue := int((angle)*180/3.14159) + 180
 							blockHue = ((blockHue % 360) + 360) % 360
 							
@@ -2302,7 +2302,7 @@ func (p *PopupPanel) renderFormContent(width, height int) []string {
 								blockSat = 100
 							}
 							
-							cr, cg, cb := hsvToRGB(blockHue, blockSat, 100)
+							cr, cg, cb := ui.HsvToRGB(blockHue, blockSat, 100)
 							blockColor := fmt.Sprintf("#%02X%02X%02X", cr, cg, cb)
 							
 							// Check if this is the selected cell
@@ -2415,7 +2415,7 @@ func (p *PopupPanel) renderFormContent(width, height int) []string {
 						// Hue - rainbow gradient
 						for j := 0; j < sliderWidth; j++ {
 							h := j * 360 / sliderWidth
-							r, g, b := hsvToRGB(h, 100, 100)
+							r, g, b := ui.HsvToRGB(h, 100, 100)
 							char := "─"
 							if j == pos {
 								char = "●"
@@ -2426,7 +2426,7 @@ func (p *PopupPanel) renderFormContent(width, height int) []string {
 						// Saturation - gray to full color
 						for j := 0; j < sliderWidth; j++ {
 							s := j * 100 / sliderWidth
-							r, g, b := hsvToRGB(field.Hue, s, 100)
+							r, g, b := ui.HsvToRGB(field.Hue, s, 100)
 							char := "─"
 							if j == pos {
 								char = "●"
@@ -2437,7 +2437,7 @@ func (p *PopupPanel) renderFormContent(width, height int) []string {
 						// Lightness - black to white through color
 						for j := 0; j < sliderWidth; j++ {
 							l := j * 100 / sliderWidth
-							r, g, b := hsvToRGB(field.Hue, field.Saturation, l)
+							r, g, b := ui.HsvToRGB(field.Hue, field.Saturation, l)
 							char := "─"
 							if j == pos {
 								char = "●"
@@ -2454,7 +2454,7 @@ func (p *PopupPanel) renderFormContent(width, height int) []string {
 					valueStr = fmt.Sprintf("%s: %s %3d", rowLabel, bar, rowVal)
 
 					// Show color preview as vertical stripe with rounded corners
-					pr, pg, pb := hsvToRGB(field.Hue, field.Saturation, field.Lightness)
+					pr, pg, pb := ui.HsvToRGB(field.Hue, field.Saturation, field.Lightness)
 					colorHex := fmt.Sprintf("#%02x%02x%02x", pr, pg, pb)
 					colorStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(colorHex))
 					bgStyle := lipgloss.NewStyle().Background(lipgloss.Color(colorHex))
@@ -2907,239 +2907,8 @@ func (p *PopupPanel) centerText(s string, width int) string {
 	return strings.Repeat(" ", leftPad) + s + strings.Repeat(" ", rightPad)
 }
 
-// Color helper functions for CIE XY color space
-// Note: xyToRGB is defined in entities.go
-
-// hsvToRGB converts HSV (hue 0-360, sat 0-100, val 0-100) to RGB.
-func hsvToRGB(h, s, v int) (r, g, b uint8) {
-	if s == 0 {
-		gray := uint8(v * 255 / 100)
-		return gray, gray, gray
-	}
-	
-	hf := float64(h) / 60.0
-	sf := float64(s) / 100.0
-	vf := float64(v) / 100.0
-	
-	i := int(hf) % 6
-	f := hf - float64(int(hf))
-	p := vf * (1 - sf)
-	q := vf * (1 - sf*f)
-	t := vf * (1 - sf*(1-f))
-	
-	var rf, gf, bf float64
-	switch i {
-	case 0:
-		rf, gf, bf = vf, t, p
-	case 1:
-		rf, gf, bf = q, vf, p
-	case 2:
-		rf, gf, bf = p, vf, t
-	case 3:
-		rf, gf, bf = p, q, vf
-	case 4:
-		rf, gf, bf = t, p, vf
-	case 5:
-		rf, gf, bf = vf, p, q
-	}
-	
-	return uint8(rf * 255), uint8(gf * 255), uint8(bf * 255)
-}
-
-// xyToHueSat converts XY color to hue (0-360) and saturation (0-100).
-func xyToHueSat(x, y float64) (hue int, sat int) {
-	whiteX, whiteY := 0.3127, 0.329
-	dx := x - whiteX
-	dy := y - whiteY
-	radius := sqrt(dx*dx + dy*dy)
-	angle := atan2(dy, dx)
-
-	// Convert angle to degrees (0-360)
-	hue = int(angle * 180 / 3.14159)
-	if hue < 0 {
-		hue += 360
-	}
-
-	// Convert radius to saturation percentage (0-100)
-	// Max radius is about 0.4 for fully saturated colors
-	sat = int(radius / 0.4 * 100)
-	if sat > 100 {
-		sat = 100
-	}
-	if sat < 0 {
-		sat = 0
-	}
-
-	return hue, sat
-}
-
-// hueSatToXY converts hue (0-360) and saturation (0-100) to XY color.
-func hueSatToXY(hue, sat int) (x, y float64) {
-	whiteX, whiteY := 0.3127, 0.329
-
-	// Convert hue to radians
-	angle := float64(hue) * 3.14159 / 180
-
-	// Convert saturation to radius (max ~0.4)
-	radius := float64(sat) / 100 * 0.4
-
-	x = whiteX + radius*cos(angle)
-	y = whiteY + radius*sin(angle)
-
-	// Clamp to valid range
-	x = clampFloat(x, 0.0, 1.0)
-	y = clampFloat(y, 0.0, 1.0)
-
-	return x, y
-}
-
-// rotateColor rotates a color around the color wheel by delta radians.
-func rotateColor(x, y, delta float64) (newX, newY float64) {
-	// Convert to polar coordinates relative to white point (0.3127, 0.329)
-	whiteX, whiteY := 0.3127, 0.329
-	dx := x - whiteX
-	dy := y - whiteY
-	radius := sqrt(dx*dx + dy*dy)
-	angle := atan2(dy, dx)
-
-	// Rotate
-	angle += delta
-
-	// Convert back
-	newX = whiteX + radius*cos(angle)
-	newY = whiteY + radius*sin(angle)
-
-	// Clamp to valid range
-	newX = clampFloat(newX, 0.0, 1.0)
-	newY = clampFloat(newY, 0.0, 1.0)
-
-	return newX, newY
-}
-
-// adjustSaturation adjusts the saturation of a color by moving it toward/away from white point.
-func adjustSaturation(x, y, delta float64) (newX, newY float64) {
-	whiteX, whiteY := 0.3127, 0.329
-	dx := x - whiteX
-	dy := y - whiteY
-
-	// Scale the distance from white point
-	scale := 1.0 + delta
-	if scale < 0.1 {
-		scale = 0.1
-	}
-	if scale > 2.0 {
-		scale = 2.0
-	}
-
-	newX = whiteX + dx*scale
-	newY = whiteY + dy*scale
-
-	// Clamp to valid range
-	newX = clampFloat(newX, 0.0, 1.0)
-	newY = clampFloat(newY, 0.0, 1.0)
-
-	return newX, newY
-}
-
-func clampFloat(v, minV, maxV float64) float64 {
-	if v < minV {
-		return minV
-	}
-	if v > maxV {
-		return maxV
-	}
-	return v
-}
-
-// Simple math functions to avoid importing math package
-func sqrt(x float64) float64 {
-	if x <= 0 {
-		return 0
-	}
-	z := x
-	for i := 0; i < 20; i++ {
-		z = (z + x/z) / 2
-	}
-	return z
-}
-
-func sin(x float64) float64 {
-	// Normalize to -pi to pi
-	for x > 3.14159 {
-		x -= 6.28318
-	}
-	for x < -3.14159 {
-		x += 6.28318
-	}
-	// Taylor series approximation
-	return x - (x*x*x)/6 + (x*x*x*x*x)/120
-}
-
-func cos(x float64) float64 {
-	return sin(x + 1.5708) // cos(x) = sin(x + pi/2)
-}
-
-func atan2(y, x float64) float64 {
-	if x > 0 {
-		return atan(y / x)
-	}
-	if x < 0 && y >= 0 {
-		return atan(y/x) + 3.14159
-	}
-	if x < 0 && y < 0 {
-		return atan(y/x) - 3.14159
-	}
-	if y > 0 {
-		return 1.5708
-	}
-	if y < 0 {
-		return -1.5708
-	}
-	return 0
-}
-
-func atan(x float64) float64 {
-	// Simple approximation for small values
-	if x > 1 {
-		return 1.5708 - atan(1/x)
-	}
-	if x < -1 {
-		return -1.5708 - atan(1/x)
-	}
-	// Taylor series for |x| <= 1
-	return x - (x*x*x)/3 + (x*x*x*x*x)/5
-}
-
-// Text transformation functions
-
-// toTitleCase capitalizes the first letter of every word.
-func toTitleCase(s string) string {
-	words := strings.Fields(s)
-	for i, word := range words {
-		if len(word) > 0 {
-			runes := []rune(word)
-			runes[0] = unicode.ToUpper(runes[0])
-			for j := 1; j < len(runes); j++ {
-				runes[j] = unicode.ToLower(runes[j])
-			}
-			words[i] = string(runes)
-		}
-	}
-	return strings.Join(words, " ")
-}
-
-// toSentenceCase lowercases everything except the first letter of the first word.
-func toSentenceCase(s string) string {
-	if len(s) == 0 {
-		return s
-	}
-	runes := []rune(strings.ToLower(s))
-	// Find first letter and capitalize it
-	for i, r := range runes {
-		if unicode.IsLetter(r) {
-			runes[i] = unicode.ToUpper(r)
-			break
-		}
-	}
-	return string(runes)
-}
+// Color and text helper functions moved to internal/ui/color.go:
+// - ui.HsvToRGB, ui.XyToRGB, ui.MirekToRGB
+// - ui.XyToHueSat, ui.HueSatToXY
+// - ui.RotateColor, ui.AdjustSaturation, ui.ClampFloat
+// - ui.ToTitleCase, ui.ToSentenceCase
