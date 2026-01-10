@@ -433,9 +433,8 @@ func (m *Model) buildEventDetails(msg BridgeEventMsg) panels.EventDetails {
 	switch msg.ResourceType {
 	case "light":
 		if light, ok := state.GetLight(msg.ResourceID); ok {
-			if light.Metadata != nil && light.Metadata.Name != nil {
-				details.ResourceName = *light.Metadata.Name
-			}
+			// Use GetLightName to get the user-assigned name from the owning device
+			details.ResourceName = state.GetLightName(light)
 			// Show current state
 			if light.On != nil && light.On.On != nil {
 				if *light.On.On {
