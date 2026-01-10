@@ -280,11 +280,12 @@ func (p *PopupPanel) showFormInternal(title string, fields []FormField, onClose 
 	p.selectDropdownCursor = 0
 	p.selectDropdownScroll = 0
 
-	// Focus the first text input if applicable
+	// Focus and enter edit mode for the first text input if applicable
 	if len(p.formFields) > 0 && p.formFields[0].Type == FormFieldText {
 		if ti, ok := p.formTextInputs[0]; ok {
 			ti.Focus()
 			p.formTextInputs[0] = ti
+			p.formFieldEditing = true // Enable edit mode so typing works
 		}
 	}
 
@@ -698,10 +699,17 @@ func (p *PopupPanel) handleFieldEditMode(msg tea.KeyMsg) tea.Cmd {
 	case FormFieldText:
 		// Handle text editing
 		switch key {
-		case "esc", "enter":
-			// Exit edit mode for text
+		case "esc":
+			// Exit edit mode for text, stay on field
 			p.formFieldEditing = false
 			p.blurAllTextInputs()
+			return nil
+		case "enter":
+			// Exit edit mode and move to Save button
+			p.formFieldEditing = false
+			p.blurAllTextInputs()
+			p.formOnButtons = true
+			p.formBtnIndex = 0 // Save button
 			return nil
 		case "ctrl+t":
 			if ti, ok := p.formTextInputs[p.formCursor]; ok {
