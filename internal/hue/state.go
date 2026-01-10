@@ -363,11 +363,47 @@ func (s *BridgeState) UpdateRooms(rooms map[string]hueclient.RoomGet) {
 	s.Rooms = rooms
 }
 
+// ApplyRoomMetadata applies a metadata update (e.g., rename) to a room.
+func (s *BridgeState) ApplyRoomMetadata(id string, name *string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	room, ok := s.Rooms[id]
+	if !ok {
+		return false
+	}
+
+	if name != nil && room.Metadata != nil {
+		room.Metadata.Name = name
+		s.Rooms[id] = room
+		return true
+	}
+	return false
+}
+
 // UpdateZones replaces the zones cache.
 func (s *BridgeState) UpdateZones(zones map[string]hueclient.RoomGet) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.Zones = zones
+}
+
+// ApplyZoneMetadata applies a metadata update (e.g., rename) to a zone.
+func (s *BridgeState) ApplyZoneMetadata(id string, name *string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	zone, ok := s.Zones[id]
+	if !ok {
+		return false
+	}
+
+	if name != nil && zone.Metadata != nil {
+		zone.Metadata.Name = name
+		s.Zones[id] = zone
+		return true
+	}
+	return false
 }
 
 // UpdateGroupedLights replaces the grouped lights cache.
@@ -384,11 +420,47 @@ func (s *BridgeState) UpdateScenes(scenes map[string]hueclient.SceneGet) {
 	s.Scenes = scenes
 }
 
+// ApplySceneMetadata applies a metadata update (e.g., rename) to a scene.
+func (s *BridgeState) ApplySceneMetadata(id string, name *string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	scene, ok := s.Scenes[id]
+	if !ok {
+		return false
+	}
+
+	if name != nil && scene.Metadata != nil {
+		scene.Metadata.Name = name
+		s.Scenes[id] = scene
+		return true
+	}
+	return false
+}
+
 // UpdateDevices replaces the devices cache.
 func (s *BridgeState) UpdateDevices(devices map[string]hueclient.DeviceGet) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.Devices = devices
+}
+
+// ApplyDeviceMetadata applies a metadata update (e.g., rename) to a device.
+func (s *BridgeState) ApplyDeviceMetadata(id string, name *string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	device, ok := s.Devices[id]
+	if !ok {
+		return false
+	}
+
+	if name != nil && device.Metadata != nil {
+		device.Metadata.Name = name
+		s.Devices[id] = device
+		return true
+	}
+	return false
 }
 
 // UpdateMotionSensors replaces the motion sensors cache.

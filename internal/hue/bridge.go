@@ -231,6 +231,27 @@ func (b *Bridge) applyResourceUpdate(update ResourceUpdate) bool {
 			debug.Log("Scene %s status: %s", update.ID, update.Status.Active)
 			return b.state.ApplySceneStatus(update.ID, update.Status.Active)
 		}
+		if update.Metadata != nil && update.Metadata.Name != nil {
+			return b.state.ApplySceneMetadata(update.ID, update.Metadata.Name)
+		}
+		return false
+
+	case "device":
+		if update.Metadata != nil && update.Metadata.Name != nil {
+			return b.state.ApplyDeviceMetadata(update.ID, update.Metadata.Name)
+		}
+		return false
+
+	case "room":
+		if update.Metadata != nil && update.Metadata.Name != nil {
+			return b.state.ApplyRoomMetadata(update.ID, update.Metadata.Name)
+		}
+		return false
+
+	case "zone":
+		if update.Metadata != nil && update.Metadata.Name != nil {
+			return b.state.ApplyZoneMetadata(update.ID, update.Metadata.Name)
+		}
 		return false
 
 	default:

@@ -75,6 +75,11 @@ type ResourceUpdate struct {
 	Status *struct {
 		Active string `json:"active"` // "inactive", "static", "dynamic_palette"
 	} `json:"status,omitempty"`
+	// Metadata for device/room/zone/scene renames
+	Metadata *struct {
+		Name      *string `json:"name,omitempty"`
+		Archetype *string `json:"archetype,omitempty"`
+	} `json:"metadata,omitempty"`
 }
 
 // EventStream manages the SSE connection to a bridge.

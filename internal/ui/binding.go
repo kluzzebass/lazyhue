@@ -42,6 +42,7 @@ const (
 
 	// Device/Sensor actions
 	ActionEditDevice        Action = "edit_device"
+	ActionRename            Action = "rename"
 	ActionToggleMotion      Action = "toggle_motion"
 	ActionMotionSensitivity Action = "motion_sensitivity"
 

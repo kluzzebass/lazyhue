@@ -39,19 +39,42 @@ type SelectOption struct {
 type FormFieldType int
 
 const (
-	FormFieldToggle FormFieldType = iota // Boolean toggle
-	FormFieldSlider                      // Integer slider with min/max
+	FormFieldToggle     FormFieldType = iota // Boolean toggle (on/off)
+	FormFieldSlider                          // Integer slider with min/max
+	FormFieldText                            // Text input
+	FormFieldBrightness                      // Brightness slider (0-100) with visual bar
+	FormFieldColorTemp                       // Color temperature slider (warm to cool)
+	FormFieldColor                           // Color picker (XY color space)
+	FormFieldSelect                          // Dropdown selection from options
 )
+
+// SelectOption represents an option for FormFieldSelect.
+type FormSelectOption struct {
+	Label string // Display label
+	Value int    // Value when selected
+}
 
 // FormField represents a single field in a form.
 type FormField struct {
-	ID       string        // Unique identifier
-	Label    string        // Display label
-	Type     FormFieldType // Field type
-	Value    int           // Current value (0/1 for toggle, actual value for slider)
-	Min      int           // Minimum value (for slider)
-	Max      int           // Maximum value (for slider)
-	Original int           // Original value (to detect changes)
+	ID           string        // Unique identifier
+	Label        string        // Display label
+	Type         FormFieldType // Field type
+	Value        int           // Current value (0/1 for toggle, actual value for slider/brightness/temp)
+	Min          int           // Minimum value (for sliders)
+	Max          int           // Maximum value (for sliders)
+	Original     int           // Original value (to detect changes)
+	TextValue    string        // Current text value (for text fields)
+	OriginalText string        // Original text value (to detect changes)
+
+	// Color fields (for FormFieldColor)
+	ColorX         float64 // CIE x coordinate (0.0-1.0)
+	ColorY         float64 // CIE y coordinate (0.0-1.0)
+	OriginalColorX float64 // Original x
+	OriginalColorY float64 // Original y
+	ColorMode      int     // 0=hue, 1=saturation adjustment mode
+
+	// Select field options
+	Options []FormSelectOption // Available options for select field
 }
 
 // PopupPanel is a generic modal dialog.
@@ -82,10 +105,13 @@ type PopupPanel struct {
 	selectCursor  int
 
 	// Form mode
-	formFields    []FormField
-	formCursor    int  // Which field is focused
-	formOnButtons bool // true when focus is on Save/Cancel buttons
-	formBtnIndex  int  // 0 = Save, 1 = Cancel
+	formFields     []FormField
+	formCursor     int  // Which field is focused
+	formOnButtons  bool // true when focus is on Save/Cancel buttons
+	formBtnIndex   int  // 0 = Save, 1 = Cancel
+	formTextInputs map[int]textinput.Model // Text inputs for FormFieldText fields (indexed by field index)
+	formLiveMode   bool                    // true = changes apply immediately, false = apply on Save
+	formOnChange   func(field FormField)   // Callback for live mode changes
 
 	// Sizing
 	screenWidth  int
@@ -157,19 +183,68 @@ func (p *PopupPanel) ShowSelect(title string, options []SelectOption, onClose fu
 
 // ShowForm shows the popup in form mode with editable fields.
 // The onClose callback receives the modified fields when Confirmed is true.
+// ShowForm displays a form with Save/Cancel buttons (edit mode).
 func (p *PopupPanel) ShowForm(title string, fields []FormField, onClose func(PopupResult, []FormField)) {
+	p.showFormInternal(title, fields, onClose, nil, false)
+}
+
+// ShowFormLive displays a form that can toggle between edit and live mode.
+// In live mode, onChange is called immediately when values change.
+// Press Enter to toggle between modes.
+func (p *PopupPanel) ShowFormLive(title string, fields []FormField, onClose func(PopupResult, []FormField), onChange func(field FormField)) {
+	p.showFormInternal(title, fields, onClose, onChange, false)
+}
+
+func (p *PopupPanel) showFormInternal(title string, fields []FormField, onClose func(PopupResult, []FormField), onChange func(field FormField), startLive bool) {
 	p.mode = PopupModeForm
 	p.title = title
+	p.formOnChange = onChange
+	p.formLiveMode = startLive
+
 	// Copy fields so we can track original values
 	p.formFields = make([]FormField, len(fields))
+	p.formTextInputs = make(map[int]textinput.Model)
+
 	for i, f := range fields {
 		f.Original = f.Value
+		f.OriginalText = f.TextValue
+		f.OriginalColorX = f.ColorX
+		f.OriginalColorY = f.ColorY
 		p.formFields[i] = f
+
+		// Initialize text input for text fields
+		if f.Type == FormFieldText {
+			ti := textinput.New()
+			ti.Prompt = ""        // Remove default "> " prompt
+			ti.Placeholder = ""
+			ti.SetValue(f.TextValue)
+			ti.CharLimit = 64
+			ti.Width = 30
+			p.formTextInputs[i] = ti
+		}
 	}
+
 	p.formCursor = 0
 	p.formOnButtons = false
 	p.formBtnIndex = 0
+
+	// Focus the first text input if applicable
+	if len(p.formFields) > 0 && p.formFields[0].Type == FormFieldText {
+		if ti, ok := p.formTextInputs[0]; ok {
+			ti.Focus()
+			p.formTextInputs[0] = ti
+		}
+	}
+
 	p.onClose = func(result PopupResult) {
+		// Sync text values back to fields before calling callback
+		for i := range p.formFields {
+			if p.formFields[i].Type == FormFieldText {
+				if ti, ok := p.formTextInputs[i]; ok {
+					p.formFields[i].TextValue = ti.Value()
+				}
+			}
+		}
 		onClose(result, p.formFields)
 	}
 	p.visible = true
@@ -363,15 +438,25 @@ func (p *PopupPanel) handleSelectKey(msg tea.KeyMsg) tea.Cmd {
 func (p *PopupPanel) handleFormKey(msg tea.KeyMsg) tea.Cmd {
 	key := msg.String()
 
+	// Check if current field is a text input
+	isTextFieldFocused := !p.formOnButtons && p.formCursor < len(p.formFields) &&
+		p.formFields[p.formCursor].Type == FormFieldText
+
+	// Handle escape and enter universally
 	switch key {
 	case "esc":
-		p.close(PopupResult{Confirmed: false})
+		if p.formLiveMode {
+			// In live mode, Esc just closes (changes already applied)
+			p.close(PopupResult{Confirmed: true})
+		} else {
+			p.close(PopupResult{Confirmed: false})
+		}
 		return nil
 
 	case "enter":
 		if p.formOnButtons {
 			if p.formBtnIndex == 0 {
-				// Save
+				// Save/Done
 				p.close(PopupResult{Confirmed: true})
 			} else {
 				// Cancel
@@ -379,14 +464,64 @@ func (p *PopupPanel) handleFormKey(msg tea.KeyMsg) tea.Cmd {
 			}
 			return nil
 		}
-		// Enter on a field - for toggle, toggle it; for slider, do nothing special
+		// Enter on a field
 		if p.formCursor < len(p.formFields) {
 			field := &p.formFields[p.formCursor]
-			if field.Type == FormFieldToggle {
+			if field.Type == FormFieldText {
+				// For text, move to Save button
+				p.formOnButtons = true
+				p.formBtnIndex = 0
+				p.blurAllTextInputs()
+				return nil
+			} else if field.Type == FormFieldToggle {
+				// Toggle and potentially apply live
 				field.Value = 1 - field.Value
+				p.notifyLiveChange(*field)
+			} else if p.formOnChange != nil {
+				// For other fields, toggle live mode
+				p.formLiveMode = !p.formLiveMode
 			}
 		}
+	}
 
+	// For text fields, pass most keys to the text input
+	if isTextFieldFocused {
+		switch key {
+		case "tab":
+			// Tab navigates to next field or buttons
+			p.blurAllTextInputs()
+			if p.formCursor < len(p.formFields)-1 {
+				p.formCursor++
+				p.focusCurrentTextField()
+			} else {
+				p.formOnButtons = true
+				p.formBtnIndex = 0
+			}
+			return nil
+		case "shift+tab":
+			// Shift+Tab navigates to previous field
+			p.blurAllTextInputs()
+			if p.formCursor > 0 {
+				p.formCursor--
+				p.focusCurrentTextField()
+			}
+			return nil
+		default:
+			// Pass to text input
+			if ti, ok := p.formTextInputs[p.formCursor]; ok {
+				var cmd tea.Cmd
+				ti, cmd = ti.Update(msg)
+				p.formTextInputs[p.formCursor] = ti
+				// Sync value back to field
+				p.formFields[p.formCursor].TextValue = ti.Value()
+				return cmd
+			}
+		}
+		return nil
+	}
+
+	// Non-text field navigation
+	switch key {
 	case "tab", "down", "j":
 		if p.formOnButtons {
 			// Cycle between Save/Cancel
@@ -395,6 +530,7 @@ func (p *PopupPanel) handleFormKey(msg tea.KeyMsg) tea.Cmd {
 			// Move to next field, or to buttons
 			if p.formCursor < len(p.formFields)-1 {
 				p.formCursor++
+				p.focusCurrentTextField()
 			} else {
 				p.formOnButtons = true
 				p.formBtnIndex = 0
@@ -409,10 +545,12 @@ func (p *PopupPanel) handleFormKey(msg tea.KeyMsg) tea.Cmd {
 				// Move back to last field
 				p.formOnButtons = false
 				p.formCursor = len(p.formFields) - 1
+				p.focusCurrentTextField()
 			}
 		} else {
 			if p.formCursor > 0 {
 				p.formCursor--
+				p.focusCurrentTextField()
 			}
 		}
 
@@ -422,33 +560,124 @@ func (p *PopupPanel) handleFormKey(msg tea.KeyMsg) tea.Cmd {
 			field := &p.formFields[p.formCursor]
 			if field.Type == FormFieldToggle {
 				field.Value = 1 - field.Value
+				p.notifyLiveChange(*field)
 			}
 		}
 
 	case "left", "h":
-		// Decrease slider value
 		if !p.formOnButtons && p.formCursor < len(p.formFields) {
 			field := &p.formFields[p.formCursor]
-			if field.Type == FormFieldSlider && field.Value > field.Min {
-				field.Value--
+			changed := false
+			switch field.Type {
+			case FormFieldSlider, FormFieldBrightness, FormFieldColorTemp:
+				if field.Value > field.Min {
+					field.Value--
+					changed = true
+				}
+			case FormFieldColor:
+				// Adjust color based on mode
+				if field.ColorMode == 0 {
+					field.ColorX, field.ColorY = rotateColor(field.ColorX, field.ColorY, -0.02)
+				} else {
+					field.ColorX, field.ColorY = adjustSaturation(field.ColorX, field.ColorY, -0.02)
+				}
+				changed = true
+			case FormFieldSelect:
+				for i, opt := range field.Options {
+					if opt.Value == field.Value && i > 0 {
+						field.Value = field.Options[i-1].Value
+						changed = true
+						break
+					}
+				}
+			}
+			if changed {
+				p.notifyLiveChange(*field)
 			}
 		} else if p.formOnButtons {
 			p.formBtnIndex = 0
 		}
 
 	case "right", "l":
-		// Increase slider value
 		if !p.formOnButtons && p.formCursor < len(p.formFields) {
 			field := &p.formFields[p.formCursor]
-			if field.Type == FormFieldSlider && field.Value < field.Max {
-				field.Value++
+			changed := false
+			switch field.Type {
+			case FormFieldSlider, FormFieldBrightness, FormFieldColorTemp:
+				if field.Value < field.Max {
+					field.Value++
+					changed = true
+				}
+			case FormFieldColor:
+				if field.ColorMode == 0 {
+					field.ColorX, field.ColorY = rotateColor(field.ColorX, field.ColorY, 0.02)
+				} else {
+					field.ColorX, field.ColorY = adjustSaturation(field.ColorX, field.ColorY, 0.02)
+				}
+				changed = true
+			case FormFieldSelect:
+				for i, opt := range field.Options {
+					if opt.Value == field.Value && i < len(field.Options)-1 {
+						field.Value = field.Options[i+1].Value
+						changed = true
+						break
+					}
+				}
+			}
+			if changed {
+				p.notifyLiveChange(*field)
 			}
 		} else if p.formOnButtons {
 			p.formBtnIndex = 1
 		}
+
+	case "m":
+		// Toggle color mode (hue/saturation) for color fields
+		if !p.formOnButtons && p.formCursor < len(p.formFields) {
+			field := &p.formFields[p.formCursor]
+			if field.Type == FormFieldColor {
+				field.ColorMode = 1 - field.ColorMode
+			}
+		}
 	}
 
 	return nil
+}
+
+// blurAllTextInputs removes focus from all text inputs.
+func (p *PopupPanel) blurAllTextInputs() {
+	for i, ti := range p.formTextInputs {
+		ti.Blur()
+		p.formTextInputs[i] = ti
+	}
+}
+
+// notifyLiveChange calls the onChange callback if in live mode.
+func (p *PopupPanel) notifyLiveChange(field FormField) {
+	if p.formLiveMode && p.formOnChange != nil {
+		p.formOnChange(field)
+	}
+}
+
+// IsLiveMode returns whether the form is in live mode.
+func (p *PopupPanel) IsLiveMode() bool {
+	return p.formLiveMode
+}
+
+// SetLiveMode sets the form's live mode.
+func (p *PopupPanel) SetLiveMode(live bool) {
+	p.formLiveMode = live
+}
+
+// focusCurrentTextField focuses the text input at the current cursor position if applicable.
+func (p *PopupPanel) focusCurrentTextField() {
+	p.blurAllTextInputs()
+	if p.formCursor < len(p.formFields) && p.formFields[p.formCursor].Type == FormFieldText {
+		if ti, ok := p.formTextInputs[p.formCursor]; ok {
+			ti.Focus()
+			p.formTextInputs[p.formCursor] = ti
+		}
+	}
 }
 
 func (p *PopupPanel) handleMouse(msg tea.MouseMsg) tea.Cmd {
@@ -530,6 +759,64 @@ func (p *PopupPanel) handleMouse(msg tea.MouseMsg) tea.Cmd {
 						Value:     p.selectOptions[i].Value,
 						Index:     i,
 					})
+					return nil
+				}
+			}
+		}
+
+	case PopupModeForm:
+		if msg.Type == tea.MouseLeft {
+			// Calculate popup position (centered on screen)
+			popupX := (p.screenWidth - p.width()) / 2
+			popupY := (p.screenHeight - p.height()) / 2
+
+			// Calculate button row position
+			contentHeight := p.contentHeight()
+			numFields := len(p.formFields)
+			totalRows := numFields + 2 // fields + blank + button row
+			startY := (contentHeight - totalRows) / 2
+			if startY < 0 {
+				startY = 0
+			}
+			buttonRowIdx := numFields + 1
+			buttonRowY := popupY + 1 + startY + buttonRowIdx // +1 for top border
+
+			// Check if click is on button row
+			if msg.Y == buttonRowY {
+				contentWidth := p.contentWidth()
+				saveBtn := " Save "
+				cancelBtn := " Cancel "
+				buttons := saveBtn + "  " + cancelBtn
+				buttonsLen := lipgloss.Width(buttons)
+				buttonsStartX := popupX + 2 + (contentWidth-buttonsLen)/2 // +2 for border+padding
+
+				// Check Save button
+				saveEndX := buttonsStartX + lipgloss.Width(saveBtn)
+				if msg.X >= buttonsStartX && msg.X < saveEndX {
+					p.formBtnIndex = 0
+					p.formOnButtons = true
+					p.close(PopupResult{Confirmed: true})
+					return nil
+				}
+
+				// Check Cancel button (after Save + 2 spaces gap)
+				cancelStartX := saveEndX + 2
+				cancelEndX := cancelStartX + lipgloss.Width(cancelBtn)
+				if msg.X >= cancelStartX && msg.X < cancelEndX {
+					p.formBtnIndex = 1
+					p.formOnButtons = true
+					p.close(PopupResult{Confirmed: false})
+					return nil
+				}
+			}
+
+			// Check if click is on a form field
+			for i := range p.formFields {
+				fieldY := popupY + 1 + startY + i // +1 for top border
+				if msg.Y == fieldY && msg.X > popupX && msg.X < popupX+p.width()-1 {
+					p.formCursor = i
+					p.formOnButtons = false
+					p.focusCurrentTextField()
 					return nil
 				}
 			}
@@ -767,13 +1054,128 @@ func (p *PopupPanel) renderFormContent(width, height int) []string {
 				} else {
 					valueStr = fmt.Sprintf("%d", field.Value)
 				}
+			case FormFieldText:
+				// Render text input - handle separately due to ANSI codes
+				label := fmt.Sprintf("%s%-15s ", prefix, field.Label+":")
+				if isFocused {
+					label = accentStyle.Render(prefix) + fmt.Sprintf("%-15s ", field.Label+":")
+				}
+				labelWidth := lipgloss.Width(label)
+
+				if ti, ok := p.formTextInputs[rowIdx]; ok {
+					// Set text input width to fill remaining space
+					inputWidth := width - labelWidth - 2
+					if inputWidth < 10 {
+						inputWidth = 10
+					}
+					ti.Width = inputWidth
+					p.formTextInputs[rowIdx] = ti
+					valueStr = ti.View()
+				} else {
+					valueStr = field.TextValue
+				}
+
+				// Build the line with proper padding
+				fullLine := label + valueStr
+				lineWidth := lipgloss.Width(fullLine)
+				if lineWidth < width {
+					fullLine += strings.Repeat(" ", width-lineWidth)
+				}
+				lines[i] = fullLine
+				continue // Skip the common line assignment below
+
+			case FormFieldBrightness:
+				// Render brightness slider with visual gradient bar
+				sliderWidth := 20
+				pct := 0
+				if field.Max > 0 {
+					pct = field.Value * 100 / field.Max
+				}
+				filled := field.Value * sliderWidth / max(1, field.Max)
+
+				// Build gradient bar with brightness indication
+				bar := ""
+				for j := 0; j < sliderWidth; j++ {
+					if j < filled {
+						// Gradient from dim to bright
+						intensity := 180 + (j * 75 / sliderWidth)
+						bar += lipgloss.NewStyle().Foreground(lipgloss.Color(fmt.Sprintf("#%02x%02x%02x", intensity, intensity, intensity))).Render("█")
+					} else {
+						bar += lipgloss.NewStyle().Foreground(p.styles.Theme.Muted).Render("░")
+					}
+				}
+				valueStr = bar + fmt.Sprintf(" %3d%%", pct)
+
+			case FormFieldColorTemp:
+				// Render color temperature slider (warm orange to cool blue)
+				sliderWidth := 20
+				// Mirek range is typically 153 (cool/6500K) to 500 (warm/2000K)
+				// Map value position on slider
+				pos := 0
+				if field.Max > field.Min {
+					pos = (field.Value - field.Min) * sliderWidth / (field.Max - field.Min)
+				}
+				if pos < 0 {
+					pos = 0
+				}
+				if pos > sliderWidth {
+					pos = sliderWidth
+				}
+
+				// Build gradient bar from warm (left) to cool (right)
+				bar := ""
+				for j := 0; j < sliderWidth; j++ {
+					// Gradient from warm orange to cool blue
+					warmR, warmG, warmB := 255, 180, 100 // Warm
+					coolR, coolG, coolB := 150, 200, 255 // Cool
+					r := warmR + (coolR-warmR)*j/sliderWidth
+					g := warmG + (coolG-warmG)*j/sliderWidth
+					b := warmB + (coolB-warmB)*j/sliderWidth
+
+					char := "─"
+					if j == pos {
+						char = "●"
+					}
+					bar += lipgloss.NewStyle().Foreground(lipgloss.Color(fmt.Sprintf("#%02x%02x%02x", r, g, b))).Render(char)
+				}
+				// Show Kelvin approximation
+				kelvin := 1000000 / max(1, field.Value) // Approximate Kelvin from Mirek
+				valueStr = bar + fmt.Sprintf(" %dK", kelvin)
+
+			case FormFieldColor:
+				// Render color picker - show current color swatch and XY values
+				// Convert XY to approximate RGB for display
+				r, g, b := xyToRGB(field.ColorX, field.ColorY, 1.0)
+				colorSwatch := lipgloss.NewStyle().
+					Background(lipgloss.Color(fmt.Sprintf("#%02x%02x%02x", r, g, b))).
+					Render("      ")
+				if isFocused {
+					modeStr := "hue"
+					if field.ColorMode == 1 {
+						modeStr = "sat"
+					}
+					valueStr = colorSwatch + fmt.Sprintf(" [%s] ←→ adjust", modeStr)
+				} else {
+					valueStr = colorSwatch + fmt.Sprintf(" (%.2f, %.2f)", field.ColorX, field.ColorY)
+				}
+
+			case FormFieldSelect:
+				// Render select dropdown - show current selection
+				currentLabel := "---"
+				for _, opt := range field.Options {
+					if opt.Value == field.Value {
+						currentLabel = opt.Label
+						break
+					}
+				}
+				valueStr = fmt.Sprintf("[%s] ←→", currentLabel)
 			}
 
-			label := fmt.Sprintf("%s%-20s %s", prefix, field.Label+":", valueStr)
+			label := fmt.Sprintf("%s%-15s ", prefix, field.Label+":")
 			if isFocused {
 				label = accentStyle.Render(label)
 			}
-			lines[i] = p.padRight(label, width)
+			lines[i] = p.padRight(label+valueStr, width)
 
 		} else if rowIdx == numFields {
 			// Blank line before buttons
@@ -790,24 +1192,27 @@ func (p *PopupPanel) renderFormContent(width, height int) []string {
 				cancelStyle = cancelStyle.Reverse(true)
 			}
 
-			// Check if any fields changed
-			hasChanges := false
-			for _, f := range p.formFields {
-				if f.Value != f.Original {
-					hasChanges = true
-					break
-				}
-			}
-
-			saveLabel := " Save "
-			if !hasChanges {
-				saveLabel = mutedStyle.Render(saveLabel)
+			var buttons string
+			if p.formLiveMode {
+				// Live mode - show "Done" (changes already applied) and mode indicator
+				liveIndicator := lipgloss.NewStyle().
+					Foreground(lipgloss.Color("#ff6b6b")).
+					Bold(true).
+					Render(" ● LIVE ")
+				doneLabel := saveStyle.Render(" Done ")
+				buttons = liveIndicator + "  " + doneLabel
 			} else {
-				saveLabel = saveStyle.Render(saveLabel)
+				// Edit mode - show Save/Cancel
+				hasChanges := p.formHasChanges()
+				saveLabel := " Save "
+				if !hasChanges {
+					saveLabel = mutedStyle.Render(saveLabel)
+				} else {
+					saveLabel = saveStyle.Render(saveLabel)
+				}
+				cancelLabel := cancelStyle.Render(" Cancel ")
+				buttons = saveLabel + "  " + cancelLabel
 			}
-			cancelLabel := cancelStyle.Render(" Cancel ")
-
-			buttons := saveLabel + "  " + cancelLabel
 			lines[i] = p.centerText(buttons, width)
 
 		} else {
@@ -815,6 +1220,31 @@ func (p *PopupPanel) renderFormContent(width, height int) []string {
 		}
 	}
 	return lines
+}
+
+// formHasChanges returns true if any form field has been modified.
+func (p *PopupPanel) formHasChanges() bool {
+	for i, f := range p.formFields {
+		switch f.Type {
+		case FormFieldText:
+			if ti, ok := p.formTextInputs[i]; ok {
+				if ti.Value() != f.OriginalText {
+					return true
+				}
+			} else if f.TextValue != f.OriginalText {
+				return true
+			}
+		case FormFieldColor:
+			if f.ColorX != f.OriginalColorX || f.ColorY != f.OriginalColorY {
+				return true
+			}
+		default:
+			if f.Value != f.Original {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func (p *PopupPanel) getHints() string {
@@ -830,7 +1260,13 @@ func (p *PopupPanel) getHints() string {
 	case PopupModeSelect:
 		hint = " ↑↓:select  Enter:confirm  Esc:cancel "
 	case PopupModeForm:
-		hint = " ↑↓:navigate  ←→:adjust  Space:toggle  Tab:next "
+		if p.formLiveMode {
+			hint = " ←→:adjust  Enter:toggle live  Esc:done "
+		} else if p.formOnChange != nil {
+			hint = " ←→:adjust  Enter:live mode  Tab:next  Esc:cancel "
+		} else {
+			hint = " ←→:adjust  Tab:next  Enter:save  Esc:cancel "
+		}
 	}
 	return p.colorize(hint, p.styles.Theme.Muted)
 }
@@ -869,4 +1305,124 @@ func (p *PopupPanel) centerText(s string, width int) string {
 	leftPad := (width - sLen) / 2
 	rightPad := width - sLen - leftPad
 	return strings.Repeat(" ", leftPad) + s + strings.Repeat(" ", rightPad)
+}
+
+// Color helper functions for CIE XY color space
+// Note: xyToRGB is defined in entities.go
+
+// rotateColor rotates a color around the color wheel by delta radians.
+func rotateColor(x, y, delta float64) (newX, newY float64) {
+	// Convert to polar coordinates relative to white point (0.3127, 0.329)
+	whiteX, whiteY := 0.3127, 0.329
+	dx := x - whiteX
+	dy := y - whiteY
+	radius := sqrt(dx*dx + dy*dy)
+	angle := atan2(dy, dx)
+
+	// Rotate
+	angle += delta
+
+	// Convert back
+	newX = whiteX + radius*cos(angle)
+	newY = whiteY + radius*sin(angle)
+
+	// Clamp to valid range
+	newX = clampFloat(newX, 0.0, 1.0)
+	newY = clampFloat(newY, 0.0, 1.0)
+
+	return newX, newY
+}
+
+// adjustSaturation adjusts the saturation of a color by moving it toward/away from white point.
+func adjustSaturation(x, y, delta float64) (newX, newY float64) {
+	whiteX, whiteY := 0.3127, 0.329
+	dx := x - whiteX
+	dy := y - whiteY
+
+	// Scale the distance from white point
+	scale := 1.0 + delta
+	if scale < 0.1 {
+		scale = 0.1
+	}
+	if scale > 2.0 {
+		scale = 2.0
+	}
+
+	newX = whiteX + dx*scale
+	newY = whiteY + dy*scale
+
+	// Clamp to valid range
+	newX = clampFloat(newX, 0.0, 1.0)
+	newY = clampFloat(newY, 0.0, 1.0)
+
+	return newX, newY
+}
+
+func clampFloat(v, minV, maxV float64) float64 {
+	if v < minV {
+		return minV
+	}
+	if v > maxV {
+		return maxV
+	}
+	return v
+}
+
+// Simple math functions to avoid importing math package
+func sqrt(x float64) float64 {
+	if x <= 0 {
+		return 0
+	}
+	z := x
+	for i := 0; i < 20; i++ {
+		z = (z + x/z) / 2
+	}
+	return z
+}
+
+func sin(x float64) float64 {
+	// Normalize to -pi to pi
+	for x > 3.14159 {
+		x -= 6.28318
+	}
+	for x < -3.14159 {
+		x += 6.28318
+	}
+	// Taylor series approximation
+	return x - (x*x*x)/6 + (x*x*x*x*x)/120
+}
+
+func cos(x float64) float64 {
+	return sin(x + 1.5708) // cos(x) = sin(x + pi/2)
+}
+
+func atan2(y, x float64) float64 {
+	if x > 0 {
+		return atan(y / x)
+	}
+	if x < 0 && y >= 0 {
+		return atan(y/x) + 3.14159
+	}
+	if x < 0 && y < 0 {
+		return atan(y/x) - 3.14159
+	}
+	if y > 0 {
+		return 1.5708
+	}
+	if y < 0 {
+		return -1.5708
+	}
+	return 0
+}
+
+func atan(x float64) float64 {
+	// Simple approximation for small values
+	if x > 1 {
+		return 1.5708 - atan(1/x)
+	}
+	if x < -1 {
+		return -1.5708 - atan(1/x)
+	}
+	// Taylor series for |x| <= 1
+	return x - (x*x*x)/3 + (x*x*x*x*x)/5
 }

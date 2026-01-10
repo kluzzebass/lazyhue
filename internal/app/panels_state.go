@@ -171,18 +171,25 @@ func (m *Model) refreshSelectedItemFromState(state *hue.BridgeState) bool {
 		if light, ok := state.GetLight(m.selectedItem.ID); ok {
 			m.selectedItem.RawPtr = light
 			m.selectedItem.IsOn = panels.IsLightOn(light)
+			m.selectedItem.Name = state.GetLightName(light)
 			return true
 		}
 	case panels.EntityRoom:
 		if room, ok := state.GetRoom(m.selectedItem.ID); ok {
 			m.selectedItem.RawPtr = room
 			m.selectedItem.IsOn = state.IsRoomOn(room)
+			if room.Metadata != nil && room.Metadata.Name != nil {
+				m.selectedItem.Name = *room.Metadata.Name
+			}
 			return true
 		}
 	case panels.EntityZone:
 		if zone, ok := state.GetZone(m.selectedItem.ID); ok {
 			m.selectedItem.RawPtr = zone
 			m.selectedItem.IsOn = state.IsRoomOn(zone)
+			if zone.Metadata != nil && zone.Metadata.Name != nil {
+				m.selectedItem.Name = *zone.Metadata.Name
+			}
 			return true
 		}
 	case panels.EntityScene:
@@ -192,16 +199,25 @@ func (m *Model) refreshSelectedItemFromState(state *hue.BridgeState) bool {
 			if scene.Status != nil && scene.Status.Active != nil {
 				m.selectedItem.IsOn = string(*scene.Status.Active) == "static" || string(*scene.Status.Active) == "dynamic_palette"
 			}
+			if scene.Metadata != nil && scene.Metadata.Name != nil {
+				m.selectedItem.Name = *scene.Metadata.Name
+			}
 			return true
 		}
 	case panels.EntityDevice:
 		if device, ok := state.GetDevice(m.selectedItem.ID); ok {
 			m.selectedItem.RawPtr = device
+			if device.Metadata != nil && device.Metadata.Name != nil {
+				m.selectedItem.Name = *device.Metadata.Name
+			}
 			return true
 		}
 	case panels.EntityEntertainment:
 		if ent, ok := state.GetEntertainmentConfiguration(m.selectedItem.ID); ok {
 			m.selectedItem.RawPtr = ent
+			if ent.Metadata != nil {
+				m.selectedItem.Name = ent.Metadata.Name
+			}
 			return true
 		}
 	}
@@ -341,24 +357,25 @@ func (m *Model) filterBindingsForSelection(bindings []ui.Binding) []ui.Binding {
 
 	switch m.selectedItem.Type {
 	case panels.EntityLight:
-		// Lights: toggle, on/off, brightness
+		// Lights: toggle, on/off, brightness (renamed via parent device)
 		return filterBindingsByAction(bindings, withTreeActions(
 			ui.ActionSelect, ui.ActionToggle, ui.ActionTurnOn, ui.ActionTurnOff,
 			ui.ActionBrightnessUp, ui.ActionBrightnessDown)...)
 
 	case panels.EntityScene:
-		// Scenes: activate only
-		return filterBindingsByAction(bindings, withTreeActions(ui.ActionSelect)...)
+		// Scenes: activate, rename
+		return filterBindingsByAction(bindings, withTreeActions(
+			ui.ActionSelect, ui.ActionRename)...)
 
 	case panels.EntityDevice:
-		// Devices: select (view details), edit
+		// Devices: select (view details), edit, rename
 		return filterBindingsByAction(bindings, withTreeActions(
-			ui.ActionSelect, ui.ActionEditDevice)...)
+			ui.ActionSelect, ui.ActionEditDevice, ui.ActionRename)...)
 
 	case panels.EntityRoom, panels.EntityZone:
-		// Rooms/Zones: toggle (grouped light), brightness
+		// Rooms/Zones: toggle (grouped light), brightness, rename
 		return filterBindingsByAction(bindings, withTreeActions(
-			ui.ActionSelect, ui.ActionToggle,
+			ui.ActionSelect, ui.ActionToggle, ui.ActionRename,
 			ui.ActionBrightnessUp, ui.ActionBrightnessDown)...)
 
 	default:

@@ -237,3 +237,84 @@ func (b *Bridge) SetMotionSensorSensitivity(motionID string, sensitivity int) er
 	})
 	return err
 }
+
+// RenameDevice renames a device.
+func (b *Bridge) RenameDevice(deviceID, newName string) error {
+	b.mu.RLock()
+	client := b.client
+	b.mu.RUnlock()
+
+	if client == nil {
+		return ErrAuthFailed
+	}
+
+	_, err := client.UpdateDevice(context.Background(), deviceID, hueclient.UpdateDeviceJSONRequestBody{
+		Metadata: &struct {
+			Archetype *hueclient.ProductArchetype `json:"archetype,omitempty"`
+			Name      *string                     `json:"name,omitempty"`
+		}{
+			Name: &newName,
+		},
+	})
+	return err
+}
+
+// RenameRoom renames a room.
+func (b *Bridge) RenameRoom(roomID, newName string) error {
+	b.mu.RLock()
+	client := b.client
+	b.mu.RUnlock()
+
+	if client == nil {
+		return ErrAuthFailed
+	}
+
+	_, err := client.UpdateRoom(context.Background(), roomID, hueclient.UpdateRoomJSONRequestBody{
+		Metadata: &struct {
+			Archetype *hueclient.RoomArchetype `json:"archetype,omitempty"`
+			Name      *string                  `json:"name,omitempty"`
+		}{
+			Name: &newName,
+		},
+	})
+	return err
+}
+
+// RenameZone renames a zone.
+func (b *Bridge) RenameZone(zoneID, newName string) error {
+	b.mu.RLock()
+	client := b.client
+	b.mu.RUnlock()
+
+	if client == nil {
+		return ErrAuthFailed
+	}
+
+	_, err := client.UpdateZone(context.Background(), zoneID, hueclient.UpdateZoneJSONRequestBody{
+		Metadata: &struct {
+			Archetype *hueclient.RoomArchetype `json:"archetype,omitempty"`
+			Name      *string                  `json:"name,omitempty"`
+		}{
+			Name: &newName,
+		},
+	})
+	return err
+}
+
+// RenameScene renames a scene.
+func (b *Bridge) RenameScene(sceneID, newName string) error {
+	b.mu.RLock()
+	client := b.client
+	b.mu.RUnlock()
+
+	if client == nil {
+		return ErrAuthFailed
+	}
+
+	_, err := client.UpdateScene(context.Background(), sceneID, hueclient.UpdateSceneJSONRequestBody{
+		Metadata: &hueclient.SceneMetadata{
+			Name: &newName,
+		},
+	})
+	return err
+}

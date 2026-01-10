@@ -16,6 +16,7 @@ func (m *Model) initBindings() {
 		PanelIDHierarchy: {
 			{Keys: []string{"enter"}, Display: "<enter>", Desc: "Select/Activate", Action: ui.ActionSelect, Priority: 100},
 			{Keys: []string{" "}, Display: "<space>", Desc: "Toggle light", Action: ui.ActionToggle, Priority: 95},
+			{Keys: []string{"r"}, Display: "r", Desc: "Rename", Action: ui.ActionRename, Priority: 93},
 			{Keys: []string{"e"}, Display: "e", Desc: "Edit device", Action: ui.ActionEditDevice, Priority: 92},
 			{Keys: []string{"left", "h"}, Display: "←/h", Desc: "Collapse", Action: ui.ActionCollapse, Priority: 90},
 			{Keys: []string{"right", "l"}, Display: "→/l", Desc: "Expand", Action: ui.ActionExpand, Priority: 90},

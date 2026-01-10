@@ -77,6 +77,8 @@ func (m *Model) dispatch(action ui.Action) tea.Cmd {
 	// Device editing
 	case ui.ActionEditDevice:
 		return m.showDeviceEditPopup()
+	case ui.ActionRename:
+		return m.showRenamePopup()
 
 	// Global
 	case ui.ActionHelp:

@@ -476,3 +476,107 @@ func (m *Model) showDeviceEditPopup() tea.Cmd {
 	return nil
 }
 
+// showRenamePopup shows an input popup to rename the selected entity.
+func (m *Model) showRenamePopup() tea.Cmd {
+	bridge := m.manager.GetActiveBridge()
+	if bridge == nil || m.selectedItem == nil {
+		return nil
+	}
+
+	currentName := m.selectedItem.Name
+	entityType := ""
+	canRename := false
+
+	switch m.selectedItem.Type {
+	case panels.EntityDevice:
+		entityType = "device"
+		canRename = true
+	case panels.EntityRoom:
+		entityType = "room"
+		canRename = true
+	case panels.EntityZone:
+		entityType = "zone"
+		canRename = true
+	case panels.EntityScene:
+		entityType = "scene"
+		canRename = true
+	case panels.EntityLight:
+		// Lights are renamed via their parent device
+		m.setStatus("Rename the device to rename this light", false)
+		return nil
+	default:
+		m.setStatus("This item cannot be renamed", false)
+		return nil
+	}
+
+	if !canRename {
+		return nil
+	}
+
+	itemID := m.selectedItem.ID
+	itemType := m.selectedItem.Type
+
+	fields := []panels.FormField{
+		{
+			ID:           "name",
+			Label:        "Name",
+			Type:         panels.FormFieldText,
+			TextValue:    currentName,
+			OriginalText: currentName,
+		},
+	}
+
+	m.popupPanel.SetRatio(0.5, 0.25)
+	m.popupPanel.ShowForm("Rename "+entityType, fields, func(result panels.PopupResult, finalFields []panels.FormField) {
+		if !result.Confirmed {
+			return
+		}
+
+		// Get the new name from the form field
+		newName := ""
+		for _, f := range finalFields {
+			if f.ID == "name" {
+				newName = f.TextValue
+				break
+			}
+		}
+
+		if newName == "" || newName == currentName {
+			return
+		}
+
+		var err error
+
+		switch itemType {
+		case panels.EntityDevice:
+			err = bridge.RenameDevice(itemID, newName)
+		case panels.EntityRoom:
+			err = bridge.RenameRoom(itemID, newName)
+		case panels.EntityZone:
+			err = bridge.RenameZone(itemID, newName)
+		case panels.EntityScene:
+			err = bridge.RenameScene(itemID, newName)
+		}
+
+		if err != nil {
+			m.setStatus("Failed to rename: "+err.Error(), true)
+			return
+		}
+
+		m.logPanel.AddEntry("request", fmt.Sprintf("%s: renamed to \"%s\"", currentName, newName))
+		m.setStatus(fmt.Sprintf("Renamed to \"%s\"", newName), false)
+
+		// Trigger a full state sync to get the new name
+		go func() {
+			if err := bridge.SyncAll(context.Background()); err == nil {
+				// The state will be updated via the normal sync mechanism
+			}
+		}()
+
+		m.refreshHierarchyPanel()
+		m.updateDetailPanel()
+	})
+
+	return nil
+}
+
