@@ -39,19 +39,19 @@ func (m *Model) loadBridgesFromCredentials() tea.Cmd {
 		}
 	}
 
-	// Also discover bridges on the network
-	discovery := hue.NewDiscoveryService(5 * time.Second)
-	bridges, err := discovery.Discover()
-	if err == nil {
-		for _, info := range bridges {
-			// Add if not already in manager
-			if m.manager.GetBridge(info.ID) == nil {
-				m.manager.AddBridge(info)
-			}
-		}
-	}
+	// Also discover bridges on the network (asynchronously)
+	cmds = append(cmds, m.discoverBridges())
 
 	return tea.Batch(cmds...)
+}
+
+// discoverBridges discovers bridges on the network asynchronously.
+func (m *Model) discoverBridges() tea.Cmd {
+	return func() tea.Msg {
+		discovery := hue.NewDiscoveryService(5 * time.Second)
+		bridges := discovery.DiscoverAll()
+		return bridgesDiscoveredMsg{bridges: bridges}
+	}
 }
 
 // syncBridgeState syncs state for a bridge.

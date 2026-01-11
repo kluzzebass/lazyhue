@@ -80,14 +80,36 @@ func (d TreeDelegate) Render(w io.Writer, m list.Model, index int, item list.Ite
 	// On/off indicator for entities
 	indicator := ""
 	if node.Item != nil {
-		if node.Item.IsOn {
-			// Use custom color if available
-			if node.Item.IndicatorColor != "" {
-				indicator = lipgloss.NewStyle().
-					Foreground(lipgloss.Color(node.Item.IndicatorColor)).
-					Render("●") + " "
-			} else {
+		// Special handling for bridges - show blink when Brightness > 0
+		if node.Item.Type == EntityBridge {
+			if node.Item.Brightness > 0 {
+				// Blinking state - use bright accent color
+				indicator = d.Styles.Accent.Render("◉") + " "
+			} else if node.Item.IsOn {
+				// Connected but not blinking
 				indicator = d.Styles.Success.Render("●") + " "
+			} else {
+				// Disconnected
+				indicator = d.Styles.Dimmed.Render("○") + " "
+			}
+		} else if node.Item.IsOn {
+			// Use RenderBrightnessIndicator for lights with brightness and color
+			if node.Item.Brightness > 0 {
+				if node.Item.IndicatorColor != "" {
+					indicator = ui2.RenderBrightnessIndicatorFromHex(node.Item.Brightness, node.Item.IndicatorColor) + " "
+				} else {
+					// Default to theme success color if no indicator color
+					indicator = ui2.RenderBrightnessIndicator(node.Item.Brightness, d.Styles.Theme.Success) + " "
+				}
+			} else {
+				// Fallback for on items without brightness
+				if node.Item.IndicatorColor != "" {
+					indicator = lipgloss.NewStyle().
+						Foreground(lipgloss.Color(node.Item.IndicatorColor)).
+						Render("●") + " "
+				} else {
+					indicator = d.Styles.Success.Render("●") + " "
+				}
 			}
 		} else {
 			indicator = d.Styles.Dimmed.Render("○") + " "

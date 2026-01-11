@@ -1,7 +1,16 @@
 package app2
 
+import (
+	"github.com/kluzzebass/lazyhue/internal/hue"
+)
+
 // Messages for the application.
 type (
+	// bridgesDiscoveredMsg is sent when bridge discovery completes.
+	bridgesDiscoveredMsg struct {
+		bridges []hue.BridgeInfo
+	}
+
 	// bridgeConnectedMsg is sent when a bridge connects successfully.
 	bridgeConnectedMsg struct {
 		bridgeID string
@@ -23,5 +32,10 @@ type (
 	// errMsg wraps errors.
 	errMsg struct {
 		err error
+	}
+
+	// bridgeBlinkTickMsg is sent when a bridge blink timer expires.
+	bridgeBlinkTickMsg struct {
+		bridgeID string
 	}
 )

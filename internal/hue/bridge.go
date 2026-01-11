@@ -53,6 +53,7 @@ type Bridge struct {
 	eventStream *EventStream
 	eventCancel context.CancelFunc
 	onEvent func(bridgeID, resourceType, resourceID, eventType string) // Callback when events are received
+	onRequest func(bridgeID, message string)                           // Callback when API requests are made
 	mu          sync.RWMutex
 }
 
@@ -117,6 +118,24 @@ func (b *Bridge) OnEvent(fn func(bridgeID, resourceType, resourceID, eventType s
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	b.onEvent = fn
+}
+
+// OnRequest sets a callback for when the bridge makes API requests.
+// The callback receives bridgeID and a descriptive message.
+func (b *Bridge) OnRequest(fn func(bridgeID, message string)) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.onRequest = fn
+}
+
+// logRequest calls the request callback if set.
+func (b *Bridge) logRequest(message string) {
+	b.mu.RLock()
+	callback := b.onRequest
+	b.mu.RUnlock()
+	if callback != nil {
+		callback(b.Info.ID, message)
+	}
 }
 
 // IsEventStreamConnected returns whether the SSE connection is active.
@@ -682,6 +701,7 @@ func (b *Bridge) SyncMotionSensors(ctx context.Context) error {
 		return ErrAuthFailed
 	}
 
+	// Sync operations don't need detailed logging - state sync covers it
 	resp, err := client.GetMotionSensorsWithResponse(ctx)
 	if err != nil {
 		return err
@@ -712,6 +732,7 @@ func (b *Bridge) SyncTemperatures(ctx context.Context) error {
 		return ErrAuthFailed
 	}
 
+	// Sync operations don't need detailed logging - state sync covers it
 	resp, err := client.GetTemperaturesWithResponse(ctx)
 	if err != nil {
 		return err
@@ -742,6 +763,7 @@ func (b *Bridge) SyncLightLevels(ctx context.Context) error {
 		return ErrAuthFailed
 	}
 
+	// Sync operations don't need detailed logging - state sync covers it
 	resp, err := client.GetLightLevelsWithResponse(ctx)
 	if err != nil {
 		return err
@@ -772,6 +794,7 @@ func (b *Bridge) SyncDevicePowers(ctx context.Context) error {
 		return ErrAuthFailed
 	}
 
+	// Sync operations don't need detailed logging - state sync covers it
 	resp, err := client.GetDevicePowersWithResponse(ctx)
 	if err != nil {
 		return err
@@ -850,6 +873,7 @@ func (b *Bridge) SyncAuthApps(ctx context.Context) error {
 		return ErrAuthFailed
 	}
 
+	// Sync operations don't need detailed logging - state sync covers it
 	apps, err := extended.GetAuthenticatedApps(ctx)
 	if err != nil {
 		return err
@@ -869,6 +893,7 @@ func (b *Bridge) SyncEntertainmentConfigurations(ctx context.Context) error {
 		return ErrAuthFailed
 	}
 
+	// Sync operations don't need detailed logging - state sync covers it
 	configs, err := extended.GetEntertainmentConfigurations(ctx)
 	if err != nil {
 		return err
@@ -888,6 +913,7 @@ func (b *Bridge) SyncWifiConnectivity(ctx context.Context) error {
 		return ErrAuthFailed
 	}
 
+	// Sync operations don't need detailed logging - state sync covers it
 	wifi, err := extended.GetWifiConnectivity(ctx)
 	if err != nil {
 		return err
@@ -907,6 +933,7 @@ func (b *Bridge) SyncZigbeeConnectivity(ctx context.Context) error {
 		return ErrAuthFailed
 	}
 
+	// Sync operations don't need detailed logging - state sync covers it
 	zigbee, err := extended.GetZigbeeConnectivity(ctx)
 	if err != nil {
 		return err

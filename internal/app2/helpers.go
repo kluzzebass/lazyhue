@@ -3,6 +3,7 @@ package app2
 import (
 	"fmt"
 	"image/color"
+	"math"
 	"sort"
 	"strings"
 	"time"
@@ -34,6 +35,12 @@ func (m *Model) buildHomeTree(_ *hue.BridgeState) {
 			bridgeName = bridge.Info.ID
 		}
 
+		// Check if bridge is currently blinking
+		isBlinking := false
+		if until, ok := m.bridgeBlinkUntil[bridge.Info.ID]; ok {
+			isBlinking = time.Now().Before(until)
+		}
+
 		// Create bridge node
 		bridgeNode := &panels.TreeNode{
 			ID:       bridge.Info.ID,
@@ -41,10 +48,17 @@ func (m *Model) buildHomeTree(_ *hue.BridgeState) {
 			Depth:    0,
 			Expanded: true, // Start expanded
 			Item: &panels.EntityItem{
-				ID:     bridge.Info.ID,
-				Name:   bridgeName,
-				Type:   panels.EntityBridge,
-				RawPtr: bridge,
+				ID:         bridge.Info.ID,
+				Name:       bridgeName,
+				Type:       panels.EntityBridge,
+				IsOn:       bridge.IsConnected(), // Use connection status for IsOn
+				RawPtr:     bridge,
+				Brightness: func() float64 {
+					if isBlinking {
+						return 100.0 // Full brightness when blinking
+					}
+					return 0 // No brightness indicator when not blinking
+				}(),
 			},
 			Children: make([]*panels.TreeNode, 0),
 		}
@@ -88,21 +102,30 @@ func (m *Model) buildBridgeChildren(bridgeNode *panels.TreeNode, state *hue.Brid
 				roomID = *room.Id
 			}
 
+			// Get lights for this room
+			lights := state.RoomLights(room)
+			
+			// Calculate aggregate brightness and color from room lights
+			brightness, indicatorColor := m.calculateRoomAggregate(lights)
+
 			roomNode := &panels.TreeNode{
 				ID:       roomID,
 				Label:    name,
 				Depth:    2,
 				Expanded: false,
 				Item: &panels.EntityItem{
-					ID:   roomID,
-					Name: name,
-					Type: panels.EntityRoom,
+					ID:             roomID,
+					Name:           name,
+					Type:           panels.EntityRoom,
+					IsOn:           brightness > 0,
+					Brightness:     brightness,
+					IndicatorColor: indicatorColor,
+					RawPtr:         room,
 				},
 				Children: make([]*panels.TreeNode, 0),
 			}
 
-			// Get lights, devices, and scenes for this room
-			lights := state.RoomLights(room)
+			// Get devices and scenes for this room
 			scenes := state.RoomScenes(roomID)
 
 			// Get non-light devices in room
@@ -246,15 +269,30 @@ func (m *Model) buildBridgeChildren(bridgeNode *panels.TreeNode, state *hue.Brid
 				name = *zone.Metadata.Name
 			}
 
+			zoneID := ""
+			if zone.Id != nil {
+				zoneID = *zone.Id
+			}
+
+			// Get lights for this zone
+			lights := state.RoomLights(zone)
+			
+			// Calculate aggregate brightness and color from zone lights
+			brightness, indicatorColor := m.calculateRoomAggregate(lights)
+
 			zoneNode := &panels.TreeNode{
-				ID:       *zone.Id,
+				ID:       zoneID,
 				Label:    name,
 				Depth:    2,
 				Expanded: false,
 				Item: &panels.EntityItem{
-					ID:   *zone.Id,
-					Name: name,
-					Type: panels.EntityZone,
+					ID:             zoneID,
+					Name:           name,
+					Type:           panels.EntityZone,
+					IsOn:           brightness > 0,
+					Brightness:     brightness,
+					IndicatorColor: indicatorColor,
+					RawPtr:         zone,
 				},
 				Children: make([]*panels.TreeNode, 0),
 			}
@@ -397,6 +435,51 @@ func (m *Model) buildLightsTree(state *hue.BridgeState) {
 	}
 
 	m.tree.SetRoots(nodes)
+}
+
+// calculateRoomAggregate calculates the average brightness and color from a list of lights.
+// Returns the average brightness (0-100) and a hex color string representing the average color.
+func (m *Model) calculateRoomAggregate(lights []hueclient.LightGet) (float64, string) {
+	if len(lights) == 0 {
+		return 0, ""
+	}
+
+	var totalBrightness float64
+	var totalR, totalG, totalB float64
+	var onCount int
+
+	for _, light := range lights {
+		if light.On != nil && light.On.On != nil && *light.On.On {
+			onCount++
+			if light.Dimming != nil && light.Dimming.Brightness != nil {
+				totalBrightness += float64(*light.Dimming.Brightness)
+			} else {
+				totalBrightness += 100.0
+			}
+
+			// Get color for this light
+			colorHex := ui2.GetLightColor(light)
+			if colorHex != "" && len(colorHex) == 7 && colorHex[0] == '#' {
+				var r, g, b int
+				fmt.Sscanf(colorHex, "#%02x%02x%02x", &r, &g, &b)
+				totalR += float64(r)
+				totalG += float64(g)
+				totalB += float64(b)
+			}
+		}
+	}
+
+	if onCount == 0 {
+		return 0, ""
+	}
+
+	brightness := totalBrightness / float64(onCount)
+	avgR := int(totalR / float64(onCount))
+	avgG := int(totalG / float64(onCount))
+	avgB := int(totalB / float64(onCount))
+	indicatorColor := fmt.Sprintf("#%02x%02x%02x", avgR, avgG, avgB)
+
+	return brightness, indicatorColor
 }
 
 // buildDevicesTree builds the tree panel showing all Devices.
@@ -564,9 +647,14 @@ func (m *Model) buildEventDetails(msg bridgeEventMsg) EventDetails {
 						details.Details = "on"
 					}
 					// Get color for indicator
+					// Use actual brightness for color conversion, or 100% if not available
+					brightnessForColor := 100.0
+					if light.Dimming != nil && light.Dimming.Brightness != nil {
+						brightnessForColor = float64(*light.Dimming.Brightness)
+					}
 					if light.Color != nil && light.Color.Xy != nil &&
 						light.Color.Xy.X != nil && light.Color.Xy.Y != nil {
-						r, g, b := ui2.XyToRGB(float64(*light.Color.Xy.X), float64(*light.Color.Xy.Y), 1.0)
+						r, g, b := ui2.XyToRGB(float64(*light.Color.Xy.X), float64(*light.Color.Xy.Y), brightnessForColor)
 						details.IndicatorColor = fmt.Sprintf("#%02x%02x%02x", r, g, b)
 					} else if light.ColorTemperature != nil && light.ColorTemperature.Mirek != nil {
 						r, g, b := ui2.MirekToRGB(*light.ColorTemperature.Mirek)
@@ -580,7 +668,7 @@ func (m *Model) buildEventDetails(msg bridgeEventMsg) EventDetails {
 
 	case "grouped_light":
 		if gl, ok := state.GetGroupedLight(msg.resourceID); ok {
-			// Try to find the room/zone name for this grouped light
+			// Try to find the room/zone/bridge home name for this grouped light
 			if name := state.GetGroupedLightName(msg.resourceID); name != "" {
 				details.ResourceName = name
 			}
@@ -592,6 +680,79 @@ func (m *Model) buildEventDetails(msg bridgeEventMsg) EventDetails {
 						details.Details = fmt.Sprintf("on %.0f%%", *gl.Dimming.Brightness)
 					} else {
 						details.Details = "on"
+					}
+					// Calculate aggregated color from lights in the room/zone/bridge home
+					// Find which room/zone/bridge home owns this grouped light service
+					var lights []hueclient.LightGet
+					for _, room := range state.AllRooms() {
+						if room.Services != nil {
+							for _, svc := range *room.Services {
+								if svc.Rtype != nil && *svc.Rtype == "grouped_light" && svc.Rid != nil && *svc.Rid == msg.resourceID {
+									// Found the room - get its lights using the proper method
+									lights = state.RoomLights(room)
+									break
+								}
+							}
+						}
+						if len(lights) > 0 {
+							break
+						}
+					}
+					// Check zones if not found in rooms
+					if len(lights) == 0 {
+						for _, zone := range state.AllZones() {
+							if zone.Services != nil {
+								for _, svc := range *zone.Services {
+									if svc.Rtype != nil && *svc.Rtype == "grouped_light" && svc.Rid != nil && *svc.Rid == msg.resourceID {
+										// Found the zone - get its lights using the proper method
+										// Zones use the same structure as rooms
+										lights = state.RoomLights(zone)
+										break
+									}
+								}
+							}
+							if len(lights) > 0 {
+								break
+							}
+						}
+					}
+					// Check bridge home if not found in rooms/zones
+					if len(lights) == 0 {
+						if bridgeHome := state.GetBridgeHome(); bridgeHome != nil {
+							if bridgeHome.Services != nil {
+								for _, svc := range *bridgeHome.Services {
+									if svc.Rtype != nil && *svc.Rtype == "grouped_light" && svc.Rid != nil && *svc.Rid == msg.resourceID {
+										// Found the bridge home - get lights from its children
+										// Bridge home children are devices, similar to rooms
+										if bridgeHome.Children != nil {
+											// Build device -> lights mapping
+											deviceLights := make(map[string][]hueclient.LightGet)
+											for _, light := range state.AllLights() {
+												if light.Owner != nil && light.Owner.Rid != nil {
+													deviceLights[*light.Owner.Rid] = append(deviceLights[*light.Owner.Rid], light)
+												}
+											}
+											// Get lights from bridge home children (devices)
+											for _, child := range *bridgeHome.Children {
+												if child.Rid != nil {
+													if deviceLightList, ok := deviceLights[*child.Rid]; ok {
+														lights = append(lights, deviceLightList...)
+													}
+												}
+											}
+										}
+										break
+									}
+								}
+							}
+						}
+					}
+					// Calculate aggregated color from the lights
+					if len(lights) > 0 {
+						_, aggregatedColor := m.calculateRoomAggregate(lights)
+						if aggregatedColor != "" {
+							details.IndicatorColor = aggregatedColor
+						}
 					}
 				} else {
 					details.Details = "off"
@@ -627,6 +788,118 @@ func (m *Model) buildEventDetails(msg bridgeEventMsg) EventDetails {
 				}
 			}
 		}
+
+	case "temperature":
+		if temp, ok := state.GetTemperature(msg.resourceID); ok {
+			// Try to get device name
+			if temp.Owner != nil && temp.Owner.Rid != nil {
+				if device, ok := state.GetDevice(*temp.Owner.Rid); ok {
+					details.ResourceName = hue.DeviceName(device, details.ResourceName)
+				}
+			}
+			if temp.Temperature != nil && temp.Temperature.Temperature != nil {
+				details.Details = fmt.Sprintf("%.1f°C", *temp.Temperature.Temperature)
+			}
+		}
+
+	case "light_level":
+		if ll, ok := state.GetLightLevel(msg.resourceID); ok {
+			// Try to get device name
+			if ll.Owner != nil && ll.Owner.Rid != nil {
+				if device, ok := state.GetDevice(*ll.Owner.Rid); ok {
+					details.ResourceName = hue.DeviceName(device, details.ResourceName)
+				}
+			}
+			if ll.Light != nil && ll.Light.LightLevel != nil {
+				// Convert from Hue's log scale to approximate lux
+				lux := float64(*ll.Light.LightLevel-1) / 10000.0
+				lux = 100 * (lux * lux * lux) // Rough approximation
+				details.Details = fmt.Sprintf("%.0f lux", lux)
+			}
+		}
+
+	case "grouped_light_level":
+		// Grouped light levels are services on rooms/zones, not separate resources
+		// Find the room/zone that has this grouped_light_level service and calculate aggregate
+		allRooms := state.AllRooms()
+		for _, room := range allRooms {
+			if room.Services != nil {
+				for _, svc := range *room.Services {
+					if svc.Rtype != nil && *svc.Rtype == "grouped_light_level" && svc.Rid != nil && *svc.Rid == msg.resourceID {
+						// Found the room
+						if room.Metadata != nil && room.Metadata.Name != nil {
+							details.ResourceName = *room.Metadata.Name
+						}
+						// Calculate aggregated light level from devices in the room
+						var totalLux float64
+						var count int
+						if room.Children != nil {
+							for _, child := range *room.Children {
+								if child.Rid == nil || child.Rtype == nil || *child.Rtype != "device" {
+									continue
+								}
+								if device, ok := state.GetDevice(*child.Rid); ok {
+									if hasLevel, level := state.GetDeviceLightLevel(device); hasLevel && level > 0 {
+										// Convert from Hue's log scale to lux: 10^((level-1)/10000)
+										lux := math.Pow(10, float64(level-1)/10000)
+										totalLux += lux
+										count++
+									}
+								}
+							}
+						}
+						if count > 0 {
+							avgLux := totalLux / float64(count)
+							details.Details = fmt.Sprintf("%.0f lux", avgLux)
+						} else {
+							details.Details = "no sensors"
+						}
+						return details
+					}
+				}
+			}
+		}
+		// Check zones as well
+		allZones := state.AllZones()
+		for _, zone := range allZones {
+			if zone.Services != nil {
+				for _, svc := range *zone.Services {
+					if svc.Rtype != nil && *svc.Rtype == "grouped_light_level" && svc.Rid != nil && *svc.Rid == msg.resourceID {
+						// Found the zone
+						if zone.Metadata != nil && zone.Metadata.Name != nil {
+							details.ResourceName = *zone.Metadata.Name
+						}
+						// Calculate aggregated light level from devices in the zone
+						var totalLux float64
+						var count int
+						if zone.Children != nil {
+							for _, child := range *zone.Children {
+								if child.Rid == nil || child.Rtype == nil || *child.Rtype != "device" {
+									continue
+								}
+								if device, ok := state.GetDevice(*child.Rid); ok {
+									if hasLevel, level := state.GetDeviceLightLevel(device); hasLevel && level > 0 {
+										// Convert from Hue's log scale to lux: 10^((level-1)/10000)
+										lux := math.Pow(10, float64(level-1)/10000)
+										totalLux += lux
+										count++
+									}
+								}
+							}
+						}
+						if count > 0 {
+							avgLux := totalLux / float64(count)
+							details.Details = fmt.Sprintf("%.0f lux", avgLux)
+						} else {
+							details.Details = "no sensors"
+						}
+						return details
+					}
+				}
+			}
+		}
+		// If we couldn't find it, just log a generic message
+		details.Details = "light level updated"
 	}
 
 	return details

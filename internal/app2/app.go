@@ -57,6 +57,7 @@ type Model struct {
 	quitting         bool
 	eventChan        chan bridgeEventMsg
 	eventCancelFuncs map[string]context.CancelFunc
+	bridgeBlinkUntil map[string]time.Time // Track when bridge blink indicators should stop
 }
 
 // New creates a new application model.
@@ -115,9 +116,10 @@ func New(creds *config.CredentialStore) Model {
 		layout:           layoutTree,
 		focusedPane:      PanelTree,
 		status:           "Loading bridges...",
-		logEntries:       []LogEntry{{Time: time.Now(), Type: "event", Message: "lazyhue v2 started"}},
+		logEntries:       []LogEntry{},
 		eventChan:        make(chan bridgeEventMsg, 100),
 		eventCancelFuncs: make(map[string]context.CancelFunc),
+		bridgeBlinkUntil: make(map[string]time.Time),
 	}
 }
 
@@ -173,13 +175,29 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.help.Width = m.width
 		return m, nil
 
+	case bridgesDiscoveredMsg:
+		// Add discovered bridges to the manager
+		for _, info := range msg.bridges {
+			// Add if not already in manager
+			if m.manager.GetBridge(info.ID) == nil {
+				m.manager.AddBridge(info)
+			}
+		}
+		return m, nil
+
 	case bridgeConnectedMsg:
-		m.logEntries = append(m.logEntries, LogEntry{
-			Time:    time.Now(),
-			Type:    "event",
-			Message: fmt.Sprintf("Connected to bridge %s", msg.bridgeID),
-		})
-		m.updateLogContent()
+		// Set up request logging callback
+		bridge := m.manager.GetBridge(msg.bridgeID)
+		if bridge != nil {
+			bridge.OnRequest(func(bridgeID, message string) {
+				m.logEntries = append(m.logEntries, LogEntry{
+					Time:    time.Now(),
+					Type:    "request",
+					Message: message,
+				})
+				m.updateLogContent()
+			})
+		}
 
 		// If this is the first connected bridge, make it active
 		if m.activeBridgeID == "" {
@@ -194,12 +212,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.Batch(cmds...)
 
 	case stateSyncedMsg:
-		m.logEntries = append(m.logEntries, LogEntry{
-			Time:    time.Now(),
-			Type:    "event",
-			Message: fmt.Sprintf("State synced for bridge %s", msg.bridgeID),
-		})
-		m.updateLogContent()
 		m.rebuildTreeForActiveTab()
 
 		bridge := m.manager.GetBridge(msg.bridgeID)
@@ -237,12 +249,26 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		})
 		m.updateLogContent()
 
+		// Trigger blink for the bridge that received the event
+		m.bridgeBlinkUntil[msg.bridgeID] = time.Now().Add(300 * time.Millisecond)
+		cmds = append(cmds, tea.Tick(300*time.Millisecond, func(t time.Time) tea.Msg {
+			return bridgeBlinkTickMsg{bridgeID: msg.bridgeID}
+		}))
+
 		if bridge := m.manager.GetBridge(msg.bridgeID); bridge != nil {
 			m.rebuildTreeForActiveTab()
 		}
 
 		cmds = append(cmds, m.listenForEvents())
 		return m, tea.Batch(cmds...)
+
+	case bridgeBlinkTickMsg:
+		// Clear blink state for this bridge
+		if _, ok := m.bridgeBlinkUntil[msg.bridgeID]; ok {
+			delete(m.bridgeBlinkUntil, msg.bridgeID)
+			m.rebuildTreeForActiveTab()
+		}
+		return m, nil
 
 	case errMsg:
 		m.status = fmt.Sprintf("Error: %v", msg.err)
@@ -280,25 +306,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.help.ShowAll = !m.help.ShowAll
 			return m, nil
 
+		case key.Matches(msg, m.keys.TestForm):
+			m.showTestForm()
+			return m, nil
+
 		case key.Matches(msg, m.keys.NextBridge):
 			m.tree.NextTab()
-			m.logEntries = append(m.logEntries, LogEntry{
-				Time:    time.Now(),
-				Type:    "event",
-				Message: fmt.Sprintf("Tab: %s", m.tree.Title()),
-			})
-			m.updateLogContent()
 			m.rebuildTreeForActiveTab()
 			return m, nil
 
 		case key.Matches(msg, m.keys.PrevBridge):
 			m.tree.PrevTab()
-			m.logEntries = append(m.logEntries, LogEntry{
-				Time:    time.Now(),
-				Type:    "event",
-				Message: fmt.Sprintf("Tab: %s", m.tree.Title()),
-			})
-			m.updateLogContent()
 			m.rebuildTreeForActiveTab()
 			return m, nil
 

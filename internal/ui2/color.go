@@ -8,6 +8,7 @@ import (
 	"unicode"
 
 	"github.com/charmbracelet/lipgloss/v2"
+	"github.com/kluzzebass/lazyhue/internal/hueclient"
 )
 
 // Colorize applies a foreground color to a string.
@@ -349,4 +350,72 @@ func RGBToHex(r, g, b uint8) string {
 // RGBColor creates a lipgloss-compatible color from RGB values.
 func RGBColor(r, g, b uint8) color.Color {
 	return color.RGBA{R: r, G: g, B: b, A: 255}
+}
+
+// Brightness indicator functions
+
+// BrightnessIndicator returns a character representing the brightness level.
+// Uses circle fill characters: ○ ◔ ◑ ◕ ●
+// Thresholds are centered around the visual representation:
+// ○=0%, ◔=25%, ◑=50%, ◕=75%, ●=100%
+func BrightnessIndicator(brightness float64) string {
+	switch {
+	case brightness <= 0:
+		return "○" // off/empty
+	case brightness < 37.5:
+		return "◔" // quarter (1-37%)
+	case brightness < 62.5:
+		return "◑" // half (38-62%)
+	case brightness < 87.5:
+		return "◕" // three-quarters (63-87%)
+	default:
+		return "●" // full (88-100%)
+	}
+}
+
+// RenderBrightnessIndicator renders a brightness indicator character with the given color.
+// This is the most generic form, used when you have pre-calculated brightness and color.
+func RenderBrightnessIndicator(brightness float64, c color.Color) string {
+	indicatorChar := BrightnessIndicator(brightness)
+	return lipgloss.NewStyle().Foreground(c).Render(indicatorChar)
+}
+
+// RenderBrightnessIndicatorFromHex renders a brightness indicator character with a hex color string.
+// Convenience function for when you have a hex color string instead of a lipgloss.Color.
+func RenderBrightnessIndicatorFromHex(brightness float64, hexColor string) string {
+	if hexColor == "" {
+		// Default to a warm white if no color provided
+		hexColor = "#ffcc66"
+	}
+	return RenderBrightnessIndicator(brightness, lipgloss.Color(hexColor))
+}
+
+// GetLightColor extracts the RGB color from a light and returns it as a hex string.
+// Returns empty string if light is off or has no color information.
+func GetLightColor(light hueclient.LightGet) string {
+	brightness := 100.0
+	if light.Dimming != nil && light.Dimming.Brightness != nil {
+		brightness = float64(*light.Dimming.Brightness)
+	}
+
+	// Try XY color first (color lights)
+	if light.Color != nil && light.Color.Xy != nil {
+		if light.Color.Xy.X != nil && light.Color.Xy.Y != nil {
+			x := float64(*light.Color.Xy.X)
+			y := float64(*light.Color.Xy.Y)
+			r, g, b := XyToRGB(x, y, brightness)
+			return RGBToHex(r, g, b)
+		}
+	}
+
+	// Try color temperature (white ambiance lights)
+	if light.ColorTemperature != nil && light.ColorTemperature.Mirek != nil {
+		if light.ColorTemperature.MirekValid == nil || *light.ColorTemperature.MirekValid {
+			r, g, b := MirekToRGB(*light.ColorTemperature.Mirek)
+			return RGBToHex(r, g, b)
+		}
+	}
+
+	// Default to warm white for non-color lights
+	return "#ffcc66"
 }
