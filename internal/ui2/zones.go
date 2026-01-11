@@ -82,6 +82,11 @@ func BridgeZone(id string) string {
 	return ZoneBridgePrefix + id
 }
 
+// BridgeItemZone returns a zone ID for a bridge item (alias for BridgeZone).
+func BridgeItemZone(id string) string {
+	return ZoneBridgePrefix + id
+}
+
 // FormFieldZone returns a zone ID for a form field.
 func FormFieldZone(id string) string {
 	return ZoneFormField + id

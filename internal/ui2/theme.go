@@ -76,6 +76,7 @@ type Styles struct {
 	Selected  lipgloss.Style
 	Dimmed    lipgloss.Style
 	Highlight lipgloss.Style
+	Accent    lipgloss.Style
 
 	// Text styles
 	Title       lipgloss.Style
@@ -117,6 +118,7 @@ func NewStyles(theme Theme) Styles {
 		Selected:  lipgloss.NewStyle().Foreground(theme.Primary).Bold(true),
 		Dimmed:    lipgloss.NewStyle().Foreground(theme.TextMuted),
 		Highlight: lipgloss.NewStyle().Foreground(theme.Highlight).Bold(true),
+		Accent:    lipgloss.NewStyle().Foreground(theme.Accent),
 
 		// Text styles
 		Title:       lipgloss.NewStyle().Foreground(theme.TextBright).Bold(true),
