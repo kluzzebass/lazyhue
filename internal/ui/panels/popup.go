@@ -102,6 +102,10 @@ type FormField struct {
 	OriginalGreen  int // Original green
 	OriginalBlue   int // Original blue
 	RGBSliderFocus int // Which slider is focused: 0=red, 1=green, 2=blue
+
+	// Toggle labels (for FormFieldToggle) - if empty, defaults to "On"/"Off"
+	ToggleOnLabel  string
+	ToggleOffLabel string
 }
 
 // PopupPanel is a generic modal dialog.
@@ -165,6 +169,9 @@ type PopupPanel struct {
 
 	// HSL/RGB slider capture state
 	capturedSliderRow int // Which sub-slider (0,1,2) is captured during drag (-1 = none)
+
+	// Form scrolling
+	formScroll int // Scroll offset for form content
 
 	// Sizing
 	screenWidth  int
@@ -286,6 +293,7 @@ func (p *PopupPanel) showFormInternal(title string, fields []FormField, onClose 
 	p.selectDropdownOpen = false
 	p.selectDropdownCursor = 0
 	p.selectDropdownScroll = 0
+	p.formScroll = 0            // Reset scroll position for new form
 
 	// Focus and enter edit mode for the first text input if applicable
 	if len(p.formFields) > 0 && p.formFields[0].Type == FormFieldText {
@@ -378,7 +386,11 @@ func (p *PopupPanel) contentWidth() int {
 }
 
 func (p *PopupPanel) contentHeight() int {
-	return p.height() - 2 // borders
+	h := p.height() - 2 // borders
+	if h < 1 {
+		return 1
+	}
+	return h
 }
 
 // Width returns the popup width.
@@ -677,6 +689,7 @@ func (p *PopupPanel) handleFormKey(msg tea.KeyMsg) tea.Cmd {
 				p.formBtnIndex = 0
 			}
 		}
+		p.ensureFocusedFieldVisible()
 
 	case "shift+tab", "up", "k":
 		if p.formOnButtons {
@@ -691,6 +704,7 @@ func (p *PopupPanel) handleFormKey(msg tea.KeyMsg) tea.Cmd {
 				p.formCursor--
 			}
 		}
+		p.ensureFocusedFieldVisible()
 
 	case "left", "h":
 		if !p.formOnButtons && p.formCursor < len(p.formFields) {
@@ -771,11 +785,23 @@ func (p *PopupPanel) handleFieldEditMode(msg tea.KeyMsg) tea.Cmd {
 			p.blurAllTextInputs()
 			return nil
 		case "enter":
-			// Exit edit mode and move to Save button
+			// Exit edit mode and advance to next field (or Save if last field)
 			p.formFieldEditing = false
 			p.blurAllTextInputs()
-			p.formOnButtons = true
-			p.formBtnIndex = 0 // Save button
+			if p.formCursor < len(p.formFields)-1 {
+				p.formCursor++
+				// If next field is also a text field, enter edit mode
+				if p.formFields[p.formCursor].Type == FormFieldText {
+					if ti, ok := p.formTextInputs[p.formCursor]; ok {
+						ti.Focus()
+						p.formTextInputs[p.formCursor] = ti
+						p.formFieldEditing = true
+					}
+				}
+			} else {
+				p.formOnButtons = true
+				p.formBtnIndex = 0 // Save button
+			}
 			return nil
 		case "ctrl+t":
 			if ti, ok := p.formTextInputs[p.formCursor]; ok {
@@ -1218,12 +1244,25 @@ func (p *PopupPanel) updateSliderFromMouse(field *FormField, mouseX int, valueSt
 }
 
 // getFieldRowY returns the Y position of a field's first row on screen.
+// Takes into account scrolling when the form is larger than the viewport.
 func (p *PopupPanel) getFieldRowY(fieldIdx int, popupY int, startY int) int {
-	row := 0
-	for i := 0; i < fieldIdx && i < len(p.formFields); i++ {
-		row += p.fieldHeight(p.formFields[i])
+	// Use rowForField which accounts for spacing between fields
+	logicalRow := p.rowForField(fieldIdx)
+
+	// Check if scrolling is active
+	contentHeight := p.contentHeight()
+	totalFieldRows := p.totalFormRows()
+	totalRows := totalFieldRows + 2 // fields + blank + button row
+	needsScroll := totalRows > contentHeight
+
+	if needsScroll {
+		// In scroll mode: convert logical row to screen row by subtracting scroll offset
+		screenRow := logicalRow - p.formScroll
+		return popupY + 1 + screenRow // +1 for border
 	}
-	return popupY + 1 + startY + row // +1 for border
+
+	// In centered mode
+	return popupY + 1 + startY + logicalRow // +1 for border
 }
 
 // updateColorFromMouse updates a color field based on mouse position.
@@ -1240,6 +1279,7 @@ func (p *PopupPanel) updateColorFromMouse(field *FormField, mouseX, mouseY, valu
 	effectiveRadiusY := hiResRadiusY + 1.0
 	
 	// Calculate clicked position relative to wheel
+	// fieldRowY points to the first row of the color field (which is wheel row 0)
 	clickedCol := mouseX - valueStartX
 	clickedRow := mouseY - fieldRowY
 	
@@ -1498,12 +1538,13 @@ func (p *PopupPanel) handleSelectDropdownKey(msg tea.KeyMsg) tea.Cmd {
 func (p *PopupPanel) handleMouse(msg tea.MouseMsg) tea.Cmd {
 	switch p.mode {
 	case PopupModeDisplay:
-		switch msg.Type {
-		case tea.MouseWheelUp:
+		// Handle scroll wheel without checking Action
+		switch msg.Button {
+		case tea.MouseButtonWheelUp:
 			if p.scroll > 0 {
 				p.scroll--
 			}
-		case tea.MouseWheelDown:
+		case tea.MouseButtonWheelDown:
 			if p.scroll < p.maxScroll() {
 				p.scroll++
 			}
@@ -1553,28 +1594,31 @@ func (p *PopupPanel) handleMouse(msg tea.MouseMsg) tea.Cmd {
 		popupX := (p.screenWidth - p.width()) / 2
 		popupY := (p.screenHeight - p.height()) / 2
 
-		switch msg.Type {
-		case tea.MouseWheelUp:
+		// Handle scroll wheel without checking Action
+		switch msg.Button {
+		case tea.MouseButtonWheelUp:
 			if p.selectCursor > 0 {
 				p.selectCursor--
 			}
-		case tea.MouseWheelDown:
+		case tea.MouseButtonWheelDown:
 			if p.selectCursor < len(p.selectOptions)-1 {
 				p.selectCursor++
 			}
-		case tea.MouseLeft:
-			// Check if click is on an option
-			contentStartY := popupY + 1 // +1 for top border
-			for i := range p.selectOptions {
-				optionY := contentStartY + i
-				if msg.Y == optionY && msg.X > popupX && msg.X < popupX+p.width()-1 {
-					p.selectCursor = i
-					p.close(PopupResult{
-						Confirmed: true,
-						Value:     p.selectOptions[i].Value,
-						Index:     i,
-					})
-					return nil
+		case tea.MouseButtonLeft:
+			if msg.Action == tea.MouseActionPress {
+				// Check if click is on an option
+				contentStartY := popupY + 1 // +1 for top border
+				for i := range p.selectOptions {
+					optionY := contentStartY + i
+					if msg.Y == optionY && msg.X > popupX && msg.X < popupX+p.width()-1 {
+						p.selectCursor = i
+						p.close(PopupResult{
+							Confirmed: true,
+							Value:     p.selectOptions[i].Value,
+							Index:     i,
+						})
+						return nil
+					}
 				}
 			}
 		}
@@ -1584,18 +1628,46 @@ func (p *PopupPanel) handleMouse(msg tea.MouseMsg) tea.Cmd {
 		popupX := (p.screenWidth - p.width()) / 2
 		popupY := (p.screenHeight - p.height()) / 2
 
-		// Calculate layout
+		// Calculate layout - must match renderFormContent logic
 		contentHeight := p.contentHeight()
 		totalFieldRows := p.totalFormRows()
 		totalRows := totalFieldRows + 2 // fields + blank + button row
-		startY := (contentHeight - totalRows) / 2
-		if startY < 0 {
+		needsScroll := totalRows > contentHeight
+
+		var startY int
+		if needsScroll {
 			startY = 0
+		} else {
+			startY = (contentHeight - totalRows) / 2
+			if startY < 0 {
+				startY = 0
+			}
 		}
 
 		contentStartX := popupX + 2 // border + padding
 		labelWidth := 18
 		valueStartX := contentStartX + labelWidth
+
+		// Handle scroll wheel first - scroll form content if scrolling is needed
+		// Note: Don't check msg.Action for scroll wheel - just check msg.Button
+		if msg.Button == tea.MouseButtonWheelUp || msg.Button == tea.MouseButtonWheelDown {
+			maxScroll := p.formMaxScroll(contentHeight)
+			if maxScroll > 0 {
+				// Scroll the form
+				if msg.Button == tea.MouseButtonWheelUp {
+					p.formScroll -= 3
+					if p.formScroll < 0 {
+						p.formScroll = 0
+					}
+				} else {
+					p.formScroll += 3
+					if p.formScroll > maxScroll {
+						p.formScroll = maxScroll
+					}
+				}
+				return nil
+			}
+		}
 
 		// Handle dropdown mouse events first
 		if p.selectDropdownOpen {
@@ -1639,11 +1711,23 @@ func (p *PopupPanel) handleMouse(msg tea.MouseMsg) tea.Cmd {
 
 		// Handle left click (new click, no capture active)
 		if msg.Type == tea.MouseLeft {
-			buttonRowIdx := totalFieldRows + 1
-			buttonRowY := popupY + 1 + startY + buttonRowIdx // +1 for top border
+			// Calculate button row position - in scroll mode, check if visible
+			buttonLogicalRow := totalFieldRows + 1
+			var buttonRowY int
+			if needsScroll {
+				// Button row is at logical position, convert to screen position
+				buttonScreenRow := buttonLogicalRow - p.formScroll
+				if buttonScreenRow >= 0 && buttonScreenRow < contentHeight {
+					buttonRowY = popupY + 1 + buttonScreenRow // +1 for top border
+				} else {
+					buttonRowY = -1 // Button not visible
+				}
+			} else {
+				buttonRowY = popupY + 1 + startY + buttonLogicalRow // +1 for top border
+			}
 
 			// Check if click is on button row
-			if msg.Y == buttonRowY {
+			if buttonRowY >= 0 && msg.Y == buttonRowY {
 				contentWidth := p.contentWidth()
 				saveBtn := " Save "
 				cancelBtn := " Cancel "
@@ -1672,15 +1756,20 @@ func (p *PopupPanel) handleMouse(msg tea.MouseMsg) tea.Cmd {
 			}
 
 			// Check if click is on a form field row
-			for visualRow := 0; visualRow < totalFieldRows; visualRow++ {
-				fieldY := popupY + 1 + startY + visualRow // +1 for top border
-				if msg.Y == fieldY && msg.X > popupX && msg.X < popupX+p.width()-1 {
-					// Map visual row to field index and subrow
-					fieldIdx, subRow := p.fieldAtRow(visualRow)
-					if fieldIdx < 0 || fieldIdx >= len(p.formFields) {
-						continue
-					}
+			// Calculate the logical row from the screen position
+			screenRowInContent := msg.Y - popupY - 1 - startY // -1 for top border
+			var logicalRow int
+			if needsScroll {
+				logicalRow = screenRowInContent + p.formScroll
+			} else {
+				logicalRow = screenRowInContent
+			}
 
+			// Check if this is a valid field row
+			if logicalRow >= 0 && logicalRow < totalFieldRows && msg.X > popupX && msg.X < popupX+p.width()-1 {
+				// Map logical row to field index and subrow
+				fieldIdx, subRow := p.fieldAtRow(logicalRow)
+				if fieldIdx >= 0 && fieldIdx < len(p.formFields) {
 					wasAlreadySelected := p.formCursor == fieldIdx && !p.formOnButtons
 
 					// Select this field
@@ -1715,11 +1804,18 @@ func (p *PopupPanel) handleMouse(msg tea.MouseMsg) tea.Cmd {
 						radiusY := 4
 						radiusX := 9
 						centerRow := radiusY
+						diameterY := radiusY*2 + 1
 						effectiveRadiusY := float64(radiusY) + 0.5
 						
 						// Calculate clicked position
+						// For color fields, subRow 0 is wheel row 0 (no separate label)
 						clickedCol := msg.X - valueStartX
 						clickedRow := subRow
+						
+						// Skip if click is on label row or outside wheel bounds
+						if clickedRow < 0 || clickedRow >= diameterY {
+							break
+						}
 						
 						// Check if click is within the ellipse
 						dy := float64(clickedRow - centerRow)
@@ -1875,88 +1971,6 @@ func (p *PopupPanel) handleMouse(msg tea.MouseMsg) tea.Cmd {
 			}
 		}
 
-		// Handle scroll wheel on focused field
-		if (msg.Type == tea.MouseWheelUp || msg.Type == tea.MouseWheelDown) && !p.formOnButtons {
-			if p.formCursor >= 0 && p.formCursor < len(p.formFields) {
-				field := &p.formFields[p.formCursor]
-				delta := 1
-				if msg.Type == tea.MouseWheelDown {
-					delta = -1
-				}
-
-				switch field.Type {
-				case FormFieldSlider, FormFieldBrightness:
-					step := max(1, (field.Max-field.Min)/20)
-					field.Value += delta * step
-					if field.Value < field.Min {
-						field.Value = field.Min
-					}
-					if field.Value > field.Max {
-						field.Value = field.Max
-					}
-					p.notifyLiveChange(*field)
-					return nil
-
-				case FormFieldColorTemp:
-					// Inverted: scroll up moves toward cool (right), scroll down moves toward warm (left)
-					step := max(1, (field.Max-field.Min)/20)
-					field.Value -= delta * step // Inverted direction
-					if field.Value < field.Min {
-						field.Value = field.Min
-					}
-					if field.Value > field.Max {
-						field.Value = field.Max
-					}
-					p.notifyLiveChange(*field)
-					return nil
-
-				case FormFieldSelect, FormFieldRadio:
-					if len(field.Options) > 0 {
-						currentIdx := 0
-						for idx, opt := range field.Options {
-							if opt.Value == field.Value {
-								currentIdx = idx
-								break
-							}
-						}
-						newIdx := currentIdx - delta
-						if newIdx < 0 {
-							newIdx = len(field.Options) - 1
-						} else if newIdx >= len(field.Options) {
-							newIdx = 0
-						}
-						field.Value = field.Options[newIdx].Value
-						p.notifyLiveChange(*field)
-						return nil
-					}
-
-				case FormFieldColor:
-					// Adjust hue or saturation based on mode
-					step := 0.02
-					if field.ColorMode == 0 {
-						// Adjust hue (X coordinate)
-						field.ColorX += float64(delta) * step
-						if field.ColorX < 0 {
-							field.ColorX = 0
-						}
-						if field.ColorX > 1 {
-							field.ColorX = 1
-						}
-					} else {
-						// Adjust saturation (Y coordinate)
-						field.ColorY += float64(delta) * step
-						if field.ColorY < 0 {
-							field.ColorY = 0
-						}
-						if field.ColorY > 1 {
-							field.ColorY = 1
-						}
-					}
-					p.notifyLiveChange(*field)
-					return nil
-				}
-			}
-		}
 	}
 	return nil
 }
@@ -2015,10 +2029,15 @@ func (p *PopupPanel) View() string {
 	// Wrap content lines with borders
 	var wrappedLines []string
 	for i, line := range contentLines {
-		// Right border - scroll indicator for display mode
+		// Right border - scroll indicator for display and form modes
 		rightBorderStr := ui.Colorize(vert, borderFg)
 		if p.mode == PopupModeDisplay && p.maxScroll() > 0 {
 			thumbPos, thumbSize := p.scrollThumb(len(contentLines))
+			if i >= thumbPos && i < thumbPos+thumbSize {
+				rightBorderStr = ui.Colorize("┃", borderFg)
+			}
+		} else if p.mode == PopupModeForm && p.formMaxScroll(contentHeight) > 0 {
+			thumbPos, thumbSize := p.formScrollThumb(contentHeight)
 			if i >= thumbPos && i < thumbPos+thumbSize {
 				rightBorderStr = ui.Colorize("┃", borderFg)
 			}
@@ -2203,6 +2222,10 @@ func (p *PopupPanel) rowForField(fieldIdx int) int {
 	row := 0
 	for i := 0; i < fieldIdx && i < len(p.formFields); i++ {
 		row += p.fieldHeight(p.formFields[i])
+		// Account for blank line after each field (except last)
+		if i < len(p.formFields)-1 {
+			row++
+		}
 	}
 	return row
 }
@@ -2213,16 +2236,47 @@ func (p *PopupPanel) renderFormContent(width, height int) []string {
 	// Calculate layout: fields + blank line + buttons
 	totalFieldRows := p.totalFormRows()
 	totalRows := totalFieldRows + 2 // fields + blank + button row
-	startY := (height - totalRows) / 2
-	if startY < 0 {
+
+	// Determine if scrolling is needed
+	needsScroll := totalRows > height
+
+	var startY int
+	var viewOffset int
+	if needsScroll {
+		// Scrolling mode: content starts at row 0, apply scroll offset
 		startY = 0
+		viewOffset = p.formScroll
+
+		// Clamp scroll (don't modify p.formScroll during render)
+		maxScroll := totalRows - height
+		if viewOffset > maxScroll {
+			viewOffset = maxScroll
+		}
+		if viewOffset < 0 {
+			viewOffset = 0
+		}
+	} else {
+		// Centered mode (no scroll needed)
+		startY = (height - totalRows) / 2
+		if startY < 0 {
+			startY = 0
+		}
+		viewOffset = 0
 	}
 
 	accentStyle := lipgloss.NewStyle().Foreground(p.styles.Theme.Accent).Bold(true)
 	mutedStyle := lipgloss.NewStyle().Foreground(p.styles.Theme.Muted)
 
 	for i := 0; i < height; i++ {
-		rowIdx := i - startY
+		// Calculate which logical row this screen line corresponds to
+		// In scroll mode: logical row = screen line + viewOffset
+		// In centered mode: logical row = screen line - startY
+		var rowIdx int
+		if needsScroll {
+			rowIdx = i + viewOffset
+		} else {
+			rowIdx = i - startY
+		}
 
 		if rowIdx >= 0 && rowIdx < totalFieldRows {
 			// Find which field this row belongs to
@@ -2246,10 +2300,18 @@ func (p *PopupPanel) renderFormContent(width, height int) []string {
 			var valueStr string
 			switch field.Type {
 			case FormFieldToggle:
+				onLabel := field.ToggleOnLabel
+				offLabel := field.ToggleOffLabel
+				if onLabel == "" {
+					onLabel = "On"
+				}
+				if offLabel == "" {
+					offLabel = "Off"
+				}
 				if field.Value != 0 {
-					valueStr = "[●] On "
+					valueStr = "[●] " + onLabel
 				} else {
-					valueStr = "[ ] Off"
+					valueStr = "[ ] " + offLabel
 				}
 			case FormFieldSlider:
 				// Render a slider: [====●----] 3/5
@@ -2769,41 +2831,44 @@ func (p *PopupPanel) handleDropdownMouse(msg tea.MouseMsg, popupX, popupY, start
 		maxVisible = numOptions
 	}
 
-	switch msg.Type {
-	case tea.MouseWheelUp:
+	// Handle scroll wheel without checking Action
+	switch msg.Button {
+	case tea.MouseButtonWheelUp:
 		if p.selectDropdownCursor > 0 {
 			p.selectDropdownCursor--
 			p.ensureDropdownCursorVisible()
 		}
 		return func() tea.Msg { return nil } // Return non-nil to indicate handled
 
-	case tea.MouseWheelDown:
+	case tea.MouseButtonWheelDown:
 		if p.selectDropdownCursor < numOptions-1 {
 			p.selectDropdownCursor++
 			p.ensureDropdownCursorVisible()
 		}
 		return func() tea.Msg { return nil }
 
-	case tea.MouseLeft:
-		// Check if click is on a dropdown option
-		for i := 0; i < maxVisible; i++ {
-			optIdx := p.selectDropdownScroll + i
-			if optIdx >= numOptions {
-				break
+	case tea.MouseButtonLeft:
+		if msg.Action == tea.MouseActionPress {
+			// Check if click is on a dropdown option
+			for i := 0; i < maxVisible; i++ {
+				optIdx := p.selectDropdownScroll + i
+				if optIdx >= numOptions {
+					break
+				}
+				optionY := dropdownStartY + i
+				if msg.Y == optionY && msg.X >= valueStartX {
+					// Select this option
+					field.Value = field.Options[optIdx].Value
+					p.notifyLiveChange(*field)
+					p.closeSelectDropdown()
+					return func() tea.Msg { return nil }
+				}
 			}
-			optionY := dropdownStartY + i
-			if msg.Y == optionY && msg.X >= valueStartX {
-				// Select this option
-				field.Value = field.Options[optIdx].Value
-				p.notifyLiveChange(*field)
-				p.closeSelectDropdown()
-				return func() tea.Msg { return nil }
-			}
-		}
 
-		// Click outside dropdown - close it
-		p.closeSelectDropdown()
-		return func() tea.Msg { return nil }
+			// Click outside dropdown - close it
+			p.closeSelectDropdown()
+			return func() tea.Msg { return nil }
+		}
 	}
 
 	return nil
@@ -3032,6 +3097,69 @@ func (p *PopupPanel) scrollThumb(viewHeight int) (pos int, size int) {
 	}
 	return pos, size
 }
+
+// formMaxScroll returns the maximum scroll offset for form mode.
+func (p *PopupPanel) formMaxScroll(viewHeight int) int {
+	totalRows := p.totalFormRows() + 2 // fields + blank + button row
+	if totalRows <= viewHeight {
+		return 0
+	}
+	return totalRows - viewHeight
+}
+
+// ensureFocusedFieldVisible adjusts formScroll to keep the focused field in view.
+func (p *PopupPanel) ensureFocusedFieldVisible() {
+	height := p.contentHeight()
+	totalRows := p.totalFormRows() + 2 // fields + blank + button row
+	if totalRows <= height {
+		return // No scrolling needed
+	}
+
+	maxScroll := totalRows - height
+
+	if !p.formOnButtons && p.formCursor < len(p.formFields) {
+		focusedFieldRow := p.rowForField(p.formCursor)
+		focusedFieldHeight := p.fieldHeight(p.formFields[p.formCursor])
+		// Scroll up if needed
+		if focusedFieldRow < p.formScroll {
+			p.formScroll = focusedFieldRow
+		}
+		// Scroll down if needed
+		if focusedFieldRow+focusedFieldHeight > p.formScroll+height {
+			p.formScroll = focusedFieldRow + focusedFieldHeight - height
+		}
+	} else if p.formOnButtons {
+		// Buttons are focused, ensure button row is visible
+		buttonRow := p.totalFormRows() + 1
+		if buttonRow >= p.formScroll+height {
+			p.formScroll = buttonRow - height + 1
+		}
+	}
+
+	// Clamp scroll
+	if p.formScroll > maxScroll {
+		p.formScroll = maxScroll
+	}
+	if p.formScroll < 0 {
+		p.formScroll = 0
+	}
+}
+
+// formScrollThumb returns the position and size of the scroll thumb for form mode.
+func (p *PopupPanel) formScrollThumb(viewHeight int) (pos int, size int) {
+	totalRows := p.totalFormRows() + 2 // fields + blank + button row
+	if totalRows <= viewHeight {
+		return 0, viewHeight
+	}
+	size = max(1, viewHeight*viewHeight/totalRows)
+	scrollRange := totalRows - viewHeight
+	posRange := viewHeight - size
+	if scrollRange > 0 {
+		pos = p.formScroll * posRange / scrollRange
+	}
+	return pos, size
+}
+
 func (p *PopupPanel) padRight(s string, width int) string {
 	sLen := lipgloss.Width(s)
 	if sLen >= width {

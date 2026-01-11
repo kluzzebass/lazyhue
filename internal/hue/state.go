@@ -54,6 +54,95 @@ func EntertainmentName(cfg EntertainmentConfiguration, fallback string) string {
 	return fallback
 }
 
+// EffectDisplayNames maps Hue API effect names to user-friendly display names.
+var EffectDisplayNames = map[string]string{
+	"no_effect":  "None",
+	"candle":     "Candle",
+	"fire":       "Fire",
+	"prism":      "Prism",
+	"sparkle":    "Sparkle",
+	"opal":       "Opal",
+	"glisten":    "Glisten",
+	"cosmos":     "Cosmos",
+	"sunbeam":    "Sunbeam",
+	"enchant":    "Enchant",
+	"underwater": "Underwater",
+}
+
+// EffectDisplayName returns the user-friendly display name for an effect, or the raw name if unknown.
+func EffectDisplayName(effect string) string {
+	if name, ok := EffectDisplayNames[effect]; ok {
+		return name
+	}
+	return effect
+}
+
+// RoomArchetypeDisplayNames maps Hue API room archetype names to user-friendly display names.
+var RoomArchetypeDisplayNames = map[string]string{
+	"attic":        "Attic",
+	"balcony":      "Balcony",
+	"barbecue":     "Barbecue",
+	"bathroom":     "Bathroom",
+	"bedroom":      "Bedroom",
+	"carport":      "Carport",
+	"closet":       "Closet",
+	"computer":     "Computer",
+	"dining":       "Dining Room",
+	"downstairs":   "Downstairs",
+	"driveway":     "Driveway",
+	"front_door":   "Front Door",
+	"garage":       "Garage",
+	"garden":       "Garden",
+	"guest_room":   "Guest Room",
+	"gym":          "Gym",
+	"hallway":      "Hallway",
+	"home":         "Home",
+	"kids_bedroom": "Kids Bedroom",
+	"kitchen":      "Kitchen",
+	"laundry_room": "Laundry Room",
+	"living_room":  "Living Room",
+	"lounge":       "Lounge",
+	"man_cave":     "Man Cave",
+	"music":        "Music Room",
+	"nursery":      "Nursery",
+	"office":       "Office",
+	"other":        "Other",
+	"pool":         "Pool",
+	"porch":        "Porch",
+	"reading":      "Reading Room",
+	"recreation":   "Recreation",
+	"staircase":    "Staircase",
+	"storage":      "Storage",
+	"studio":       "Studio",
+	"terrace":      "Terrace",
+	"toilet":       "Toilet",
+	"top_floor":    "Top Floor",
+	"tv":           "TV Room",
+	"upstairs":     "Upstairs",
+}
+
+// RoomArchetypeDisplayName returns the user-friendly display name for a room archetype.
+func RoomArchetypeDisplayName(archetype string) string {
+	if name, ok := RoomArchetypeDisplayNames[archetype]; ok {
+		return name
+	}
+	return archetype
+}
+
+// RoomArchetypeList returns a sorted list of all room archetypes for use in selection UIs.
+func RoomArchetypeList() []string {
+	return []string{
+		"living_room", "bedroom", "bathroom", "kitchen", "dining",
+		"office", "hallway", "staircase", "closet", "storage",
+		"laundry_room", "guest_room", "kids_bedroom", "nursery",
+		"lounge", "tv", "reading", "music", "computer", "gym",
+		"recreation", "man_cave", "studio", "garage", "carport",
+		"garden", "terrace", "balcony", "porch", "pool", "barbecue",
+		"driveway", "front_door", "attic", "top_floor", "upstairs",
+		"downstairs", "home", "other",
+	}
+}
+
 // BridgeState holds cached entities from a bridge using hueclient types.
 // Relationships are stored as IDs and resolved on-demand.
 type BridgeState struct {
@@ -143,6 +232,17 @@ func (s *BridgeState) GetDevice(id string) (hueclient.DeviceGet, bool) {
 	defer s.mu.RUnlock()
 	d, ok := s.Devices[id]
 	return d, ok
+}
+
+// GetAllDevices returns a copy of all devices.
+func (s *BridgeState) GetAllDevices() []hueclient.DeviceGet {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	devices := make([]hueclient.DeviceGet, 0, len(s.Devices))
+	for _, d := range s.Devices {
+		devices = append(devices, d)
+	}
+	return devices
 }
 
 // GetLightName returns the user-assigned name for a light.
@@ -1085,6 +1185,20 @@ func (s *BridgeState) SetLightColorTemperature(id string, mirek int) {
 	if light, ok := s.Lights[id]; ok {
 		if light.ColorTemperature != nil {
 			light.ColorTemperature.Mirek = &mirek
+			s.Lights[id] = light
+		}
+	}
+}
+
+// SetLightEffect optimistically updates a light's effect in the cache.
+func (s *BridgeState) SetLightEffect(id string, effect hueclient.SupportedEffects) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if light, ok := s.Lights[id]; ok {
+		if light.Effects != nil {
+			light.Effects.Effect = &effect
+			light.Effects.Status = &effect
 			s.Lights[id] = light
 		}
 	}

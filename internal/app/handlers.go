@@ -64,6 +64,17 @@ func (m *Model) handleKey(msg tea.KeyMsg) tea.Cmd {
 		}
 	}
 
+	// IMPORTANT: For detail panel, let the form handle navigation keys
+	// before global bindings consume them. This is handled in Update(),
+	// so we skip global bindings for navigation keys when detail is focused.
+	if m.focusedOnDetail() {
+		// Let navigation keys pass through to be handled by updateFocusedPanel
+		switch keyStr {
+		case "up", "down", "left", "right", "j", "k", "h", "l", "enter", " ", "esc":
+			return nil // Will be handled by updateFocusedPanel in Update()
+		}
+	}
+
 	// Check global bindings
 	for _, b := range m.globalBindings {
 		if b.Matches(keyStr) && b.Action != ui.ActionNone {
@@ -142,6 +153,18 @@ func (m *Model) handleMouse(msg tea.MouseMsg) tea.Cmd {
 				m.lastFocusIndex = m.focusIndex
 			}
 			m.focusIndex = -1
+			// Pass click to detail panel with relative coordinates
+			relMsg := tea.MouseMsg{
+				X:      relX,
+				Y:      relY,
+				Type:   tea.MouseLeft,
+				Button: msg.Button,
+				Action: msg.Action,
+			}
+			_, cmd := m.detailPanel.Update(relMsg)
+			if cmd != nil {
+				return cmd
+			}
 		case PanelIDLog:
 			if m.logPanelVisible {
 				if m.focusIndex >= 0 {
@@ -169,11 +192,31 @@ func (m *Model) handleMouse(msg tea.MouseMsg) tea.Cmd {
 		m.syncSelectionFromFocusedPanel()
 	}
 
+	// Handle mouse motion/drag for detail panel
+	if msg.Action == tea.MouseActionMotion && leaf.ID == PanelIDDetail {
+		relMsg := tea.MouseMsg{
+			X:      relX,
+			Y:      relY,
+			Type:   tea.MouseMotion,
+			Button: msg.Button,
+			Action: msg.Action,
+		}
+		m.detailPanel.Update(relMsg)
+	}
+
 	// Pass scroll events to panel under cursor
 	if msg.Button == tea.MouseButtonWheelUp || msg.Button == tea.MouseButtonWheelDown {
 		switch leaf.ID {
 		case PanelIDDetail:
-			m.detailPanel.Update(msg)
+			// Pass scroll with relative coordinates
+			relMsg := tea.MouseMsg{
+				X:      relX,
+				Y:      relY,
+				Type:   msg.Type,
+				Button: msg.Button,
+				Action: msg.Action,
+			}
+			m.detailPanel.Update(relMsg)
 		case PanelIDLog:
 			m.logPanel.Update(msg)
 		case PanelIDBridges:
@@ -256,6 +299,80 @@ func (m *Model) handlePairingSuccess(msg PairingSuccessMsg) {
 	})
 	_ = m.credentials.Save()
 	m.setStatusTemporary("Pairing successful!", false, 3*time.Second)
+}
+
+// handleDetailFieldSave handles saves from the details panel's editable fields.
+func (m *Model) handleDetailFieldSave(entityType panels.EntityType, entityID string, fieldID string, value interface{}) {
+	bridge := m.manager.GetActiveBridge()
+	if bridge == nil {
+		m.setStatus("No active bridge", true)
+		return
+	}
+
+	var err error
+
+	switch entityType {
+	case panels.EntityLight:
+		switch fieldID {
+		case "on":
+			if v, ok := value.(int); ok {
+				err = bridge.SetLightOn(entityID, v != 0)
+			}
+		case "brightness":
+			if v, ok := value.(int); ok {
+				err = bridge.SetLightBrightness(entityID, float64(v))
+			}
+		case "colortemp":
+			if v, ok := value.(int); ok {
+				err = bridge.SetLightColorTemperature(entityID, v)
+			}
+		case "color":
+			if v, ok := value.([2]float64); ok {
+				err = bridge.SetLightColor(entityID, v[0], v[1])
+			}
+		case "effect":
+			if v, ok := value.(int); ok {
+				// Get the effect name from the options
+				if light, ok := bridge.GetState().GetLight(entityID); ok {
+					if light.Effects != nil && light.Effects.EffectValues != nil && v < len(*light.Effects.EffectValues) {
+						effect := (*light.Effects.EffectValues)[v]
+						err = bridge.SetLightEffect(entityID, effect)
+					}
+				}
+			}
+		}
+
+	case panels.EntityRoom:
+		switch fieldID {
+		case "archetype":
+			if v, ok := value.(int); ok {
+				archetypes := hue.RoomArchetypeList()
+				if v < len(archetypes) {
+					archetype := hueclient.RoomArchetype(archetypes[v])
+					err = bridge.SetRoomArchetype(entityID, archetype)
+				}
+			}
+		}
+
+	case panels.EntityZone:
+		switch fieldID {
+		case "archetype":
+			if v, ok := value.(int); ok {
+				archetypes := hue.RoomArchetypeList()
+				if v < len(archetypes) {
+					archetype := hueclient.RoomArchetype(archetypes[v])
+					err = bridge.SetRoomArchetype(entityID, archetype)
+				}
+			}
+		}
+	}
+
+	if err != nil {
+		m.setStatus(fmt.Sprintf("Failed to update: %v", err), true)
+	} else {
+		// Refresh the display
+		m.refreshHierarchyPanel()
+	}
 }
 
 func (m *Model) startBridgePairing() tea.Cmd {
@@ -576,6 +693,32 @@ func (m *Model) showLightEditPopup() tea.Cmd {
 		})
 	}
 
+	// Effects (if supported)
+	if light.Effects != nil && light.Effects.EffectValues != nil && len(*light.Effects.EffectValues) > 0 {
+		// Build options from available effects
+		effectOptions := []panels.FormSelectOption{}
+		currentEffect := 0
+
+		for i, effect := range *light.Effects.EffectValues {
+			effectOptions = append(effectOptions, panels.FormSelectOption{
+				Label: hue.EffectDisplayName(string(effect)),
+				Value: i,
+			})
+			// Check if this is the current effect
+			if light.Effects.Status != nil && *light.Effects.Status == effect {
+				currentEffect = i
+			}
+		}
+
+		fields = append(fields, panels.FormField{
+			ID:      "effect",
+			Label:   "Effect",
+			Type:    panels.FormFieldSelect,
+			Value:   currentEffect,
+			Options: effectOptions,
+		})
+	}
+
 	// Calculate popup size based on fields
 	height := 0.30 + float64(len(fields))*0.06
 	if height > 0.7 {
@@ -616,6 +759,16 @@ func (m *Model) showLightEditPopup() tea.Cmd {
 				}
 				m.popupPanel.UpdateFormField("color", 0, x, y)
 			}
+
+			// Update effect
+			if currentLight.Effects != nil && currentLight.Effects.Status != nil && currentLight.Effects.EffectValues != nil {
+				for i, effect := range *currentLight.Effects.EffectValues {
+					if effect == *currentLight.Effects.Status {
+						m.popupPanel.UpdateFormField("effect", i, 0, 0)
+						break
+					}
+				}
+			}
 		}
 	}
 
@@ -647,6 +800,19 @@ func (m *Model) showLightEditPopup() tea.Cmd {
 			case "color":
 				if err := bridge.SetLightColor(lightID, field.ColorX, field.ColorY); err != nil {
 					m.setStatus("Failed to set color: "+err.Error(), true)
+				}
+			case "effect":
+				// Get the effect from the options based on the Value (index)
+				if currentLight, ok := bridge.GetState().GetLight(lightID); ok {
+					if currentLight.Effects != nil && currentLight.Effects.EffectValues != nil {
+						effects := *currentLight.Effects.EffectValues
+						if field.Value >= 0 && field.Value < len(effects) {
+							effect := effects[field.Value]
+							if err := bridge.SetLightEffect(lightID, effect); err != nil {
+								m.setStatus("Failed to set effect: "+err.Error(), true)
+							}
+						}
+					}
 				}
 			}
 			// Live update the UI panels
@@ -943,4 +1109,463 @@ func startBlinkTicker() tea.Cmd {
 	return tea.Tick(400*time.Millisecond, func(t time.Time) tea.Msg {
 		return blinkTickMsg{}
 	})
+}
+
+// showCreateRoomPopup shows a form to create a new room.
+func (m *Model) showCreateRoomPopup() tea.Cmd {
+	bridge := m.manager.GetActiveBridge()
+	if bridge == nil {
+		m.setStatusTemporary("No active bridge", false, 3*time.Second)
+		return nil
+	}
+
+	// Build archetype options
+	archetypeOptions := []panels.FormSelectOption{}
+	for i, archetype := range hue.RoomArchetypeList() {
+		archetypeOptions = append(archetypeOptions, panels.FormSelectOption{
+			Label: hue.RoomArchetypeDisplayName(archetype),
+			Value: i,
+		})
+	}
+
+	fields := []panels.FormField{
+		{
+			ID:        "name",
+			Label:     "Name",
+			Type:      panels.FormFieldText,
+			TextValue: "",
+		},
+		{
+			ID:      "archetype",
+			Label:   "Type",
+			Type:    panels.FormFieldSelect,
+			Value:   0, // Default to first (living_room)
+			Options: archetypeOptions,
+		},
+	}
+
+	m.popupPanel.SetRatio(0.5, 0.35)
+	m.popupPanel.ShowForm("Create Room", fields,
+		func(result panels.PopupResult, finalFields []panels.FormField) {
+			if !result.Confirmed {
+				return
+			}
+
+			// Extract values
+			name := ""
+			archetypeIdx := 0
+			for _, f := range finalFields {
+				switch f.ID {
+				case "name":
+					name = f.TextValue
+				case "archetype":
+					archetypeIdx = f.Value
+				}
+			}
+
+			if name == "" {
+				m.setStatusTemporary("Room name is required", true, 3*time.Second)
+				return
+			}
+
+			// Get archetype from index
+			archetypes := hue.RoomArchetypeList()
+			if archetypeIdx < 0 || archetypeIdx >= len(archetypes) {
+				archetypeIdx = 0
+			}
+			archetype := hueclient.RoomArchetype(archetypes[archetypeIdx])
+
+			// Create room with no devices initially
+			if err := bridge.CreateRoom(name, archetype, nil); err != nil {
+				m.setStatus("Failed to create room: "+err.Error(), true)
+				return
+			}
+
+			m.setStatusTemporary("Created room: "+name, false, 3*time.Second)
+			// Sync to get the new room
+			go func() {
+				bridge.SyncRooms(context.Background())
+			}()
+		},
+	)
+
+	return startBlinkTicker()
+}
+
+// showCreateZonePopup shows a form to create a new zone.
+func (m *Model) showCreateZonePopup() tea.Cmd {
+	bridge := m.manager.GetActiveBridge()
+	if bridge == nil {
+		m.setStatusTemporary("No active bridge", false, 3*time.Second)
+		return nil
+	}
+
+	// Build archetype options
+	archetypeOptions := []panels.FormSelectOption{}
+	for i, archetype := range hue.RoomArchetypeList() {
+		archetypeOptions = append(archetypeOptions, panels.FormSelectOption{
+			Label: hue.RoomArchetypeDisplayName(archetype),
+			Value: i,
+		})
+	}
+
+	fields := []panels.FormField{
+		{
+			ID:        "name",
+			Label:     "Name",
+			Type:      panels.FormFieldText,
+			TextValue: "",
+		},
+		{
+			ID:      "archetype",
+			Label:   "Type",
+			Type:    panels.FormFieldSelect,
+			Value:   0,
+			Options: archetypeOptions,
+		},
+	}
+
+	m.popupPanel.SetRatio(0.5, 0.35)
+	m.popupPanel.ShowForm("Create Zone", fields,
+		func(result panels.PopupResult, finalFields []panels.FormField) {
+			if !result.Confirmed {
+				return
+			}
+
+			// Extract values
+			name := ""
+			archetypeIdx := 0
+			for _, f := range finalFields {
+				switch f.ID {
+				case "name":
+					name = f.TextValue
+				case "archetype":
+					archetypeIdx = f.Value
+				}
+			}
+
+			if name == "" {
+				m.setStatusTemporary("Zone name is required", true, 3*time.Second)
+				return
+			}
+
+			// Get archetype from index
+			archetypes := hue.RoomArchetypeList()
+			if archetypeIdx < 0 || archetypeIdx >= len(archetypes) {
+				archetypeIdx = 0
+			}
+			archetype := hueclient.RoomArchetype(archetypes[archetypeIdx])
+
+			// Create zone with no services initially
+			if err := bridge.CreateZone(name, archetype, nil); err != nil {
+				m.setStatus("Failed to create zone: "+err.Error(), true)
+				return
+			}
+
+			m.setStatusTemporary("Created zone: "+name, false, 3*time.Second)
+			// Sync to get the new zone
+			go func() {
+				bridge.SyncZones(context.Background())
+			}()
+		},
+	)
+
+	return startBlinkTicker()
+}
+
+// showDeleteConfirmation shows a confirmation dialog for deleting the selected entity.
+func (m *Model) showDeleteConfirmation() tea.Cmd {
+	bridge := m.manager.GetActiveBridge()
+	if bridge == nil || m.selectedItem == nil {
+		return nil
+	}
+
+	itemID := m.selectedItem.ID
+	itemName := m.selectedItem.Name
+	itemType := m.selectedItem.Type
+
+	// Only rooms and zones can be deleted
+	var entityType string
+	switch itemType {
+	case panels.EntityRoom:
+		entityType = "room"
+	case panels.EntityZone:
+		entityType = "zone"
+	default:
+		m.setStatusTemporary("Cannot delete this item", false, 3*time.Second)
+		return nil
+	}
+
+	m.popupPanel.SetRatio(0.5, 0.25)
+	m.popupPanel.ShowConfirm(
+		"Delete "+entityType,
+		"Are you sure you want to delete \""+itemName+"\"?",
+		func(result panels.PopupResult) {
+			if !result.Confirmed {
+				return
+			}
+
+			var err error
+			switch itemType {
+			case panels.EntityRoom:
+				err = bridge.DeleteRoom(itemID)
+			case panels.EntityZone:
+				err = bridge.DeleteZone(itemID)
+			}
+
+			if err != nil {
+				m.setStatus("Failed to delete: "+err.Error(), true)
+				return
+			}
+
+			m.setStatusTemporary("Deleted: "+itemName, false, 3*time.Second)
+
+			// Sync to update the UI
+			go func() {
+				if itemType == panels.EntityRoom {
+					bridge.SyncRooms(context.Background())
+				} else {
+					bridge.SyncZones(context.Background())
+				}
+			}()
+		},
+	)
+
+	return nil
+}
+
+// showEditRoomPopup shows a form to edit a room's properties.
+func (m *Model) showEditRoomPopup() tea.Cmd {
+	bridge := m.manager.GetActiveBridge()
+	if bridge == nil || m.selectedItem == nil {
+		return nil
+	}
+
+	if m.selectedItem.Type != panels.EntityRoom {
+		return nil
+	}
+
+	room, ok := panels.GetRoomFromItem(*m.selectedItem)
+	if !ok {
+		return nil
+	}
+
+	roomID := m.selectedItem.ID
+	roomName := m.selectedItem.Name
+	state := bridge.GetState()
+
+	// Get current archetype
+	currentArchetype := "other"
+	if room.Metadata != nil && room.Metadata.Archetype != nil {
+		currentArchetype = string(*room.Metadata.Archetype)
+	}
+
+	// Build archetype options and find current index
+	archetypeOptions := []panels.FormSelectOption{}
+	currentArchetypeIdx := 0
+	for i, archetype := range hue.RoomArchetypeList() {
+		archetypeOptions = append(archetypeOptions, panels.FormSelectOption{
+			Label: hue.RoomArchetypeDisplayName(archetype),
+			Value: i,
+		})
+		if archetype == currentArchetype {
+			currentArchetypeIdx = i
+		}
+	}
+
+	// Build set of device IDs currently in this room
+	currentDeviceIDs := make(map[string]bool)
+	if room.Children != nil {
+		for _, child := range *room.Children {
+			if child.Rid != nil && child.Rtype != nil && *child.Rtype == hueclient.ResourceIdentifierRtypeDevice {
+				currentDeviceIDs[*child.Rid] = true
+			}
+		}
+	}
+
+	// Get all devices and create toggle fields for devices in this room
+	allDevices := state.GetAllDevices()
+	fields := []panels.FormField{
+		{
+			ID:      "archetype",
+			Label:   "Type",
+			Type:    panels.FormFieldSelect,
+			Value:   currentArchetypeIdx,
+			Options: archetypeOptions,
+		},
+	}
+
+	// Store device IDs in order for later reference
+	deviceIDs := []string{}
+	for _, device := range allDevices {
+		if device.Id == nil {
+			continue
+		}
+		deviceID := *device.Id
+		deviceName := hue.DeviceName(device, deviceID[:8])
+
+		// Only show devices that are currently in this room
+		if currentDeviceIDs[deviceID] {
+			deviceIDs = append(deviceIDs, deviceID)
+			fields = append(fields, panels.FormField{
+				ID:             "device_" + deviceID,
+				Label:          deviceName,
+				Type:           panels.FormFieldToggle,
+				Value:          1, // 1 = in room (checked), 0 = removed
+				ToggleOnLabel:  "In Room",
+				ToggleOffLabel: "Removed",
+			})
+		}
+	}
+
+	// Calculate popup height based on number of fields
+	height := 0.25 + float64(len(fields))*0.05
+	if height > 0.8 {
+		height = 0.8
+	}
+
+	m.popupPanel.SetRatio(0.55, height)
+	m.popupPanel.ShowForm("Edit Room: "+roomName, fields,
+		func(result panels.PopupResult, finalFields []panels.FormField) {
+			if !result.Confirmed {
+				return
+			}
+
+			// Extract archetype
+			archetypeIdx := 0
+			for _, f := range finalFields {
+				if f.ID == "archetype" {
+					archetypeIdx = f.Value
+					break
+				}
+			}
+
+			// Get archetype from index
+			archetypes := hue.RoomArchetypeList()
+			if archetypeIdx < 0 || archetypeIdx >= len(archetypes) {
+				archetypeIdx = 0
+			}
+			archetype := hueclient.RoomArchetype(archetypes[archetypeIdx])
+
+			// Collect device IDs that should remain in the room (those still toggled on)
+			remainingDeviceIDs := []string{}
+			for _, f := range finalFields {
+				if len(f.ID) > 7 && f.ID[:7] == "device_" {
+					deviceID := f.ID[7:]
+					if f.Value != 0 { // Value 1 = keep in room, Value 0 = removed
+						remainingDeviceIDs = append(remainingDeviceIDs, deviceID)
+					}
+				}
+			}
+
+			// Update archetype
+			if err := bridge.SetRoomArchetype(roomID, archetype); err != nil {
+				m.setStatus("Failed to update room type: "+err.Error(), true)
+				return
+			}
+
+			// Update devices if changed
+			if len(remainingDeviceIDs) != len(currentDeviceIDs) {
+				if err := bridge.UpdateRoomDevices(roomID, remainingDeviceIDs); err != nil {
+					m.setStatus("Failed to update room devices: "+err.Error(), true)
+					return
+				}
+			}
+
+			m.setStatusTemporary("Updated room: "+roomName, false, 3*time.Second)
+			go func() {
+				bridge.SyncRooms(context.Background())
+			}()
+		},
+	)
+
+	return startBlinkTicker()
+}
+
+// showEditZonePopup shows a form to edit a zone's properties.
+func (m *Model) showEditZonePopup() tea.Cmd {
+	bridge := m.manager.GetActiveBridge()
+	if bridge == nil || m.selectedItem == nil {
+		return nil
+	}
+
+	if m.selectedItem.Type != panels.EntityZone {
+		return nil
+	}
+
+	// Get the zone from the state (zones use the same RoomGet type)
+	state := bridge.GetState()
+	zone, ok := state.GetZone(m.selectedItem.ID)
+	if !ok {
+		return nil
+	}
+
+	zoneID := m.selectedItem.ID
+	zoneName := m.selectedItem.Name
+
+	// Get current archetype
+	currentArchetype := "other"
+	if zone.Metadata != nil && zone.Metadata.Archetype != nil {
+		currentArchetype = string(*zone.Metadata.Archetype)
+	}
+
+	// Build archetype options and find current index
+	archetypeOptions := []panels.FormSelectOption{}
+	currentIdx := 0
+	for i, archetype := range hue.RoomArchetypeList() {
+		archetypeOptions = append(archetypeOptions, panels.FormSelectOption{
+			Label: hue.RoomArchetypeDisplayName(archetype),
+			Value: i,
+		})
+		if archetype == currentArchetype {
+			currentIdx = i
+		}
+	}
+
+	fields := []panels.FormField{
+		{
+			ID:      "archetype",
+			Label:   "Type",
+			Type:    panels.FormFieldSelect,
+			Value:   currentIdx,
+			Options: archetypeOptions,
+		},
+	}
+
+	m.popupPanel.SetRatio(0.5, 0.30)
+	m.popupPanel.ShowForm("Edit Zone: "+zoneName, fields,
+		func(result panels.PopupResult, finalFields []panels.FormField) {
+			if !result.Confirmed {
+				return
+			}
+
+			// Extract archetype
+			archetypeIdx := 0
+			for _, f := range finalFields {
+				if f.ID == "archetype" {
+					archetypeIdx = f.Value
+				}
+			}
+
+			// Get archetype from index
+			archetypes := hue.RoomArchetypeList()
+			if archetypeIdx < 0 || archetypeIdx >= len(archetypes) {
+				archetypeIdx = 0
+			}
+			archetype := hueclient.RoomArchetype(archetypes[archetypeIdx])
+
+			// Use SetRoomArchetype for zones too (same API)
+			if err := bridge.SetZoneArchetype(zoneID, archetype); err != nil {
+				m.setStatus("Failed to update zone: "+err.Error(), true)
+				return
+			}
+
+			m.setStatusTemporary("Updated zone: "+zoneName, false, 3*time.Second)
+			go func() {
+				bridge.SyncZones(context.Background())
+			}()
+		},
+	)
+
+	return startBlinkTicker()
 }

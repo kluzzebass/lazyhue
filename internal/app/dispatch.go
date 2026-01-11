@@ -74,13 +74,32 @@ func (m *Model) dispatch(action ui.Action) tea.Cmd {
 			m.syncSelectionFromFocusedPanel()
 		}
 
-	// Device editing
+	// Entity editing
 	case ui.ActionEditDevice:
+		// Dispatch to appropriate edit popup based on selected item type
+		if m.selectedItem != nil {
+			switch m.selectedItem.Type {
+			case panels.EntityRoom:
+				return m.showEditRoomPopup()
+			case panels.EntityZone:
+				return m.showEditZonePopup()
+			default:
+				return m.showDeviceEditPopup()
+			}
+		}
 		return m.showDeviceEditPopup()
 	case ui.ActionRename:
 		return m.showRenamePopup()
 	case ui.ActionTestForm:
 		return m.showTestForm()
+
+	// Room/Zone management
+	case ui.ActionCreateRoom:
+		return m.showCreateRoomPopup()
+	case ui.ActionCreateZone:
+		return m.showCreateZonePopup()
+	case ui.ActionDelete:
+		return m.showDeleteConfirmation()
 
 	// Global
 	case ui.ActionHelp:

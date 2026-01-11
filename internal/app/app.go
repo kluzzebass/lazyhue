@@ -72,8 +72,9 @@ type Model struct {
 	logPanelVisible bool
 
 	// Live editing state
-	editingLightID string                           // Light ID being edited (for live sync)
-	syncLivePopup  func()                           // Callback to sync popup with live state
+	editingLightID    string // Light ID being edited (for live sync)
+	syncLivePopup     func() // Callback to sync popup with live state
+	blinkTimerRunning bool   // Whether the color wheel blink timer is active
 
 	// SSE event channel for receiving bridge events from goroutines
 	eventChan chan BridgeEventMsg
@@ -153,6 +154,9 @@ func New(cfg *config.Config, creds *config.CredentialStore, uiState *config.UISt
 	// Initialize keybindings - handlers are defined here, right next to keys
 	m.initBindings()
 
+	// Set up detail panel field save callback
+	m.detailPanel.SetOnFieldSave(m.handleDetailFieldSave)
+
 	// Restore last selected bridge from saved state (visual selection only)
 	// Active bridge will be set after bridges are loaded in connectFromStoredCredentials
 	if uiState.LastSelectedBridgeID != "" {
@@ -225,6 +229,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if cmd := m.popupPanel.Update(msg); cmd != nil {
 				cmds = append(cmds, cmd)
 			}
+			// Start blink timer for popup if not already running
+			if !m.blinkTimerRunning {
+				m.blinkTimerRunning = true
+				cmds = append(cmds, tea.Tick(400*time.Millisecond, func(t time.Time) tea.Msg {
+					return blinkTickMsg{}
+				}))
+			}
 			return m, tea.Batch(cmds...)
 		}
 
@@ -260,6 +271,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.popupPanel.IsVisible() {
 			if cmd := m.popupPanel.Update(msg); cmd != nil {
 				cmds = append(cmds, cmd)
+			}
+			// Start blink timer for popup if not already running
+			if !m.blinkTimerRunning {
+				m.blinkTimerRunning = true
+				cmds = append(cmds, tea.Tick(400*time.Millisecond, func(t time.Time) tea.Msg {
+					return blinkTickMsg{}
+				}))
 			}
 			return m, tea.Batch(cmds...)
 		}
@@ -416,13 +434,27 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Check if status message should be cleared
 		m.checkStatusExpiry()
 
-	case blinkTickMsg:
-		// Toggle color wheel blink state and continue ticking while popup is visible
-		m.popupPanel.ToggleBlink()
-		if m.popupPanel.IsVisible() {
+	case panels.StartBlinkTickMsg:
+		// Start the blink ticker (from details panel entering color edit mode)
+		if !m.blinkTimerRunning {
+			m.blinkTimerRunning = true
 			cmds = append(cmds, tea.Tick(400*time.Millisecond, func(t time.Time) tea.Msg {
 				return blinkTickMsg{}
 			}))
+		}
+
+	case blinkTickMsg:
+		// Toggle color wheel blink state for popup and details panel
+		m.popupPanel.ToggleBlink()
+		m.detailPanel.ToggleBlink()
+
+		// Continue ticking while popup is visible OR details panel is editing color
+		if m.popupPanel.IsVisible() || m.detailPanel.IsEditingColor() {
+			cmds = append(cmds, tea.Tick(400*time.Millisecond, func(t time.Time) tea.Msg {
+				return blinkTickMsg{}
+			}))
+		} else {
+			m.blinkTimerRunning = false
 		}
 
 	case PairingTickMsg:

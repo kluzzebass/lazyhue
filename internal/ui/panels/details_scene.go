@@ -128,7 +128,7 @@ func (p *DetailsPanel) buildSceneView(sceneAny interface{}) *details.View {
 			if scene.Palette.Effects != nil && len(*scene.Palette.Effects) > 0 {
 				for i, e := range *scene.Palette.Effects {
 					if e.Effect != nil {
-						paletteDetails.AddSub(fmt.Sprintf("Effect %d", i+1), string(*e.Effect))
+						paletteDetails.AddSub(fmt.Sprintf("Effect %d", i+1), hue.EffectDisplayName(string(*e.Effect)))
 					}
 				}
 			}
@@ -176,7 +176,7 @@ func (p *DetailsPanel) buildSceneView(sceneAny interface{}) *details.View {
 					actionFields.AddSub("Color XY", fmt.Sprintf("(%.4f, %.4f)", *action.Action.Color.Xy.X, *action.Action.Color.Xy.Y))
 				}
 				if action.Action.Effects != nil && action.Action.Effects.Effect != nil {
-					actionFields.AddSub("Effect", string(*action.Action.Effects.Effect))
+					actionFields.AddSub("Effect", hue.EffectDisplayName(string(*action.Action.Effects.Effect)))
 				}
 				if action.Action.Gradient != nil && action.Action.Gradient.Points != nil {
 					actionFields.AddSub("Gradient", fmt.Sprintf("%d points", len(*action.Action.Gradient.Points)))

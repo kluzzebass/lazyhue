@@ -122,6 +122,25 @@ func (b *Bridge) SetLightColorTemperature(lightID string, mirek int) error {
 	return err
 }
 
+// SetLightEffect sets a light's effect (candle, fire, prism, etc.).
+func (b *Bridge) SetLightEffect(lightID string, effect hueclient.SupportedEffects) error {
+	b.mu.RLock()
+	client := b.client
+	b.mu.RUnlock()
+
+	if client == nil {
+		return ErrAuthFailed
+	}
+
+	// Optimistic update
+	b.state.SetLightEffect(lightID, effect)
+
+	_, err := client.UpdateLight(context.Background(), lightID, hueclient.UpdateLightJSONRequestBody{
+		Effects: &hueclient.Effects{Effect: &effect},
+	})
+	return err
+}
+
 // ToggleGroupedLight toggles a grouped light (room/zone).
 func (b *Bridge) ToggleGroupedLight(groupedLightID string) error {
 	b.mu.RLock()
@@ -355,6 +374,200 @@ func (b *Bridge) RenameScene(sceneID, newName string) error {
 	_, err := client.UpdateScene(context.Background(), sceneID, hueclient.UpdateSceneJSONRequestBody{
 		Metadata: &hueclient.SceneMetadata{
 			Name: &newName,
+		},
+	})
+	return err
+}
+
+// CreateRoom creates a new room with the given name and archetype.
+// deviceIDs should be the IDs of devices to add to the room.
+func (b *Bridge) CreateRoom(name string, archetype hueclient.RoomArchetype, deviceIDs []string) error {
+	b.mu.RLock()
+	client := b.client
+	b.mu.RUnlock()
+
+	if client == nil {
+		return ErrAuthFailed
+	}
+
+	// Build children list from device IDs
+	children := make([]hueclient.ResourceIdentifier, len(deviceIDs))
+	deviceType := hueclient.ResourceIdentifierRtypeDevice
+	for i, id := range deviceIDs {
+		idCopy := id
+		children[i] = hueclient.ResourceIdentifier{
+			Rid:   &idCopy,
+			Rtype: &deviceType,
+		}
+	}
+
+	_, err := client.CreateRoom(context.Background(), hueclient.CreateRoomJSONRequestBody{
+		Metadata: &struct {
+			Archetype *hueclient.RoomArchetype `json:"archetype,omitempty"`
+			Name      *string                  `json:"name,omitempty"`
+		}{
+			Name:      &name,
+			Archetype: &archetype,
+		},
+		Children: &children,
+	})
+	return err
+}
+
+// CreateZone creates a new zone with the given name and archetype.
+// serviceIDs should be the IDs of services (lights, grouped_lights) to add to the zone.
+func (b *Bridge) CreateZone(name string, archetype hueclient.RoomArchetype, serviceIDs []string) error {
+	b.mu.RLock()
+	client := b.client
+	b.mu.RUnlock()
+
+	if client == nil {
+		return ErrAuthFailed
+	}
+
+	// Build children list from service IDs (typically lights)
+	children := make([]hueclient.ResourceIdentifier, len(serviceIDs))
+	lightType := hueclient.ResourceIdentifierRtypeLight
+	for i, id := range serviceIDs {
+		idCopy := id
+		children[i] = hueclient.ResourceIdentifier{
+			Rid:   &idCopy,
+			Rtype: &lightType,
+		}
+	}
+
+	_, err := client.CreateZone(context.Background(), hueclient.CreateZoneJSONRequestBody{
+		Metadata: &struct {
+			Archetype *hueclient.RoomArchetype `json:"archetype,omitempty"`
+			Name      *string                  `json:"name,omitempty"`
+		}{
+			Name:      &name,
+			Archetype: &archetype,
+		},
+		Children: &children,
+	})
+	return err
+}
+
+// DeleteRoom deletes a room by its ID.
+func (b *Bridge) DeleteRoom(roomID string) error {
+	b.mu.RLock()
+	client := b.client
+	b.mu.RUnlock()
+
+	if client == nil {
+		return ErrAuthFailed
+	}
+
+	_, err := client.DeleteRoom(context.Background(), roomID)
+	return err
+}
+
+// DeleteZone deletes a zone by its ID.
+func (b *Bridge) DeleteZone(zoneID string) error {
+	b.mu.RLock()
+	client := b.client
+	b.mu.RUnlock()
+
+	if client == nil {
+		return ErrAuthFailed
+	}
+
+	_, err := client.DeleteZone(context.Background(), zoneID)
+	return err
+}
+
+// UpdateRoomDevices updates the devices assigned to a room.
+func (b *Bridge) UpdateRoomDevices(roomID string, deviceIDs []string) error {
+	b.mu.RLock()
+	client := b.client
+	b.mu.RUnlock()
+
+	if client == nil {
+		return ErrAuthFailed
+	}
+
+	// Build children list from device IDs
+	children := make([]hueclient.ResourceIdentifier, len(deviceIDs))
+	deviceType := hueclient.ResourceIdentifierRtypeDevice
+	for i, id := range deviceIDs {
+		idCopy := id
+		children[i] = hueclient.ResourceIdentifier{
+			Rid:   &idCopy,
+			Rtype: &deviceType,
+		}
+	}
+
+	_, err := client.UpdateRoom(context.Background(), roomID, hueclient.UpdateRoomJSONRequestBody{
+		Children: &children,
+	})
+	return err
+}
+
+// UpdateZoneServices updates the services (lights) assigned to a zone.
+func (b *Bridge) UpdateZoneServices(zoneID string, serviceIDs []string) error {
+	b.mu.RLock()
+	client := b.client
+	b.mu.RUnlock()
+
+	if client == nil {
+		return ErrAuthFailed
+	}
+
+	// Build children list from service IDs
+	children := make([]hueclient.ResourceIdentifier, len(serviceIDs))
+	lightType := hueclient.ResourceIdentifierRtypeLight
+	for i, id := range serviceIDs {
+		idCopy := id
+		children[i] = hueclient.ResourceIdentifier{
+			Rid:   &idCopy,
+			Rtype: &lightType,
+		}
+	}
+
+	_, err := client.UpdateZone(context.Background(), zoneID, hueclient.UpdateZoneJSONRequestBody{
+		Children: &children,
+	})
+	return err
+}
+
+// SetRoomArchetype updates a room's archetype.
+func (b *Bridge) SetRoomArchetype(roomID string, archetype hueclient.RoomArchetype) error {
+	b.mu.RLock()
+	client := b.client
+	b.mu.RUnlock()
+
+	if client == nil {
+		return ErrAuthFailed
+	}
+
+	_, err := client.UpdateRoom(context.Background(), roomID, hueclient.UpdateRoomJSONRequestBody{
+		Metadata: &struct {
+			Archetype *hueclient.RoomArchetype `json:"archetype,omitempty"`
+			Name      *string                  `json:"name,omitempty"`
+		}{
+			Archetype: &archetype,
+		},
+	})
+	return err
+}
+
+// SetZoneArchetype updates a zone's archetype.
+func (b *Bridge) SetZoneArchetype(zoneID string, archetype hueclient.RoomArchetype) error {
+	b.mu.RLock()
+	client := b.client
+	b.mu.RUnlock()
+
+	if client == nil {
+		return ErrAuthFailed
+	}
+
+	_, err := client.UpdateZone(context.Background(), zoneID, hueclient.UpdateZoneJSONRequestBody{
+		Metadata: &struct {
+			Archetype *hueclient.RoomArchetype `json:"archetype,omitempty"`
+			Name      *string                  `json:"name,omitempty"`
+		}{
+			Archetype: &archetype,
 		},
 	})
 	return err

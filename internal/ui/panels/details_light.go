@@ -3,6 +3,7 @@ package panels
 import (
 	"fmt"
 
+	"github.com/kluzzebass/lazyhue/internal/hue"
 	"github.com/kluzzebass/lazyhue/internal/hueclient"
 	"github.com/kluzzebass/lazyhue/internal/ui/panels/details"
 )
@@ -180,7 +181,7 @@ func (p *DetailsPanel) buildLightView(lightAny interface{}) *details.View {
 		view.Add(details.Header("Available Effects"))
 		effectsList := details.NewList()
 		for _, effect := range *light.Effects.EffectValues {
-			effectsList.Add(string(effect))
+			effectsList.Add(hue.EffectDisplayName(string(effect)))
 		}
 		view.Add(effectsList)
 	}

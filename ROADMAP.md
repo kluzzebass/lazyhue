@@ -58,33 +58,29 @@ A terminal UI for Philips Hue bridge management.
 - [x] Live mode (changes apply immediately)
 - [x] Edit mode (changes on Save)
 
----
-
-## 🚧 In Progress
-
 ### Live Light Editing
-- [ ] Wire up form system to light control
-- [ ] Real-time brightness adjustment
-- [ ] Real-time color adjustment
-- [ ] Real-time color temperature adjustment
-- [ ] Debouncing for API calls
+- [x] Wire up form system to light control
+- [x] Real-time brightness adjustment
+- [x] Real-time color adjustment
+- [x] Real-time color temperature adjustment
+- [x] Debouncing for API calls
+- [x] Color picker dialog (HSV color wheel)
+- [x] Color temperature dialog (warm to cool slider)
+- [x] Effects control (candle, fire, prism, sparkle, etc.)
 
 ---
 
 ## 📋 Planned Features
 
 ### Light Control (Phase 2)
-- [ ] Color picker dialog for lights
-- [ ] Color temperature dialog
-- [ ] Effects control (colorloop, etc.)
-- [ ] Gradient control for gradient-capable lights
+- [ ] Gradient control for gradient-capable lights (needs hardware to test)
 
 ### Room/Zone Management
-- [ ] Create new room
-- [ ] Create new zone
-- [ ] Delete room/zone
-- [ ] Add/remove lights from room/zone
-- [ ] Room archetype selection
+- [x] Create new room (`n` key)
+- [x] Create new zone (`N` key)
+- [x] Delete room/zone (`d` key)
+- [x] Room archetype selection (in create/edit dialog)
+- [x] Remove devices from room (`e` to edit)
 
 ### Scene Management
 - [ ] Create new scene

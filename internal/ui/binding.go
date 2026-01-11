@@ -47,6 +47,11 @@ const (
 	ActionToggleMotion      Action = "toggle_motion"
 	ActionMotionSensitivity Action = "motion_sensitivity"
 
+	// Room/Zone management
+	ActionCreateRoom Action = "create_room"
+	ActionCreateZone Action = "create_zone"
+	ActionDelete     Action = "delete"
+
 	// Global
 	ActionHelp      Action = "help"
 	ActionQuit      Action = "quit"

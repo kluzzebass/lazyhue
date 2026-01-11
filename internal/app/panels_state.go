@@ -361,9 +361,10 @@ func (m *Model) filterBindingsForSelection(bindings []ui.Binding) []ui.Binding {
 		return actions
 	}
 
-	// If on a group node (no item selected), only show navigation
+	// If on a group node (no item selected), show navigation and create actions
 	if m.selectedItem == nil {
-		return filterBindingsByAction(bindings, withTreeActions(ui.ActionSelect)...)
+		return filterBindingsByAction(bindings, withTreeActions(
+			ui.ActionSelect, ui.ActionCreateRoom, ui.ActionCreateZone)...)
 	}
 
 	switch m.selectedItem.Type {
@@ -383,11 +384,17 @@ func (m *Model) filterBindingsForSelection(bindings []ui.Binding) []ui.Binding {
 		return filterBindingsByAction(bindings, withTreeActions(
 			ui.ActionSelect, ui.ActionEditDevice, ui.ActionRename)...)
 
-	case panels.EntityRoom, panels.EntityZone:
-		// Rooms/Zones: toggle (grouped light), brightness, rename
+	case panels.EntityRoom:
+		// Rooms: toggle (grouped light), brightness, edit, rename, delete, create
 		return filterBindingsByAction(bindings, withTreeActions(
-			ui.ActionSelect, ui.ActionToggle, ui.ActionRename,
-			ui.ActionBrightnessUp, ui.ActionBrightnessDown)...)
+			ui.ActionSelect, ui.ActionToggle, ui.ActionEditDevice, ui.ActionRename,
+			ui.ActionDelete, ui.ActionCreateRoom, ui.ActionBrightnessUp, ui.ActionBrightnessDown)...)
+
+	case panels.EntityZone:
+		// Zones: toggle (grouped light), brightness, edit, rename, delete, create
+		return filterBindingsByAction(bindings, withTreeActions(
+			ui.ActionSelect, ui.ActionToggle, ui.ActionEditDevice, ui.ActionRename,
+			ui.ActionDelete, ui.ActionCreateZone, ui.ActionBrightnessUp, ui.ActionBrightnessDown)...)
 
 	default:
 		return bindings
