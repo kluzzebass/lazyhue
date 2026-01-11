@@ -5,11 +5,13 @@ import (
 	"image/color"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/lipgloss/v2"
 
 	"github.com/kluzzebass/lazyhue/internal/hue"
 	"github.com/kluzzebass/lazyhue/internal/hueclient"
+	"github.com/kluzzebass/lazyhue/internal/ui2"
 	"github.com/kluzzebass/lazyhue/internal/ui2/panels"
 )
 
@@ -513,16 +515,253 @@ func (m *Model) updateDetailContent() {
 	m.detailViewport.SetContent(content.String())
 }
 
-// updateLogContent updates the log viewport content from logLines.
+// EventDetails contains rich information about an SSE event.
+type EventDetails struct {
+	ResourceType   string  // "light", "scene", "motion", etc.
+	ResourceName   string  // Human-readable name
+	EventType      string  // "update", "add", "delete"
+	Details        string  // What changed: "on", "off", "50%", "activated", "motion detected"
+	IndicatorColor string  // Hex color for brightness indicator (lights)
+	Brightness     float64 // Brightness 0-100 for indicator
+	IsOn           bool    // Whether the light/entity is on
+}
+
+// LogEntry represents a single log entry.
+type LogEntry struct {
+	Time           time.Time
+	Type           string  // "event", "request", "response", "error"
+	Message        string  // For non-event entries
+	ResourceType   string  // For events: "light", "scene", etc.
+	ResourceName   string  // For events: the human-readable name
+	Details        string  // For events: "on 50%", "activated", etc.
+	IndicatorColor string  // Hex color for brightness indicator (lights)
+	Brightness     float64 // Brightness 0-100 for indicator
+	IsOn           bool    // Whether the light/entity is on
+}
+
+// buildEventDetails creates rich event details by looking up resource info from bridge state.
+func (m *Model) buildEventDetails(msg bridgeEventMsg) EventDetails {
+	details := EventDetails{
+		ResourceType: msg.resourceType,
+		EventType:    msg.eventType,
+	}
+
+	bridge := m.manager.GetBridge(msg.bridgeID)
+	if bridge == nil || bridge.GetState() == nil {
+		return details
+	}
+	state := bridge.GetState()
+
+	switch msg.resourceType {
+	case "light":
+		if light, ok := state.GetLight(msg.resourceID); ok {
+			// Use GetLightName to get the user-assigned name from the owning device
+			details.ResourceName = state.GetLightName(light)
+			// Show current state
+			if light.On != nil && light.On.On != nil {
+				details.IsOn = *light.On.On
+				if *light.On.On {
+					if light.Dimming != nil && light.Dimming.Brightness != nil {
+						details.Brightness = float64(*light.Dimming.Brightness)
+						details.Details = fmt.Sprintf("on %.0f%%", *light.Dimming.Brightness)
+					} else {
+						details.Details = "on"
+					}
+					// Get color for indicator
+					if light.Color != nil && light.Color.Xy != nil &&
+						light.Color.Xy.X != nil && light.Color.Xy.Y != nil {
+						r, g, b := ui2.XyToRGB(float64(*light.Color.Xy.X), float64(*light.Color.Xy.Y), 1.0)
+						details.IndicatorColor = fmt.Sprintf("#%02x%02x%02x", r, g, b)
+					} else if light.ColorTemperature != nil && light.ColorTemperature.Mirek != nil {
+						r, g, b := ui2.MirekToRGB(*light.ColorTemperature.Mirek)
+						details.IndicatorColor = fmt.Sprintf("#%02x%02x%02x", r, g, b)
+					}
+				} else {
+					details.Details = "off"
+				}
+			}
+		}
+
+	case "grouped_light":
+		if gl, ok := state.GetGroupedLight(msg.resourceID); ok {
+			// Try to find the room/zone name for this grouped light
+			if name := state.GetGroupedLightName(msg.resourceID); name != "" {
+				details.ResourceName = name
+			}
+			if gl.On != nil && gl.On.On != nil {
+				details.IsOn = *gl.On.On
+				if *gl.On.On {
+					if gl.Dimming != nil && gl.Dimming.Brightness != nil {
+						details.Brightness = float64(*gl.Dimming.Brightness)
+						details.Details = fmt.Sprintf("on %.0f%%", *gl.Dimming.Brightness)
+					} else {
+						details.Details = "on"
+					}
+				} else {
+					details.Details = "off"
+				}
+			}
+		}
+
+	case "scene":
+		if scene, ok := state.GetScene(msg.resourceID); ok {
+			details.ResourceName = hue.SceneName(scene, details.ResourceName)
+			if scene.Status != nil && scene.Status.Active != nil {
+				if *scene.Status.Active == "active" {
+					details.Details = "activated"
+				} else {
+					details.Details = "deactivated"
+				}
+			}
+		}
+
+	case "motion":
+		if motion, ok := state.GetMotion(msg.resourceID); ok {
+			// Try to get device name
+			if motion.Owner != nil && motion.Owner.Rid != nil {
+				if device, ok := state.GetDevice(*motion.Owner.Rid); ok {
+					details.ResourceName = hue.DeviceName(device, details.ResourceName)
+				}
+			}
+			if motion.Motion != nil && motion.Motion.Motion != nil {
+				if *motion.Motion.Motion {
+					details.Details = "motion detected"
+				} else {
+					details.Details = "clear"
+				}
+			}
+		}
+	}
+
+	return details
+}
+
+// brightnessIndicatorLog returns a character representing the brightness level.
+func brightnessIndicatorLog(brightness float64) string {
+	switch {
+	case brightness <= 0:
+		return "○" // off/empty
+	case brightness < 37.5:
+		return "◔" // quarter (1-37%)
+	case brightness < 62.5:
+		return "◑" // half (38-62%)
+	case brightness < 87.5:
+		return "◕" // three-quarters (63-87%)
+	default:
+		return "●" // full (88-100%)
+	}
+}
+
+// formatLogEntry formats a log entry with timestamps, colors, and styling like v1.
+func (m *Model) formatLogEntry(entry LogEntry, width int) string {
+	// Format: HH:MM:SS [TYPE] message
+	timeStr := entry.Time.Format("15:04:05")
+
+	var typeStyle lipgloss.Style
+	switch entry.Type {
+	case "event":
+		typeStyle = lipgloss.NewStyle().Foreground(m.styles.Theme.Success)
+	case "request":
+		typeStyle = lipgloss.NewStyle().Foreground(m.styles.Theme.Secondary)
+	case "response":
+		typeStyle = lipgloss.NewStyle().Foreground(m.styles.Theme.TextMuted)
+	case "error":
+		typeStyle = lipgloss.NewStyle().Foreground(m.styles.Theme.Error)
+	default:
+		typeStyle = m.styles.Dimmed
+	}
+
+	typeIndicator := typeStyle.Render(string(entry.Type[0]))
+
+	var line string
+	if entry.Type == "event" && entry.ResourceType != "" {
+		// For events, style the resource name in a faded color
+		nameStyle := lipgloss.NewStyle().Foreground(m.styles.Theme.TextMuted)
+
+		// Build brightness/color indicator for lights
+		var indicator string
+		if (entry.ResourceType == "light" || entry.ResourceType == "grouped_light") && entry.IsOn {
+			indicatorChar := brightnessIndicatorLog(entry.Brightness)
+			if entry.IndicatorColor != "" {
+				indicatorStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(entry.IndicatorColor))
+				indicator = indicatorStyle.Render(indicatorChar) + " "
+			} else {
+				indicator = lipgloss.NewStyle().Foreground(m.styles.Theme.Success).Render(indicatorChar) + " "
+			}
+		} else if (entry.ResourceType == "light" || entry.ResourceType == "grouped_light") && !entry.IsOn {
+			indicator = m.styles.Dimmed.Render("○") + " "
+		}
+
+		if entry.ResourceName != "" {
+			if entry.Details != "" {
+				line = fmt.Sprintf("%s %s %s%s %s → %s",
+					m.styles.Dimmed.Render(timeStr),
+					typeIndicator,
+					indicator,
+					entry.ResourceType,
+					nameStyle.Render(entry.ResourceName),
+					entry.Details)
+			} else {
+				line = fmt.Sprintf("%s %s %s%s %s",
+					m.styles.Dimmed.Render(timeStr),
+					typeIndicator,
+					indicator,
+					entry.ResourceType,
+					nameStyle.Render(entry.ResourceName))
+			}
+		} else {
+			// No resource name - show details if available
+			if entry.Details != "" {
+				line = fmt.Sprintf("%s %s %s%s → %s",
+					m.styles.Dimmed.Render(timeStr),
+					typeIndicator,
+					indicator,
+					entry.ResourceType,
+					entry.Details)
+			} else {
+				line = fmt.Sprintf("%s %s %s%s update",
+					m.styles.Dimmed.Render(timeStr),
+					typeIndicator,
+					indicator,
+					entry.ResourceType)
+			}
+		}
+	} else {
+		line = fmt.Sprintf("%s %s %s", m.styles.Dimmed.Render(timeStr), typeIndicator, entry.Message)
+	}
+
+	// Truncate if needed (simple truncation - v1 has more sophisticated ANSI-aware truncation)
+	if lipgloss.Width(line) > width {
+		// Simple truncation - in production you'd want ANSI-aware truncation like v1
+		maxLen := len(line)
+		if width-1 < maxLen {
+			maxLen = width - 1
+		}
+		line = line[:maxLen] + "…"
+	}
+
+	return line
+}
+
+// updateLogContent updates the log viewport content from logEntries.
 func (m *Model) updateLogContent() {
 	var content strings.Builder
-	for _, line := range m.logLines {
+	logBounds := m.layout.Bounds(PanelLog)
+	contentWidth := logBounds.Width - 2 // Account for border
+	if contentWidth < 1 {
+		contentWidth = 1
+	}
+
+	for i, entry := range m.logEntries {
+		line := m.formatLogEntry(entry, contentWidth)
 		content.WriteString(line)
-		content.WriteString("\n")
+		if i < len(m.logEntries)-1 {
+			content.WriteString("\n")
+		}
 	}
 	m.logViewport.SetContent(content.String())
 	// Scroll to bottom
-	m.logViewport.LineDown(len(m.logLines))
+	m.logViewport.LineDown(len(m.logEntries))
 }
 
 // renderDetailPanel renders the detail panel with border and header.
@@ -597,8 +836,6 @@ func (m *Model) renderLogPanel(width, height int, focused bool, key string) stri
 
 	topBorder := m.renderPanelHeader(width, key, "Activity", focused, borderColor)
 
-	content := m.logViewport.View()
-
 	innerWidth := width - 2
 	if innerWidth < 1 {
 		innerWidth = 1
@@ -608,10 +845,16 @@ func (m *Model) renderLogPanel(width, height int, focused bool, key string) stri
 		innerHeight = 1
 	}
 
+	content := m.logViewport.View()
+	// Split content - viewport may add trailing newline
 	contentLines := strings.Split(content, "\n")
+	// Remove trailing empty line if present
+	if len(contentLines) > 0 && contentLines[len(contentLines)-1] == "" {
+		contentLines = contentLines[:len(contentLines)-1]
+	}
+	// Viewport should return exactly innerHeight lines, but cap it just in case
 	if len(contentLines) > innerHeight {
 		contentLines = contentLines[:innerHeight]
-		content = strings.Join(contentLines, "\n")
 	}
 
 	border := lipgloss.RoundedBorder()
@@ -626,16 +869,14 @@ func (m *Model) renderLogPanel(width, height int, focused bool, key string) stri
 	var lines []string
 	lines = append(lines, topBorder)
 
-	for _, line := range contentLines {
+	// Render exactly the lines the viewport provides (should be innerHeight)
+	// Limit to innerHeight to prevent overflow
+	for i := 0; i < len(contentLines) && i < innerHeight; i++ {
+		line := contentLines[i]
 		if lipgloss.Width(line) > innerWidth {
 			line = lipgloss.Place(innerWidth, 1, lipgloss.Left, lipgloss.Top, line)
 		}
 		paddedLine := lipgloss.Place(innerWidth, 1, lipgloss.Left, lipgloss.Top, line)
-		lines = append(lines, leftBorder+paddedLine+rightBorder)
-	}
-
-	for len(lines) < height-1 {
-		paddedLine := strings.Repeat(" ", innerWidth)
 		lines = append(lines, leftBorder+paddedLine+rightBorder)
 	}
 

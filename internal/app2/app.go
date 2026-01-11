@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/bubbles/v2/help"
 	"github.com/charmbracelet/bubbles/v2/key"
@@ -52,7 +53,7 @@ type Model struct {
 	focusedPane      string
 	activeBridgeID   string
 	status           string
-	logLines         []string
+	logEntries       []LogEntry
 	quitting         bool
 	eventChan        chan bridgeEventMsg
 	eventCancelFuncs map[string]context.CancelFunc
@@ -94,8 +95,8 @@ func New(creds *config.CredentialStore) Model {
 	layoutRoot := layout.HSplit(
 		layout.Child{Size: layout.Flex(0.4), Node: layout.NewLeaf(PanelTree)},
 		layout.Child{Size: layout.Flex(0.6), Node: layout.VSplit(
-			layout.Child{Size: layout.Flex(1), Node: layout.NewLeaf(PanelDetail)},
-			layout.Child{Size: layout.Fixed(6), Node: layout.NewLeaf(PanelLog)},
+			layout.Child{Size: layout.Flex(0.67), Node: layout.NewLeaf(PanelDetail)},
+			layout.Child{Size: layout.Flex(0.33), Node: layout.NewLeaf(PanelLog)},
 		)},
 	)
 	layoutTree := layout.NewTree(layoutRoot)
@@ -114,7 +115,7 @@ func New(creds *config.CredentialStore) Model {
 		layout:           layoutTree,
 		focusedPane:      PanelTree,
 		status:           "Loading bridges...",
-		logLines:         []string{"lazyhue v2 started"},
+		logEntries:       []LogEntry{{Time: time.Now(), Type: "event", Message: "lazyhue v2 started"}},
 		eventChan:        make(chan bridgeEventMsg, 100),
 		eventCancelFuncs: make(map[string]context.CancelFunc),
 	}
@@ -162,7 +163,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if logWidth < 1 {
 			logWidth = 1
 		}
-		logHeight := logBounds.Height - 4
+		logHeight := logBounds.Height - 2
 		if logHeight < 1 {
 			logHeight = 1
 		}
@@ -173,7 +174,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case bridgeConnectedMsg:
-		m.logLines = append(m.logLines, fmt.Sprintf("Connected to bridge %s", msg.bridgeID))
+		m.logEntries = append(m.logEntries, LogEntry{
+			Time:    time.Now(),
+			Type:    "event",
+			Message: fmt.Sprintf("Connected to bridge %s", msg.bridgeID),
+		})
 		m.updateLogContent()
 
 		// If this is the first connected bridge, make it active
@@ -189,7 +194,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.Batch(cmds...)
 
 	case stateSyncedMsg:
-		m.logLines = append(m.logLines, fmt.Sprintf("State synced for bridge %s", msg.bridgeID))
+		m.logEntries = append(m.logEntries, LogEntry{
+			Time:    time.Now(),
+			Type:    "event",
+			Message: fmt.Sprintf("State synced for bridge %s", msg.bridgeID),
+		})
 		m.updateLogContent()
 		m.rebuildTreeForActiveTab()
 
@@ -215,7 +224,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.Batch(cmds...)
 
 	case bridgeEventMsg:
-		m.logLines = append(m.logLines, fmt.Sprintf("Event: %s %s", msg.eventType, msg.resourceType))
+		details := m.buildEventDetails(msg)
+		m.logEntries = append(m.logEntries, LogEntry{
+			Time:           time.Now(),
+			Type:           "event",
+			ResourceType:   details.ResourceType,
+			ResourceName:   details.ResourceName,
+			Details:        details.Details,
+			IndicatorColor: details.IndicatorColor,
+			Brightness:     details.Brightness,
+			IsOn:           details.IsOn,
+		})
 		m.updateLogContent()
 
 		if bridge := m.manager.GetBridge(msg.bridgeID); bridge != nil {
@@ -227,7 +246,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case errMsg:
 		m.status = fmt.Sprintf("Error: %v", msg.err)
-		m.logLines = append(m.logLines, m.status)
+		m.logEntries = append(m.logEntries, LogEntry{
+			Time:    time.Now(),
+			Type:    "error",
+			Message: m.status,
+		})
 		m.updateLogContent()
 		return m, nil
 
@@ -259,14 +282,22 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		case key.Matches(msg, m.keys.NextBridge):
 			m.tree.NextTab()
-			m.logLines = append(m.logLines, fmt.Sprintf("Tab: %s", m.tree.Title()))
+			m.logEntries = append(m.logEntries, LogEntry{
+				Time:    time.Now(),
+				Type:    "event",
+				Message: fmt.Sprintf("Tab: %s", m.tree.Title()),
+			})
 			m.updateLogContent()
 			m.rebuildTreeForActiveTab()
 			return m, nil
 
 		case key.Matches(msg, m.keys.PrevBridge):
 			m.tree.PrevTab()
-			m.logLines = append(m.logLines, fmt.Sprintf("Tab: %s", m.tree.Title()))
+			m.logEntries = append(m.logEntries, LogEntry{
+				Time:    time.Now(),
+				Type:    "event",
+				Message: fmt.Sprintf("Tab: %s", m.tree.Title()),
+			})
 			m.updateLogContent()
 			m.rebuildTreeForActiveTab()
 			return m, nil
