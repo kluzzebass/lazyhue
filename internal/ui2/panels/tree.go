@@ -2,6 +2,7 @@ package panels
 
 import (
 	"fmt"
+	"image/color"
 	"io"
 	"strings"
 
@@ -122,6 +123,10 @@ type TreePanel struct {
 	title  string
 	key    string
 
+	// Tabs
+	tabs      []string
+	activeTab int
+
 	// Tree data
 	roots    []*TreeNode
 	flatList []FlatNode
@@ -152,6 +157,7 @@ func NewTreePanel(styles ui2.Styles, zones *zone.Manager, title, panelKey string
 		zones:  zones,
 		title:  title,
 		key:    panelKey,
+		tabs:   []string{"Home", "Lights", "Devices", "Scenes"},
 	}
 }
 
@@ -325,11 +331,27 @@ func (p *TreePanel) Update(msg tea.Msg) (*TreePanel, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
 		switch {
+		case key.Matches(msg, key.NewBinding(key.WithKeys("tab"))):
+			p.NextTab()
+			return p, nil
+		case key.Matches(msg, key.NewBinding(key.WithKeys("shift+tab"))):
+			p.PrevTab()
+			return p, nil
 		case key.Matches(msg, key.NewBinding(key.WithKeys("left", "h"))):
-			p.Collapse()
+			// Only collapse in Home tab, otherwise switch tabs
+			if p.activeTab == 0 {
+				p.Collapse()
+			} else {
+				p.PrevTab()
+			}
 			return p, nil
 		case key.Matches(msg, key.NewBinding(key.WithKeys("right", "l"))):
-			p.Expand()
+			// Only expand in Home tab, otherwise switch tabs
+			if p.activeTab == 0 {
+				p.Expand()
+			} else {
+				p.NextTab()
+			}
 			return p, nil
 		case key.Matches(msg, key.NewBinding(key.WithKeys("enter", " "))):
 			p.ToggleExpanded()
@@ -363,19 +385,21 @@ func (p *TreePanel) Update(msg tea.Msg) (*TreePanel, tea.Cmd) {
 
 // View renders the panel.
 func (p *TreePanel) View(focused bool) string {
-	// Choose border style based on focus
-	borderStyle := p.styles.Panel
+	// Determine border color
+	borderColor := p.styles.Theme.Border
 	if focused {
-		borderStyle = p.styles.PanelActive
+		borderColor = p.styles.Theme.Accent
 	}
+
+	// Build top border with tabs
+	topBorder := p.renderTabbedBorder(focused, borderColor)
 
 	// Render the list content
 	content := p.list.View()
 
-	// Wrap in a panel with title
-	// Width/Height here are for the content area inside the border
+	// Calculate dimensions
 	innerWidth := p.width - 2   // Account for left+right border
-	innerHeight := p.height - 2 // Account for top+bottom border
+	innerHeight := p.height - 3 // Account for top border (with tabs), bottom border, and content
 	if innerWidth < 1 {
 		innerWidth = 1
 	}
@@ -383,19 +407,172 @@ func (p *TreePanel) View(focused bool) string {
 		innerHeight = 1
 	}
 
-	panel := borderStyle.
-		Width(innerWidth).
-		Height(innerHeight).
-		Render(content)
+	// Constrain content height
+	contentLines := strings.Split(content, "\n")
+	if len(contentLines) > innerHeight {
+		contentLines = contentLines[:innerHeight]
+		content = strings.Join(contentLines, "\n")
+	}
 
-	return panel
+	// Get border characters
+	border := lipgloss.RoundedBorder()
+	borderStyleColor := lipgloss.NewStyle().Foreground(borderColor)
+
+	// Build sides and bottom
+	leftBorder := borderStyleColor.Render(border.Left)
+	rightBorder := borderStyleColor.Render(border.Right)
+	bottomBorder := borderStyleColor.Render(border.BottomLeft) +
+		borderStyleColor.Render(strings.Repeat(border.Bottom, innerWidth)) +
+		borderStyleColor.Render(border.BottomRight)
+
+	// Build panel
+	var lines []string
+	lines = append(lines, topBorder)
+
+	// Content lines with side borders
+	for _, line := range contentLines {
+		// Truncate line if too long
+		if lipgloss.Width(line) > innerWidth {
+			line = lipgloss.Place(innerWidth, 1, lipgloss.Left, lipgloss.Top, line)
+		}
+		paddedLine := lipgloss.Place(innerWidth, 1, lipgloss.Left, lipgloss.Top, line)
+		lines = append(lines, leftBorder+paddedLine+rightBorder)
+	}
+
+	// Fill remaining height
+	for len(lines) < p.height-1 {
+		paddedLine := strings.Repeat(" ", innerWidth)
+		lines = append(lines, leftBorder+paddedLine+rightBorder)
+	}
+
+	lines = append(lines, bottomBorder)
+
+	return strings.Join(lines, "\n")
+}
+
+// renderTabbedBorder renders the top border with tabs embedded.
+func (p *TreePanel) renderTabbedBorder(focused bool, borderColor color.Color) string {
+	border := lipgloss.RoundedBorder()
+
+	// Build key prefix (e.g., "[2]")
+	keyRendered := ""
+	keyWidth := 0
+	if p.key != "" {
+		keyStyle := lipgloss.NewStyle().
+			Foreground(p.styles.Theme.Primary).
+			Bold(true)
+		keyRendered = keyStyle.Render("[" + p.key + "]")
+		keyWidth = lipgloss.Width(keyRendered)
+	}
+
+	// Build tabs
+	var tabParts []string
+	for i, tab := range p.tabs {
+		var tabStyle lipgloss.Style
+		if i == p.activeTab {
+			tabStyle = lipgloss.NewStyle().
+				Foreground(p.styles.Theme.Primary).
+				Bold(true)
+		} else {
+			tabStyle = lipgloss.NewStyle().
+				Foreground(p.styles.Theme.TextMuted)
+		}
+		tabParts = append(tabParts, tabStyle.Render(tab))
+		if i < len(p.tabs)-1 {
+			sepStyle := lipgloss.NewStyle().Foreground(borderColor)
+			tabParts = append(tabParts, sepStyle.Render(border.Top))
+		}
+	}
+	tabString := strings.Join(tabParts, "")
+	tabWidth := lipgloss.Width(tabString)
+
+	// Calculate border segments
+	leftPadding := 1                                                                  // after TopLeft
+	middlePadding := 1                                                                // between key and tabs
+	remainingWidth := p.width - keyWidth - tabWidth - leftPadding - middlePadding - 2 // -2 for corners
+
+	if remainingWidth < 0 {
+		remainingWidth = 0
+	}
+
+	borderStyle := lipgloss.NewStyle().Foreground(borderColor)
+
+	if keyRendered != "" {
+		return borderStyle.Render(border.TopLeft) +
+			borderStyle.Render(strings.Repeat(border.Top, leftPadding)) +
+			keyRendered +
+			borderStyle.Render(strings.Repeat(border.Top, middlePadding)) +
+			tabString +
+			borderStyle.Render(strings.Repeat(border.Top, remainingWidth)) +
+			borderStyle.Render(border.TopRight)
+	}
+
+	return borderStyle.Render(border.TopLeft) +
+		borderStyle.Render(strings.Repeat(border.Top, leftPadding)) +
+		tabString +
+		borderStyle.Render(strings.Repeat(border.Top, remainingWidth+middlePadding)) +
+		borderStyle.Render(border.TopRight)
 }
 
 // Title returns the panel title.
 func (p *TreePanel) Title() string { return p.title }
 
+// SetTitle sets the panel title.
+func (p *TreePanel) SetTitle(title string) { p.title = title }
+
 // Key returns the panel hotkey.
 func (p *TreePanel) Key() string { return p.key }
+
+// SetKey sets the panel hotkey.
+func (p *TreePanel) SetKey(key string) { p.key = key }
+
+// ActiveTabIndex returns the active tab index.
+func (p *TreePanel) ActiveTabIndex() int {
+	return p.activeTab
+}
+
+// SetActiveTab sets the active tab index.
+func (p *TreePanel) SetActiveTab(tab int) {
+	if tab >= 0 && tab < len(p.tabs) {
+		p.activeTab = tab
+		p.title = p.tabs[tab]
+	}
+}
+
+// NextTab switches to the next tab.
+func (p *TreePanel) NextTab() {
+	if len(p.tabs) == 0 {
+		return
+	}
+	p.activeTab = (p.activeTab + 1) % len(p.tabs)
+	p.title = p.tabs[p.activeTab]
+}
+
+// PrevTab switches to the previous tab.
+func (p *TreePanel) PrevTab() {
+	if len(p.tabs) == 0 {
+		return
+	}
+	p.activeTab = (p.activeTab - 1 + len(p.tabs)) % len(p.tabs)
+	p.title = p.tabs[p.activeTab]
+}
+
+// ActiveTabID returns the active tab ID (for compatibility with app layer).
+func (p *TreePanel) ActiveTabID() string {
+	if p.activeTab >= 0 && p.activeTab < len(p.tabs) {
+		switch p.tabs[p.activeTab] {
+		case "Home":
+			return "home"
+		case "Lights":
+			return "lights"
+		case "Devices":
+			return "devices"
+		case "Scenes":
+			return "scenes"
+		}
+	}
+	return "home"
+}
 
 // Clear clears the tree data.
 func (p *TreePanel) Clear() {

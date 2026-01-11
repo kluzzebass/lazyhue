@@ -2,7 +2,9 @@ package panels
 
 import (
 	"fmt"
+	"image/color"
 	"io"
+	"strings"
 	"time"
 
 	"github.com/charmbracelet/bubbles/v2/key"
@@ -135,6 +137,7 @@ type BridgePanel struct {
 	zones   *zone.Manager
 	spinner spinner.Model
 	title   string
+	key     string
 
 	// Bridge data
 	bridges      []*hue.Bridge
@@ -175,6 +178,7 @@ func NewBridgePanel(styles ui2.Styles, zones *zone.Manager) *BridgePanel {
 		zones:        zones,
 		spinner:      s,
 		title:        "Bridges",
+		key:          "1",
 		pollingUntil: make(map[string]time.Time),
 	}
 }
@@ -303,28 +307,127 @@ func (p *BridgePanel) Update(msg tea.Msg) (*BridgePanel, tea.Cmd) {
 
 // View renders the panel.
 func (p *BridgePanel) View(focused bool) string {
-	borderStyle := p.styles.Panel
+	borderColor := p.styles.Theme.Border
 	if focused {
-		borderStyle = p.styles.PanelActive
+		borderColor = p.styles.Theme.Accent
 	}
 
-	// Title with optional discovery indicator
+	// Build top border with key and title
+	topBorder := p.renderHeader(focused, borderColor)
+
+	// Render list content
+	content := p.list.View()
+
+	// Calculate dimensions
+	innerWidth := p.width - 2   // Account for left+right border
+	innerHeight := p.height - 2 // Account for top+bottom border
+	if innerWidth < 1 {
+		innerWidth = 1
+	}
+	if innerHeight < 1 {
+		innerHeight = 1
+	}
+
+	// Constrain content height
+	contentLines := strings.Split(content, "\n")
+	if len(contentLines) > innerHeight {
+		contentLines = contentLines[:innerHeight]
+	}
+
+	// Get border characters
+	border := lipgloss.RoundedBorder()
+	borderStyleColor := lipgloss.NewStyle().Foreground(borderColor)
+
+	// Build sides and bottom
+	leftBorder := borderStyleColor.Render(border.Left)
+	rightBorder := borderStyleColor.Render(border.Right)
+	bottomBorder := borderStyleColor.Render(border.BottomLeft) +
+		borderStyleColor.Render(strings.Repeat(border.Bottom, innerWidth)) +
+		borderStyleColor.Render(border.BottomRight)
+
+	// Build panel
+	var lines []string
+	lines = append(lines, topBorder)
+
+	// Content lines with side borders
+	for _, line := range contentLines {
+		if lipgloss.Width(line) > innerWidth {
+			line = lipgloss.Place(innerWidth, 1, lipgloss.Left, lipgloss.Top, line)
+		}
+		paddedLine := lipgloss.Place(innerWidth, 1, lipgloss.Left, lipgloss.Top, line)
+		lines = append(lines, leftBorder+paddedLine+rightBorder)
+	}
+
+	// Fill remaining height
+	for len(lines) < p.height-1 {
+		paddedLine := strings.Repeat(" ", innerWidth)
+		lines = append(lines, leftBorder+paddedLine+rightBorder)
+	}
+
+	lines = append(lines, bottomBorder)
+
+	return strings.Join(lines, "\n")
+}
+
+// renderHeader renders the top border with key and title.
+func (p *BridgePanel) renderHeader(focused bool, borderColor color.Color) string {
+	border := lipgloss.RoundedBorder()
+
+	// Build key prefix (e.g., "[1]")
+	keyRendered := ""
+	keyWidth := 0
+	if p.key != "" {
+		keyStyle := lipgloss.NewStyle().
+			Foreground(p.styles.Theme.Primary).
+			Bold(true)
+		keyRendered = keyStyle.Render("[" + p.key + "]")
+		keyWidth = lipgloss.Width(keyRendered)
+	}
+
+	// Build title with optional discovery indicator
 	title := p.title
 	if p.IsDiscovering() {
 		title += " " + p.spinner.View()
 	}
-
 	titleStyle := lipgloss.NewStyle().
 		Foreground(p.styles.Theme.Primary).
 		Bold(true)
+	titleRendered := titleStyle.Render(title)
+	titleWidth := lipgloss.Width(titleRendered)
 
-	content := titleStyle.Render(title) + "\n" + p.list.View()
+	// Calculate border segments
+	leftPadding := 1                                                                    // after TopLeft
+	middlePadding := 1                                                                  // between key and title
+	remainingWidth := p.width - keyWidth - titleWidth - leftPadding - middlePadding - 2 // -2 for corners
 
-	return borderStyle.
-		Width(p.width).
-		Height(p.height).
-		Render(content)
+	if remainingWidth < 0 {
+		remainingWidth = 0
+	}
+
+	borderStyle := lipgloss.NewStyle().Foreground(borderColor)
+
+	if keyRendered != "" {
+		return borderStyle.Render(border.TopLeft) +
+			borderStyle.Render(strings.Repeat(border.Top, leftPadding)) +
+			keyRendered +
+			borderStyle.Render(strings.Repeat(border.Top, middlePadding)) +
+			titleRendered +
+			borderStyle.Render(strings.Repeat(border.Top, remainingWidth)) +
+			borderStyle.Render(border.TopRight)
+	}
+
+	return borderStyle.Render(border.TopLeft) +
+		borderStyle.Render(strings.Repeat(border.Top, leftPadding)) +
+		titleRendered +
+		borderStyle.Render(strings.Repeat(border.Top, remainingWidth+middlePadding)) +
+		borderStyle.Render(border.TopRight)
 }
+
+// Key returns the panel hotkey.
+func (p *BridgePanel) Key() string { return p.key }
+
+// SetKey sets the panel hotkey.
+func (p *BridgePanel) SetKey(key string) { p.key = key }
 
 // Index returns the current selection index.
 func (p *BridgePanel) Index() int {
