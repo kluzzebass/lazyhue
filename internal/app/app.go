@@ -71,6 +71,10 @@ type Model struct {
 	statusExpiry    time.Time // When to auto-clear status (zero means no expiry)
 	logPanelVisible bool
 
+	// Live editing state
+	editingLightID string                           // Light ID being edited (for live sync)
+	syncLivePopup  func()                           // Callback to sync popup with live state
+
 	// SSE event channel for receiving bridge events from goroutines
 	eventChan chan BridgeEventMsg
 }
@@ -360,6 +364,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.BridgeID == m.displayedBridgeID {
 			m.refreshHierarchyPanel()
 			m.updateDetailPanel()
+			// Sync live popup if editing the light that changed
+			if m.editingLightID != "" && msg.ResourceType == "light" && msg.ResourceID == m.editingLightID {
+				if m.syncLivePopup != nil {
+					m.syncLivePopup()
+				}
+			}
 		}
 		// Re-listen for more events
 		cmds = append(cmds, listenForBridgeEvents(m.eventChan))

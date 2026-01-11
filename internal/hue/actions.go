@@ -81,6 +81,47 @@ func (b *Bridge) SetLightBrightness(lightID string, brightness float64) error {
 	return err
 }
 
+// SetLightColor sets a light's color using CIE XY coordinates.
+func (b *Bridge) SetLightColor(lightID string, x, y float64) error {
+	b.mu.RLock()
+	client := b.client
+	b.mu.RUnlock()
+
+	if client == nil {
+		return ErrAuthFailed
+	}
+
+	// Optimistic update
+	b.state.SetLightColor(lightID, x, y)
+
+	xf, yf := float32(x), float32(y)
+	_, err := client.UpdateLight(context.Background(), lightID, hueclient.UpdateLightJSONRequestBody{
+		Color: &hueclient.Color{
+			Xy: &hueclient.GamutPosition{X: &xf, Y: &yf},
+		},
+	})
+	return err
+}
+
+// SetLightColorTemperature sets a light's color temperature in mirek (153-500).
+func (b *Bridge) SetLightColorTemperature(lightID string, mirek int) error {
+	b.mu.RLock()
+	client := b.client
+	b.mu.RUnlock()
+
+	if client == nil {
+		return ErrAuthFailed
+	}
+
+	// Optimistic update
+	b.state.SetLightColorTemperature(lightID, mirek)
+
+	_, err := client.UpdateLight(context.Background(), lightID, hueclient.UpdateLightJSONRequestBody{
+		ColorTemperature: &hueclient.ColorTemperature{Mirek: &mirek},
+	})
+	return err
+}
+
 // ToggleGroupedLight toggles a grouped light (room/zone).
 func (b *Bridge) ToggleGroupedLight(groupedLightID string) error {
 	b.mu.RLock()

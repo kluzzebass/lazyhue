@@ -189,17 +189,55 @@ func XyToHueSat(x, y float64) (hue int, sat int) {
 }
 
 // HueSatToXY converts hue (0-360) and saturation (0-100) to XY color.
+// Maps HSV hue to CIE XY color space, interpolating between RGB primaries.
 func HueSatToXY(hue, sat int) (x, y float64) {
+	// CIE xy coordinates for sRGB primaries and white point D65
 	whiteX, whiteY := 0.3127, 0.329
+	redX, redY := 0.64, 0.33
+	greenX, greenY := 0.30, 0.60
+	blueX, blueY := 0.15, 0.06
 
-	// Convert hue to radians
-	angle := float64(hue) * math.Pi / 180
+	// Normalize hue to 0-360
+	h := ((hue % 360) + 360) % 360
+	s := float64(sat) / 100.0
 
-	// Convert saturation to radius (max ~0.4)
-	radius := float64(sat) / 100 * 0.4
+	// Determine which two primaries to interpolate between
+	var primaryX, primaryY float64
+	if h < 60 {
+		// Red to Yellow (interpolate Red toward Green)
+		t := float64(h) / 60.0
+		primaryX = redX + t*(greenX-redX)*0.5
+		primaryY = redY + t*(greenY-redY)*0.5
+	} else if h < 120 {
+		// Yellow to Green
+		t := float64(h-60) / 60.0
+		primaryX = redX + 0.5*(greenX-redX) + t*0.5*(greenX-redX)
+		primaryY = redY + 0.5*(greenY-redY) + t*0.5*(greenY-redY)
+	} else if h < 180 {
+		// Green to Cyan (interpolate Green toward Blue)
+		t := float64(h-120) / 60.0
+		primaryX = greenX + t*(blueX-greenX)*0.5
+		primaryY = greenY + t*(blueY-greenY)*0.5
+	} else if h < 240 {
+		// Cyan to Blue
+		t := float64(h-180) / 60.0
+		primaryX = greenX + 0.5*(blueX-greenX) + t*0.5*(blueX-greenX)
+		primaryY = greenY + 0.5*(blueY-greenY) + t*0.5*(blueY-greenY)
+	} else if h < 300 {
+		// Blue to Magenta (interpolate Blue toward Red)
+		t := float64(h-240) / 60.0
+		primaryX = blueX + t*(redX-blueX)*0.5
+		primaryY = blueY + t*(redY-blueY)*0.5
+	} else {
+		// Magenta to Red
+		t := float64(h-300) / 60.0
+		primaryX = blueX + 0.5*(redX-blueX) + t*0.5*(redX-blueX)
+		primaryY = blueY + 0.5*(redY-blueY) + t*0.5*(redY-blueY)
+	}
 
-	x = whiteX + radius*math.Cos(angle)
-	y = whiteY + radius*math.Sin(angle)
+	// Interpolate between white and the primary based on saturation
+	x = whiteX + s*(primaryX-whiteX)
+	y = whiteY + s*(primaryY-whiteY)
 
 	// Clamp to valid range
 	x = ClampFloat(x, 0.0, 1.0)

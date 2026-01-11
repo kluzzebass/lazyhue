@@ -111,6 +111,12 @@ func (m *Model) handleSelect() tea.Cmd {
 			return recallScene(bridge, m.selectedItem.ID)
 		}
 	}
+
+	// Open light controls if a light is selected
+	if m.selectedItem != nil && m.selectedItem.Type == panels.EntityLight {
+		return m.showLightEditPopup()
+	}
+
 	return nil
 }
 
@@ -473,6 +479,181 @@ func (m *Model) showDeviceEditPopup() tea.Cmd {
 		m.refreshHierarchyPanel()
 		m.updateDetailPanel()
 	})
+
+	return startBlinkTicker()
+}
+
+// showLightEditPopup shows a configuration popup for the selected light.
+func (m *Model) showLightEditPopup() tea.Cmd {
+	bridge := m.manager.GetActiveBridge()
+	if bridge == nil || m.selectedItem == nil {
+		return nil
+	}
+
+	if m.selectedItem.Type != panels.EntityLight {
+		m.setStatusTemporary("Select a light to edit", false, 3*time.Second)
+		return nil
+	}
+
+	light, ok := panels.GetLightFromItem(*m.selectedItem)
+	if !ok {
+		return nil
+	}
+
+	lightID := m.selectedItem.ID
+	lightName := m.selectedItem.Name
+
+	// Build form fields based on light capabilities
+	fields := []panels.FormField{}
+
+	// On/Off toggle
+	isOn := 0
+	if light.On != nil && light.On.On != nil && *light.On.On {
+		isOn = 1
+	}
+	fields = append(fields, panels.FormField{
+		ID:    "on",
+		Label: "Power",
+		Type:  panels.FormFieldToggle,
+		Value: isOn,
+	})
+
+	// Brightness (if dimmable)
+	if light.Dimming != nil {
+		brightness := 0
+		if light.Dimming.Brightness != nil {
+			brightness = int(*light.Dimming.Brightness)
+		}
+		fields = append(fields, panels.FormField{
+			ID:    "brightness",
+			Label: "Brightness",
+			Type:  panels.FormFieldBrightness,
+			Value: brightness,
+			Min:   1,
+			Max:   100,
+		})
+	}
+
+	// Color temperature (if supported)
+	if light.ColorTemperature != nil && light.ColorTemperature.MirekSchema != nil {
+		mirek := 366 // Default middle value
+		if light.ColorTemperature.Mirek != nil {
+			mirek = *light.ColorTemperature.Mirek
+		}
+		mirekMin := 153
+		mirekMax := 500
+		if light.ColorTemperature.MirekSchema.MirekMinimum != nil {
+			mirekMin = *light.ColorTemperature.MirekSchema.MirekMinimum
+		}
+		if light.ColorTemperature.MirekSchema.MirekMaximum != nil {
+			mirekMax = *light.ColorTemperature.MirekSchema.MirekMaximum
+		}
+		fields = append(fields, panels.FormField{
+			ID:    "color_temp",
+			Label: "Color temp",
+			Type:  panels.FormFieldColorTemp,
+			Value: mirek,
+			Min:   mirekMin,
+			Max:   mirekMax,
+		})
+	}
+
+	// Color (if supported)
+	if light.Color != nil && light.Color.Xy != nil {
+		x, y := float64(0.3127), float64(0.3290) // Default to white
+		if light.Color.Xy.X != nil {
+			x = float64(*light.Color.Xy.X)
+		}
+		if light.Color.Xy.Y != nil {
+			y = float64(*light.Color.Xy.Y)
+		}
+		fields = append(fields, panels.FormField{
+			ID:     "color",
+			Label:  "Color",
+			Type:   panels.FormFieldColor,
+			ColorX: x,
+			ColorY: y,
+		})
+	}
+
+	// Calculate popup size based on fields
+	height := 0.30 + float64(len(fields))*0.06
+	if height > 0.7 {
+		height = 0.7
+	}
+	m.popupPanel.SetRatio(0.50, height)
+
+	// Track the light being edited for live sync
+	m.editingLightID = lightID
+	m.syncLivePopup = func() {
+		// Re-read light state and update popup fields
+		if currentLight, ok := bridge.GetState().GetLight(lightID); ok {
+			// Update on/off
+			isOn := 0
+			if currentLight.On != nil && currentLight.On.On != nil && *currentLight.On.On {
+				isOn = 1
+			}
+			m.popupPanel.UpdateFormField("on", isOn, 0, 0)
+
+			// Update brightness
+			if currentLight.Dimming != nil && currentLight.Dimming.Brightness != nil {
+				m.popupPanel.UpdateFormField("brightness", int(*currentLight.Dimming.Brightness), 0, 0)
+			}
+
+			// Update color temperature
+			if currentLight.ColorTemperature != nil && currentLight.ColorTemperature.Mirek != nil {
+				m.popupPanel.UpdateFormField("color_temp", *currentLight.ColorTemperature.Mirek, 0, 0)
+			}
+
+			// Update color
+			if currentLight.Color != nil && currentLight.Color.Xy != nil {
+				x, y := float64(0), float64(0)
+				if currentLight.Color.Xy.X != nil {
+					x = float64(*currentLight.Color.Xy.X)
+				}
+				if currentLight.Color.Xy.Y != nil {
+					y = float64(*currentLight.Color.Xy.Y)
+				}
+				m.popupPanel.UpdateFormField("color", 0, x, y)
+			}
+		}
+	}
+
+	// Show form in live mode - changes apply immediately
+	m.popupPanel.ShowFormLive("Controls: "+lightName, fields,
+		func(result panels.PopupResult, finalFields []panels.FormField) {
+			// On close, clear live sync and refresh
+			m.editingLightID = ""
+			m.syncLivePopup = nil
+			m.refreshHierarchyPanel()
+			m.updateDetailPanel()
+		},
+		func(field panels.FormField) {
+			// onChange callback - apply changes immediately and update UI
+			switch field.ID {
+			case "on":
+				newOn := field.Value != 0
+				if err := bridge.SetLightOn(lightID, newOn); err != nil {
+					m.setStatus("Failed to update light: "+err.Error(), true)
+				}
+			case "brightness":
+				if err := bridge.SetLightBrightness(lightID, float64(field.Value)); err != nil {
+					m.setStatus("Failed to set brightness: "+err.Error(), true)
+				}
+			case "color_temp":
+				if err := bridge.SetLightColorTemperature(lightID, field.Value); err != nil {
+					m.setStatus("Failed to set color temp: "+err.Error(), true)
+				}
+			case "color":
+				if err := bridge.SetLightColor(lightID, field.ColorX, field.ColorY); err != nil {
+					m.setStatus("Failed to set color: "+err.Error(), true)
+				}
+			}
+			// Live update the UI panels
+			m.refreshHierarchyPanel()
+			m.updateDetailPanel()
+		},
+	)
 
 	return startBlinkTicker()
 }

@@ -1062,6 +1062,34 @@ func (s *BridgeState) SetLightBrightness(id string, brightness float64) {
 	}
 }
 
+// SetLightColor optimistically updates a light's color in the cache.
+func (s *BridgeState) SetLightColor(id string, x, y float64) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if light, ok := s.Lights[id]; ok {
+		if light.Color != nil && light.Color.Xy != nil {
+			xf, yf := float32(x), float32(y)
+			light.Color.Xy.X = &xf
+			light.Color.Xy.Y = &yf
+			s.Lights[id] = light
+		}
+	}
+}
+
+// SetLightColorTemperature optimistically updates a light's color temperature in the cache.
+func (s *BridgeState) SetLightColorTemperature(id string, mirek int) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if light, ok := s.Lights[id]; ok {
+		if light.ColorTemperature != nil {
+			light.ColorTemperature.Mirek = &mirek
+			s.Lights[id] = light
+		}
+	}
+}
+
 // SetGroupedLightBrightness optimistically updates a grouped light's brightness in the cache.
 func (s *BridgeState) SetGroupedLightBrightness(id string, brightness float64) {
 	s.mu.Lock()

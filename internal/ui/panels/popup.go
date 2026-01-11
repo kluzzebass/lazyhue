@@ -5,12 +5,16 @@ import (
 	"fmt"
 	"math"
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/kluzzebass/lazyhue/internal/ui"
 )
+
+// debounceDelay is the delay before sending slider changes to the bridge.
+const debounceDelay = 50 * time.Millisecond
 
 // PopupMode defines the type of popup.
 type PopupMode int
@@ -136,6 +140,8 @@ type PopupPanel struct {
 	formLiveMode     bool                    // true = changes apply immediately, false = apply on Save
 	formOnChange     func(field FormField)   // Callback for live mode changes
 	formFieldEditing bool                    // true when current field is in edit mode (captures keys)
+	debouncePending  *FormField              // Pending field change waiting for debounce
+	debounceTime     time.Time               // Timestamp of last change (for debounce)
 	mouseCaptureIdx  int                     // Field index that has mouse capture (-1 = none)
 	mouseCaptureType FormFieldType           // Type of captured field for validation
 
@@ -154,6 +160,7 @@ type PopupPanel struct {
 	colorOriginalY float64 // Original Y before editing (for cancel)
 	colorSelRow    int     // Selected row on disc (screen coordinates)
 	colorSelCol    int     // Selected column on disc (screen coordinates)
+	colorPosValid  bool    // True if colorSelRow/colorSelCol are valid (have been set by user interaction)
 	colorBlinkOn   bool    // Blink state for color wheel indicator
 
 	// HSL/RGB slider capture state
@@ -234,11 +241,10 @@ func (p *PopupPanel) ShowForm(title string, fields []FormField, onClose func(Pop
 	p.showFormInternal(title, fields, onClose, nil, false)
 }
 
-// ShowFormLive displays a form that can toggle between edit and live mode.
-// In live mode, onChange is called immediately when values change.
-// Press Enter to toggle between modes.
+// ShowFormLive displays a form in live mode where changes apply immediately.
+// onChange is called immediately when values change.
 func (p *PopupPanel) ShowFormLive(title string, fields []FormField, onClose func(PopupResult, []FormField), onChange func(field FormField)) {
-	p.showFormInternal(title, fields, onClose, onChange, false)
+	p.showFormInternal(title, fields, onClose, onChange, true)
 }
 
 func (p *PopupPanel) showFormInternal(title string, fields []FormField, onClose func(PopupResult, []FormField), onChange func(field FormField), startLive bool) {
@@ -276,6 +282,7 @@ func (p *PopupPanel) showFormInternal(title string, fields []FormField, onClose 
 	p.formFieldEditing = false  // Not editing any field initially
 	p.mouseCaptureIdx = -1      // No mouse capture initially
 	p.capturedSliderRow = -1    // No slider row captured
+	p.colorPosValid = false     // Color position needs to be calculated from XY initially
 	p.selectDropdownOpen = false
 	p.selectDropdownCursor = 0
 	p.selectDropdownScroll = 0
@@ -306,6 +313,22 @@ func (p *PopupPanel) showFormInternal(title string, fields []FormField, onClose 
 // GetFormFields returns the current form field values.
 func (p *PopupPanel) GetFormFields() []FormField {
 	return p.formFields
+}
+
+// UpdateFormField updates a form field's value by ID without triggering onChange.
+// Used for live state sync from external sources (e.g., SSE events).
+func (p *PopupPanel) UpdateFormField(id string, value int, colorX, colorY float64) {
+	if !p.visible || p.mode != PopupModeForm {
+		return
+	}
+	for i := range p.formFields {
+		if p.formFields[i].ID == id {
+			p.formFields[i].Value = value
+			p.formFields[i].ColorX = colorX
+			p.formFields[i].ColorY = colorY
+			break
+		}
+	}
 }
 
 // Hide hides the popup.
@@ -519,7 +542,10 @@ func (p *PopupPanel) handleFormKey(msg tea.KeyMsg) tea.Cmd {
 	// Handle enter
 	if key == "enter" {
 		if p.formOnButtons {
-			if p.formBtnIndex == 0 {
+			// In live mode, there's only Close (changes already applied)
+			if p.formLiveMode {
+				p.close(PopupResult{Confirmed: true})
+			} else if p.formBtnIndex == 0 {
 				p.close(PopupResult{Confirmed: true})
 			} else {
 				p.close(PopupResult{Confirmed: false})
@@ -552,19 +578,41 @@ func (p *PopupPanel) handleFormKey(msg tea.KeyMsg) tea.Cmd {
 				p.formFieldEditing = true
 				p.colorOriginalX = field.ColorX
 				p.colorOriginalY = field.ColorY
-				// Initialize screen position from current color
-				// Ellipse params must match rendering
-				radiusY := 4
-				radiusX := 9
-				whiteX, whiteY := 0.31, 0.33
-				p.colorSelRow = radiusY - int((field.ColorY-whiteY)*float64(radiusY)/0.35+0.5)
-				p.colorSelCol = radiusX + int((field.ColorX-whiteX)*float64(radiusX)/0.35+0.5)
-				// Clamp to valid range
-				if p.colorSelRow < 0 {
-					p.colorSelRow = 0
-				}
-				if p.colorSelRow > radiusY*2 {
-					p.colorSelRow = radiusY * 2
+				
+				// Only calculate screen position from XY if we don't have a valid position
+				// (i.e., first time entering edit mode for this color field)
+				if !p.colorPosValid {
+					// Initialize screen position from current color
+					// Must use inverse of the forward conversion (screen→color)
+					radiusY := 4
+					radiusX := 9
+					
+					// Convert XY to hue/sat (in XY space)
+					hue, sat := ui.XyToHueSat(field.ColorX, field.ColorY)
+					
+					// The wheel uses: hue = -angle*180/π + 90
+					// So: angle = (90 - hue) * π/180
+					angleRad := float64(90-hue) * math.Pi / 180
+					dist := float64(sat) / 100.0
+					xNorm := dist * math.Cos(angleRad)
+					yNorm := -dist * math.Sin(angleRad)
+					
+					p.colorSelCol = radiusX + int(xNorm*float64(radiusX)+0.5)
+					p.colorSelRow = radiusY + int(yNorm*float64(radiusY)+0.5)
+					
+					// Clamp to valid range
+					if p.colorSelRow < 0 {
+						p.colorSelRow = 0
+					}
+					if p.colorSelRow > radiusY*2 {
+						p.colorSelRow = radiusY * 2
+					}
+					if p.colorSelCol < 0 {
+						p.colorSelCol = 0
+					}
+					if p.colorSelCol > radiusX*2 {
+						p.colorSelCol = radiusX * 2
+					}
 				}
 				return nil
 			case FormFieldHSL:
@@ -649,9 +697,18 @@ func (p *PopupPanel) handleFormKey(msg tea.KeyMsg) tea.Cmd {
 			field := &p.formFields[p.formCursor]
 			changed := false
 			switch field.Type {
-			case FormFieldSlider, FormFieldBrightness, FormFieldColorTemp:
+			case FormFieldSlider, FormFieldBrightness:
 				if field.Value > field.Min {
 					field.Value--
+					changed = true
+				}
+			case FormFieldColorTemp:
+				// Inverted: left = toward warm = increase mirek
+				if field.Value < field.Max {
+					field.Value += 2
+					if field.Value > field.Max {
+						field.Value = field.Max
+					}
 					changed = true
 				}
 			// Note: Color requires Enter to edit
@@ -669,9 +726,18 @@ func (p *PopupPanel) handleFormKey(msg tea.KeyMsg) tea.Cmd {
 			field := &p.formFields[p.formCursor]
 			changed := false
 			switch field.Type {
-			case FormFieldSlider, FormFieldBrightness, FormFieldColorTemp:
+			case FormFieldSlider, FormFieldBrightness:
 				if field.Value < field.Max {
 					field.Value++
+					changed = true
+				}
+			case FormFieldColorTemp:
+				// Inverted: right = toward cool = decrease mirek
+				if field.Value > field.Min {
+					field.Value -= 2
+					if field.Value < field.Min {
+						field.Value = field.Min
+					}
 					changed = true
 				}
 			// Note: Color requires Enter to edit
@@ -804,12 +870,16 @@ func (p *PopupPanel) handleFieldEditMode(msg tea.KeyMsg) tea.Cmd {
 
 		switch key {
 		case "esc":
-			field.ColorX = p.colorOriginalX
-			field.ColorY = p.colorOriginalY
+			// In live mode, changes are already applied, just exit edit mode
+			// In non-live mode, revert to original
+			if !p.formLiveMode {
+				field.ColorX = p.colorOriginalX
+				field.ColorY = p.colorOriginalY
+			}
 			p.formFieldEditing = false
 			return nil
 		case "enter":
-			p.notifyLiveChange(*field)
+			// Enter just exits edit mode (same as Esc in live mode)
 			p.formFieldEditing = false
 			return nil
 		case "left", "h":
@@ -866,15 +936,28 @@ func (p *PopupPanel) handleFieldEditMode(msg tea.KeyMsg) tea.Cmd {
 			}
 		}
 		
-		// Derive ColorX/ColorY from screen position
+		// Mark position as valid since user interacted with it
+		p.colorPosValid = true
+		
+		// Derive ColorX/ColorY using same HSV calculation as rendering
 		dy := float64(p.colorSelRow - radiusY)
 		dx := float64(p.colorSelCol - radiusX)
 		xNorm := dx / float64(radiusX)
 		yNorm := dy / float64(radiusY)
 		
-		whiteX, whiteY := 0.31, 0.33
-		field.ColorX = whiteX + xNorm*0.35
-		field.ColorY = whiteY - yNorm*0.35 // Negate because screen Y is inverted
+		// Calculate hue and saturation same as rendering
+		// Reverse direction and rotate to put Red at right
+		dist := math.Sqrt(xNorm*xNorm + yNorm*yNorm)
+		angle := math.Atan2(-yNorm, xNorm)
+		hue := -int(angle*180/math.Pi) + 90
+		hue = ((hue % 360) + 360) % 360
+		sat := int(dist * 100)
+		if sat > 100 {
+			sat = 100
+		}
+		
+		// Convert HSV to XY
+		field.ColorX, field.ColorY = ui.HueSatToXY(hue, sat)
 		
 		// Clamp to valid range
 		if field.ColorX < 0.05 {
@@ -889,6 +972,9 @@ func (p *PopupPanel) handleFieldEditMode(msg tea.KeyMsg) tea.Cmd {
 		if field.ColorY > 0.6 {
 			field.ColorY = 0.6
 		}
+		
+		// Notify live change for real-time updates
+		p.notifyLiveChange(*field)
 		return nil
 
 	case FormFieldHSL:
@@ -1038,11 +1124,29 @@ func (p *PopupPanel) blurAllTextInputs() {
 	}
 }
 
-// notifyLiveChange calls the onChange callback if in live mode.
+// notifyLiveChange schedules a debounced callback if in live mode.
+// The callback is debounced to avoid flooding the API during rapid slider adjustments.
 func (p *PopupPanel) notifyLiveChange(field FormField) {
-	if p.formLiveMode && p.formOnChange != nil {
-		p.formOnChange(field)
+	if !p.formLiveMode || p.formOnChange == nil {
+		return
 	}
+	
+	// Store the pending change and current timestamp
+	fieldCopy := field
+	p.debouncePending = &fieldCopy
+	p.debounceTime = time.Now()
+	
+	// Start a goroutine that will fire the callback after the debounce delay
+	// if no newer changes have come in
+	timestamp := p.debounceTime
+	callback := p.formOnChange
+	go func() {
+		time.Sleep(debounceDelay)
+		// Only fire if this is still the most recent change
+		if p.debouncePending != nil && timestamp.Equal(p.debounceTime) {
+			callback(fieldCopy)
+		}
+	}()
 }
 
 // IsLiveMode returns whether the form is in live mode.
@@ -1077,10 +1181,10 @@ func (p *PopupPanel) updateSliderFromMouse(field *FormField, mouseX int, valueSt
 		sliderStartX = valueStartX + 1 // After "["
 	case FormFieldBrightness:
 		sliderWidth = 20
-		sliderStartX = valueStartX + 1 // After initial char
+		sliderStartX = valueStartX // Slider starts directly at value position
 	case FormFieldColorTemp:
 		sliderWidth = 20
-		sliderStartX = valueStartX
+		sliderStartX = valueStartX - 1 // Account for rendering offset
 	default:
 		return
 	}
@@ -1096,7 +1200,12 @@ func (p *PopupPanel) updateSliderFromMouse(field *FormField, mouseX int, valueSt
 
 	// Map to value
 	if field.Max > field.Min {
-		field.Value = field.Min + (clickPos * (field.Max - field.Min) / sliderWidth)
+		if field.Type == FormFieldColorTemp {
+			// ColorTemp is inverted: left = Max (warm), right = Min (cool)
+			field.Value = field.Max - (clickPos * (field.Max - field.Min) / sliderWidth)
+		} else {
+			field.Value = field.Min + (clickPos * (field.Max - field.Min) / sliderWidth)
+		}
 		if field.Value < field.Min {
 			field.Value = field.Min
 		}
@@ -1105,9 +1214,7 @@ func (p *PopupPanel) updateSliderFromMouse(field *FormField, mouseX int, valueSt
 		}
 	}
 
-	if p.formLiveMode && p.formOnChange != nil {
-		p.formOnChange(*field)
-	}
+	p.notifyLiveChange(*field)
 }
 
 // getFieldRowY returns the Y position of a field's first row on screen.
@@ -1157,16 +1264,27 @@ func (p *PopupPanel) updateColorFromMouse(field *FormField, mouseX, mouseY, valu
 	// Update selection
 	p.colorSelRow = clickedRow
 	p.colorSelCol = clickedCol
+	p.colorPosValid = true
 	
-	// Derive ColorX/ColorY
+	// Derive ColorX/ColorY using same HSV calculation as rendering
 	dxf := float64(clickedCol - radiusX)
 	dy := float64(clickedRow - centerRow)
 	xNorm := dxf / float64(radiusX)
-	yNormColor := dy / float64(radiusY)
+	yNorm := dy / float64(radiusY)
 	
-	whiteX, whiteY := 0.31, 0.33
-	field.ColorX = whiteX + xNorm*0.35
-	field.ColorY = whiteY - yNormColor*0.35
+	// Calculate hue and saturation same as rendering
+	// Reverse direction and rotate to put Red at right
+	dist := math.Sqrt(xNorm*xNorm + yNorm*yNorm)
+	angle := math.Atan2(-yNorm, xNorm)
+	hue := -int(angle*180/math.Pi) + 90
+	hue = ((hue % 360) + 360) % 360
+	sat := int(dist * 100)
+	if sat > 100 {
+		sat = 100
+	}
+	
+	// Convert HSV to XY using the same function as elsewhere
+	field.ColorX, field.ColorY = ui.HueSatToXY(hue, sat)
 	
 	// Clamp
 	if field.ColorX < 0.05 {
@@ -1182,9 +1300,7 @@ func (p *PopupPanel) updateColorFromMouse(field *FormField, mouseX, mouseY, valu
 		field.ColorY = 0.6
 	}
 	
-	if p.formLiveMode && p.formOnChange != nil {
-		p.formOnChange(*field)
-	}
+	p.notifyLiveChange(*field)
 }
 
 // updateHSLFromMouseRow updates an HSL field for a specific slider row.
@@ -1218,9 +1334,7 @@ func (p *PopupPanel) updateHSLFromMouseRow(field *FormField, mouseX, valueStartX
 		field.HSLSliderFocus = 2
 	}
 
-	if p.formLiveMode && p.formOnChange != nil {
-		p.formOnChange(*field)
-	}
+	p.notifyLiveChange(*field)
 }
 
 // updateRGBFromMouseRow updates an RGB field for a specific slider row.
@@ -1256,9 +1370,7 @@ func (p *PopupPanel) updateRGBFromMouseRow(field *FormField, mouseX, valueStartX
 		field.RGBSliderFocus = 2
 	}
 
-	if p.formLiveMode && p.formOnChange != nil {
-		p.formOnChange(*field)
-	}
+	p.notifyLiveChange(*field)
 }
 
 // openSelectDropdown opens the dropdown for the current select field.
@@ -1591,9 +1703,7 @@ func (p *PopupPanel) handleMouse(msg tea.MouseMsg) tea.Cmd {
 							} else {
 								field.Value = 1
 							}
-							if p.formLiveMode && p.formOnChange != nil {
-								p.formOnChange(*field)
-							}
+							p.notifyLiveChange(*field)
 						}
 
 					case FormFieldSlider, FormFieldBrightness, FormFieldColorTemp:
@@ -1623,15 +1733,26 @@ func (p *PopupPanel) handleMouse(msg tea.MouseMsg) tea.Cmd {
 								// Valid click - update selection
 								p.colorSelRow = clickedRow
 								p.colorSelCol = clickedCol
+								p.colorPosValid = true
 								
-								// Derive ColorX/ColorY from clicked position
+								// Derive ColorX/ColorY using same HSV calculation as rendering
 								dx := float64(clickedCol - radiusX)
 								xNorm := dx / float64(radiusX)
 								yNormColor := dy / float64(radiusY)
 								
-								whiteX, whiteY := 0.31, 0.33
-								field.ColorX = whiteX + xNorm*0.35
-								field.ColorY = whiteY - yNormColor*0.35
+								// Calculate hue and saturation same as rendering
+								// Reverse direction and rotate to put Red at right
+								dist := math.Sqrt(xNorm*xNorm + yNormColor*yNormColor)
+								angle := math.Atan2(-yNormColor, xNorm)
+								hue := -int(angle*180/math.Pi) + 90
+								hue = ((hue % 360) + 360) % 360
+								sat := int(dist * 100)
+								if sat > 100 {
+									sat = 100
+								}
+								
+								// Convert HSV to XY
+								field.ColorX, field.ColorY = ui.HueSatToXY(hue, sat)
 								
 								// Clamp
 								if field.ColorX < 0.05 {
@@ -1654,9 +1775,7 @@ func (p *PopupPanel) handleMouse(msg tea.MouseMsg) tea.Cmd {
 									p.colorOriginalY = p.formFields[p.formCursor].ColorY
 								}
 								
-								if p.formLiveMode && p.formOnChange != nil {
-									p.formOnChange(*field)
-								}
+								p.notifyLiveChange(*field)
 								
 								// Set mouse capture for dragging
 								p.mouseCaptureIdx = p.formCursor
@@ -1711,9 +1830,7 @@ func (p *PopupPanel) handleMouse(msg tea.MouseMsg) tea.Cmd {
 									opt := field.Options[subRow]
 									if field.Value != opt.Value {
 										field.Value = opt.Value
-										if p.formLiveMode && p.formOnChange != nil {
-											p.formOnChange(*field)
-										}
+										p.notifyLiveChange(*field)
 									}
 								}
 							} else {
@@ -1726,9 +1843,7 @@ func (p *PopupPanel) handleMouse(msg tea.MouseMsg) tea.Cmd {
 									if clickX >= currentX && clickX < currentX+optWidth-2 {
 										if field.Value != opt.Value {
 											field.Value = opt.Value
-											if p.formLiveMode && p.formOnChange != nil {
-												p.formOnChange(*field)
-											}
+											p.notifyLiveChange(*field)
 										}
 										break
 									}
@@ -1779,23 +1894,20 @@ func (p *PopupPanel) handleMouse(msg tea.MouseMsg) tea.Cmd {
 					if field.Value > field.Max {
 						field.Value = field.Max
 					}
-					if p.formLiveMode && p.formOnChange != nil {
-						p.formOnChange(*field)
-					}
+					p.notifyLiveChange(*field)
 					return nil
 
 				case FormFieldColorTemp:
+					// Inverted: scroll up moves toward cool (right), scroll down moves toward warm (left)
 					step := max(1, (field.Max-field.Min)/20)
-					field.Value += delta * step
+					field.Value -= delta * step // Inverted direction
 					if field.Value < field.Min {
 						field.Value = field.Min
 					}
 					if field.Value > field.Max {
 						field.Value = field.Max
 					}
-					if p.formLiveMode && p.formOnChange != nil {
-						p.formOnChange(*field)
-					}
+					p.notifyLiveChange(*field)
 					return nil
 
 				case FormFieldSelect, FormFieldRadio:
@@ -1814,9 +1926,7 @@ func (p *PopupPanel) handleMouse(msg tea.MouseMsg) tea.Cmd {
 							newIdx = 0
 						}
 						field.Value = field.Options[newIdx].Value
-						if p.formLiveMode && p.formOnChange != nil {
-							p.formOnChange(*field)
-						}
+						p.notifyLiveChange(*field)
 						return nil
 					}
 
@@ -1842,9 +1952,7 @@ func (p *PopupPanel) handleMouse(msg tea.MouseMsg) tea.Cmd {
 							field.ColorY = 1
 						}
 					}
-					if p.formLiveMode && p.formOnChange != nil {
-						p.formOnChange(*field)
-					}
+					p.notifyLiveChange(*field)
 					return nil
 				}
 			}
@@ -2054,16 +2162,21 @@ func (p *PopupPanel) fieldHeight(field FormField) int {
 	return 1
 }
 
-// totalFormRows returns the total visual rows for all fields.
+// totalFormRows returns the total visual rows for all fields including spacing.
 func (p *PopupPanel) totalFormRows() int {
 	total := 0
-	for _, f := range p.formFields {
+	for i, f := range p.formFields {
 		total += p.fieldHeight(f)
+		// Add blank line after each field except the last
+		if i < len(p.formFields)-1 {
+			total++
+		}
 	}
 	return total
 }
 
 // fieldAtRow returns the field index and sub-row within that field for a given visual row.
+// Returns -1 for fieldIdx if the row is a spacing row between fields.
 func (p *PopupPanel) fieldAtRow(row int) (fieldIdx int, subRow int) {
 	currentRow := 0
 	for i, f := range p.formFields {
@@ -2072,9 +2185,18 @@ func (p *PopupPanel) fieldAtRow(row int) (fieldIdx int, subRow int) {
 			return i, row - currentRow
 		}
 		currentRow += h
+		// Account for spacing row after each field except the last
+		if i < len(p.formFields)-1 {
+			if row == currentRow {
+				// This is a spacing row
+				return -1, 0
+			}
+			currentRow++
+		}
 	}
 	return -1, 0
 }
+
 
 // rowForField returns the starting visual row for a field.
 func (p *PopupPanel) rowForField(fieldIdx int) int {
@@ -2197,11 +2319,12 @@ func (p *PopupPanel) renderFormContent(width, height int) []string {
 			case FormFieldColorTemp:
 				// Render color temperature slider (warm orange to cool blue)
 				sliderWidth := 20
-				// Mirek range is typically 153 (cool/6500K) to 500 (warm/2000K)
-				// Map value position on slider
+				// Mirek range: 153 (cool/6500K) to 500 (warm/2000K)
+				// Warm (high mirek) = left side, Cool (low mirek) = right side
+				// Invert position: high mirek → left, low mirek → right
 				pos := 0
 				if field.Max > field.Min {
-					pos = (field.Value - field.Min) * sliderWidth / (field.Max - field.Min)
+					pos = (field.Max - field.Value) * sliderWidth / (field.Max - field.Min)
 				}
 				if pos < 0 {
 					pos = 0
@@ -2214,8 +2337,8 @@ func (p *PopupPanel) renderFormContent(width, height int) []string {
 				bar := ""
 				for j := 0; j < sliderWidth; j++ {
 					// Gradient from warm orange to cool blue
-					warmR, warmG, warmB := 255, 180, 100 // Warm
-					coolR, coolG, coolB := 150, 200, 255 // Cool
+					warmR, warmG, warmB := 255, 180, 100 // Warm (left, high mirek)
+					coolR, coolG, coolB := 150, 200, 255 // Cool (right, low mirek)
 					r := warmR + (coolR-warmR)*j/sliderWidth
 					g := warmG + (coolG-warmG)*j/sliderWidth
 					b := warmB + (coolB-warmB)*j/sliderWidth
@@ -2247,18 +2370,33 @@ func (p *PopupPanel) renderFormContent(width, height int) []string {
 				
 				// Calculate selection position
 				var selRow, selCol int
-				if p.formFieldEditing {
+				if p.formFieldEditing || p.colorPosValid {
+					// Use stored position from user interaction
 					selRow = p.colorSelRow
 					selCol = p.colorSelCol
 				} else {
-					whiteX, whiteY := 0.31, 0.33
-					selCol = radiusX + int((field.ColorX-whiteX)*float64(radiusX)/0.35+0.5)
-					selRow = centerRow - int((field.ColorY-whiteY)*float64(radiusY)/0.35+0.5)
+					// First time showing - calculate from XY (approximate)
+					// This won't be perfect but is only used before first interaction
+					hue, sat := ui.XyToHueSat(field.ColorX, field.ColorY)
+					angleRad := float64(90-hue) * math.Pi / 180
+					dist := float64(sat) / 100.0
+					xNorm := dist * math.Cos(angleRad)
+					yNorm := -dist * math.Sin(angleRad)
+					
+					selCol = radiusX + int(xNorm*float64(radiusX)+0.5)
+					selRow = centerRow + int(yNorm*float64(radiusY)+0.5)
+					
 					if selRow < 0 {
 						selRow = 0
 					}
 					if selRow >= diameterY {
 						selRow = diameterY - 1
+					}
+					if selCol < 0 {
+						selCol = 0
+					}
+					if selCol > radiusX*2 {
+						selCol = radiusX * 2
 					}
 				}
 				
@@ -2301,8 +2439,10 @@ func (p *PopupPanel) renderFormContent(width, height int) []string {
 							yNorm := useY / float64(radiusY)
 							dist := math.Sqrt(xNorm*xNorm + yNorm*yNorm)
 							
-							angle := math.Atan2(yNorm, xNorm)
-							blockHue := int((angle)*180/3.14159) + 180
+							// Calculate angle and reverse direction for standard color wheel
+							// Red at right, going counter-clockwise: Red→Magenta→Blue→Cyan→Green→Yellow→Red
+							angle := math.Atan2(-yNorm, xNorm)
+							blockHue := -int(angle*180/math.Pi) + 90 // Rotate to put Red at right
 							blockHue = ((blockHue % 360) + 360) % 360
 							
 							blockSat := int(dist * 100)
@@ -2552,27 +2692,27 @@ func (p *PopupPanel) renderFormContent(width, height int) []string {
 			lines[i] = strings.Repeat(" ", width)
 
 		} else if rowIdx == totalFieldRows+1 {
-			// Render Save/Cancel buttons
-			saveStyle := lipgloss.NewStyle()
-			cancelStyle := lipgloss.NewStyle()
-
-			if p.formOnButtons && p.formBtnIndex == 0 {
-				saveStyle = saveStyle.Reverse(true)
-			} else if p.formOnButtons && p.formBtnIndex == 1 {
-				cancelStyle = cancelStyle.Reverse(true)
-			}
-
+			// Render buttons
 			var buttons string
 			if p.formLiveMode {
-				// Live mode - show "Done" (changes already applied) and mode indicator
-				liveIndicator := lipgloss.NewStyle().
-					Foreground(lipgloss.Color("#ff6b6b")).
-					Bold(true).
-					Render(" ● LIVE ")
-				doneLabel := saveStyle.Render(" Done ")
-				buttons = liveIndicator + "  " + doneLabel
+				// Live mode - just show Close (changes already applied)
+				closeStyle := lipgloss.NewStyle()
+				if p.formOnButtons {
+					closeStyle = closeStyle.Reverse(true)
+				}
+				closeLabel := closeStyle.Render(" Close ")
+				buttons = closeLabel
 			} else {
 				// Edit mode - show Save/Cancel
+				saveStyle := lipgloss.NewStyle()
+				cancelStyle := lipgloss.NewStyle()
+
+				if p.formOnButtons && p.formBtnIndex == 0 {
+					saveStyle = saveStyle.Reverse(true)
+				} else if p.formOnButtons && p.formBtnIndex == 1 {
+					cancelStyle = cancelStyle.Reverse(true)
+				}
+
 				hasChanges := p.formHasChanges()
 				saveLabel := " Save "
 				if !hasChanges {

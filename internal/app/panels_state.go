@@ -368,7 +368,7 @@ func (m *Model) filterBindingsForSelection(bindings []ui.Binding) []ui.Binding {
 
 	switch m.selectedItem.Type {
 	case panels.EntityLight:
-		// Lights: toggle, on/off, brightness (renamed via parent device)
+		// Lights: controls (enter), toggle (space), on/off, brightness
 		return filterBindingsByAction(bindings, withTreeActions(
 			ui.ActionSelect, ui.ActionToggle, ui.ActionTurnOn, ui.ActionTurnOff,
 			ui.ActionBrightnessUp, ui.ActionBrightnessDown)...)
@@ -430,11 +430,22 @@ func (m *Model) buildEventDetails(msg BridgeEventMsg) panels.EventDetails {
 			details.ResourceName = state.GetLightName(light)
 			// Show current state
 			if light.On != nil && light.On.On != nil {
+				details.IsOn = *light.On.On
 				if *light.On.On {
 					if light.Dimming != nil && light.Dimming.Brightness != nil {
+						details.Brightness = float64(*light.Dimming.Brightness)
 						details.Details = fmt.Sprintf("on %.0f%%", *light.Dimming.Brightness)
 					} else {
 						details.Details = "on"
+					}
+					// Get color for indicator
+					if light.Color != nil && light.Color.Xy != nil &&
+						light.Color.Xy.X != nil && light.Color.Xy.Y != nil {
+						r, g, b := ui.XyToRGB(float64(*light.Color.Xy.X), float64(*light.Color.Xy.Y), 1.0)
+						details.IndicatorColor = fmt.Sprintf("#%02x%02x%02x", r, g, b)
+					} else if light.ColorTemperature != nil && light.ColorTemperature.Mirek != nil {
+						r, g, b := ui.MirekToRGB(*light.ColorTemperature.Mirek)
+						details.IndicatorColor = fmt.Sprintf("#%02x%02x%02x", r, g, b)
 					}
 				} else {
 					details.Details = "off"
@@ -449,8 +460,10 @@ func (m *Model) buildEventDetails(msg BridgeEventMsg) panels.EventDetails {
 				details.ResourceName = name
 			}
 			if gl.On != nil && gl.On.On != nil {
+				details.IsOn = *gl.On.On
 				if *gl.On.On {
 					if gl.Dimming != nil && gl.Dimming.Brightness != nil {
+						details.Brightness = float64(*gl.Dimming.Brightness)
 						details.Details = fmt.Sprintf("on %.0f%%", *gl.Dimming.Brightness)
 					} else {
 						details.Details = "on"
