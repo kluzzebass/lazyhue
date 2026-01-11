@@ -151,7 +151,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if detailWidth < 1 {
 			detailWidth = 1
 		}
-		detailHeight := detailBounds.Height - 4
+		detailHeight := detailBounds.Height - 2
 		if detailHeight < 1 {
 			detailHeight = 1
 		}
@@ -325,24 +325,23 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// Pass events to focused panel
 	switch m.focusedPane {
 	case PanelTree:
+		oldTabID := m.tree.ActiveTabID()
 		var cmd tea.Cmd
 		m.tree, cmd = m.tree.Update(msg)
 		if cmd != nil {
 			cmds = append(cmds, cmd)
 		}
 
+		// If tab changed, rebuild tree
+		newTabID := m.tree.ActiveTabID()
+		if newTabID != oldTabID {
+			m.rebuildTreeForActiveTab()
+		}
+
 		if node := m.tree.SelectedNode(); node != nil {
 			if node.Item != nil {
-				status := fmt.Sprintf("Selected: %s (%s)", node.Item.Name, node.Item.Type)
-				if node.Item.IsOn {
-					status += " [ON]"
-				} else {
-					status += " [OFF]"
-				}
-				m.status = status
 				m.updateDetailContent()
 			} else {
-				m.status = fmt.Sprintf("Selected: %s", node.Label)
 				m.updateDetailContent()
 			}
 		}
@@ -394,16 +393,13 @@ func (m Model) View() string {
 
 	// Compose layout
 	mainContent := lipgloss.JoinHorizontal(lipgloss.Top, leftColumn, rightColumn)
-	output.WriteString(mainContent + "\n")
 
-	// Status bar
-	statusStyle := lipgloss.NewStyle().
-		Foreground(m.styles.Theme.TextMuted).
-		Width(m.width)
-	output.WriteString(statusStyle.Render(m.status) + "\n")
+	// Combine with help
+	full := lipgloss.JoinVertical(lipgloss.Left, mainContent, m.help.View(m.keys))
 
-	// Help
-	output.WriteString(m.help.View(m.keys))
+	// Constrain to terminal size
+	result := lipgloss.Place(m.width, m.height, lipgloss.Left, lipgloss.Top, full)
+	output.WriteString(result)
 
 	return m.zones.Scan(output.String())
 }

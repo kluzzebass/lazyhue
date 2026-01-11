@@ -359,7 +359,21 @@ func (p *TreePanel) Update(msg tea.Msg) (*TreePanel, tea.Cmd) {
 		}
 
 	case tea.MouseClickMsg:
-		// Check for zone clicks
+		// Check for tab clicks first
+		if p.zones != nil {
+			for i := range p.tabs {
+				zoneID := ui2.TabZone(i)
+				if p.zones.Get(zoneID).InBounds(msg) {
+					if msg.Button == tea.MouseLeft {
+						p.SetActiveTab(i)
+						// Return a special message that app layer can handle to rebuild tree
+						return p, nil
+					}
+				}
+			}
+		}
+
+		// Check for tree item zone clicks
 		if p.zones != nil {
 			for i, f := range p.flatList {
 				zoneID := ui2.TreeItemZone(f.Node.ID)
@@ -409,9 +423,12 @@ func (p *TreePanel) View(focused bool) string {
 
 	// Constrain content height
 	contentLines := strings.Split(content, "\n")
+	// Remove trailing empty line if present (list may add trailing newline)
+	if len(contentLines) > 0 && contentLines[len(contentLines)-1] == "" {
+		contentLines = contentLines[:len(contentLines)-1]
+	}
 	if len(contentLines) > innerHeight {
 		contentLines = contentLines[:innerHeight]
-		content = strings.Join(contentLines, "\n")
 	}
 
 	// Get border characters
@@ -439,8 +456,9 @@ func (p *TreePanel) View(focused bool) string {
 		lines = append(lines, leftBorder+paddedLine+rightBorder)
 	}
 
-	// Fill remaining height
-	for len(lines) < p.height-1 {
+	// Fill to exact height (1 for top border + content + 1 for bottom border)
+	targetHeight := p.height
+	for len(lines) < targetHeight-1 {
 		paddedLine := strings.Repeat(" ", innerWidth)
 		lines = append(lines, leftBorder+paddedLine+rightBorder)
 	}
@@ -465,7 +483,7 @@ func (p *TreePanel) renderTabbedBorder(focused bool, borderColor color.Color) st
 		keyWidth = lipgloss.Width(keyRendered)
 	}
 
-	// Build tabs
+	// Build tabs with clickable zones
 	var tabParts []string
 	for i, tab := range p.tabs {
 		var tabStyle lipgloss.Style
@@ -477,7 +495,13 @@ func (p *TreePanel) renderTabbedBorder(focused bool, borderColor color.Color) st
 			tabStyle = lipgloss.NewStyle().
 				Foreground(p.styles.Theme.TextMuted)
 		}
-		tabParts = append(tabParts, tabStyle.Render(tab))
+		tabRendered := tabStyle.Render(tab)
+		// Mark tab as clickable zone
+		if p.zones != nil {
+			zoneID := ui2.TabZone(i)
+			tabRendered = p.zones.Mark(zoneID, tabRendered)
+		}
+		tabParts = append(tabParts, tabRendered)
 		if i < len(p.tabs)-1 {
 			sepStyle := lipgloss.NewStyle().Foreground(borderColor)
 			tabParts = append(tabParts, sepStyle.Render(border.Top))

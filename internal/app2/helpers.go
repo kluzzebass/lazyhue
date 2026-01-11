@@ -505,10 +505,6 @@ func (m *Model) updateDetailContent() {
 
 	// Build content based on entity type
 	var content strings.Builder
-	content.WriteString(node.Item.Name)
-	content.WriteString("\n")
-	content.WriteString(strings.Repeat("─", 30))
-	content.WriteString("\n\n")
 	content.WriteString(fmt.Sprintf("Type: %s\n", node.Item.Type))
 	content.WriteString(fmt.Sprintf("ID: %s\n", node.Item.ID))
 
@@ -792,9 +788,12 @@ func (m *Model) renderDetailPanel(width, height int, focused bool, key string) s
 	}
 
 	contentLines := strings.Split(content, "\n")
+	// Remove trailing empty line if present (viewport may add trailing newline)
+	if len(contentLines) > 0 && contentLines[len(contentLines)-1] == "" {
+		contentLines = contentLines[:len(contentLines)-1]
+	}
 	if len(contentLines) > innerHeight {
 		contentLines = contentLines[:innerHeight]
-		content = strings.Join(contentLines, "\n")
 	}
 
 	border := lipgloss.RoundedBorder()
@@ -817,7 +816,9 @@ func (m *Model) renderDetailPanel(width, height int, focused bool, key string) s
 		lines = append(lines, leftBorder+paddedLine+rightBorder)
 	}
 
-	for len(lines) < height-1 {
+	// Fill to exact height (1 for top border + content + 1 for bottom border)
+	targetHeight := height
+	for len(lines) < targetHeight-1 {
 		paddedLine := strings.Repeat(" ", innerWidth)
 		lines = append(lines, leftBorder+paddedLine+rightBorder)
 	}
@@ -877,6 +878,13 @@ func (m *Model) renderLogPanel(width, height int, focused bool, key string) stri
 			line = lipgloss.Place(innerWidth, 1, lipgloss.Left, lipgloss.Top, line)
 		}
 		paddedLine := lipgloss.Place(innerWidth, 1, lipgloss.Left, lipgloss.Top, line)
+		lines = append(lines, leftBorder+paddedLine+rightBorder)
+	}
+
+	// Fill to exact height (1 for top border + content + 1 for bottom border)
+	targetHeight := height
+	for len(lines) < targetHeight-1 {
+		paddedLine := strings.Repeat(" ", innerWidth)
 		lines = append(lines, leftBorder+paddedLine+rightBorder)
 	}
 
