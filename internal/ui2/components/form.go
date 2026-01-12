@@ -59,7 +59,13 @@ type Form struct {
 	// Styling and zones
 	Styles *ui2.Styles
 	Zones  *zone.Manager
+
+	// Blink timer
+	blinkTimerActive bool
 }
+
+// blinkTickMsg is sent by the blink timer to toggle the indicator.
+type blinkTickMsg struct{}
 
 // NewForm creates a new form.
 func NewForm(styles *ui2.Styles, zones *zone.Manager) *Form {
@@ -119,13 +125,44 @@ func (f *Form) Update(msg tea.Msg) (*Form, tea.Cmd) {
 	var cmds []tea.Cmd
 
 	switch msg := msg.(type) {
+	case blinkTickMsg:
+		// Toggle blink state if timer is active and we're editing a color field
+		if f.blinkTimerActive && f.Editing && f.Cursor < len(f.Fields) {
+			if f.Fields[f.Cursor].Type == FormFieldColor {
+				f.ColorWheel.BlinkOn = !f.ColorWheel.BlinkOn
+				// Schedule next tick
+				cmds = append(cmds, tea.Tick(500*time.Millisecond, func(t time.Time) tea.Msg {
+					return blinkTickMsg{}
+				}))
+			}
+		}
+		return f, tea.Batch(cmds...)
+
 	case tea.KeyMsg:
+		wasEditingColor := f.Editing && f.Cursor < len(f.Fields) && f.Fields[f.Cursor].Type == FormFieldColor
 		if f.handleKey(msg) {
+			// Check if we just entered edit mode for color field
+			isNowEditingColor := f.Editing && f.Cursor < len(f.Fields) && f.Fields[f.Cursor].Type == FormFieldColor
+			if !wasEditingColor && isNowEditingColor && f.blinkTimerActive {
+				// Start blink timer
+				cmds = append(cmds, tea.Tick(500*time.Millisecond, func(t time.Time) tea.Msg {
+					return blinkTickMsg{}
+				}))
+			}
 			return f, tea.Batch(cmds...)
 		}
 
 	case tea.MouseClickMsg:
+		wasEditingColor := f.Editing && f.Cursor < len(f.Fields) && f.Fields[f.Cursor].Type == FormFieldColor
 		if f.handleMouseClick(msg) {
+			// Check if we just entered edit mode for color field
+			isNowEditingColor := f.Editing && f.Cursor < len(f.Fields) && f.Fields[f.Cursor].Type == FormFieldColor
+			if !wasEditingColor && isNowEditingColor && f.blinkTimerActive {
+				// Start blink timer
+				cmds = append(cmds, tea.Tick(500*time.Millisecond, func(t time.Time) tea.Msg {
+					return blinkTickMsg{}
+				}))
+			}
 			return f, tea.Batch(cmds...)
 		}
 	}
@@ -259,6 +296,7 @@ func (f *Form) handleFieldClick(fieldIdx int, field *FormField, msg tea.MouseCli
 			// Enter edit mode if not already
 			if !f.Editing {
 				f.Editing = true
+				f.blinkTimerActive = true
 				f.ColorWheel.SetOriginal(field.ColorX, field.ColorY)
 				f.ColorWheel.SetColor(field.ColorX, field.ColorY)
 			}
@@ -304,6 +342,7 @@ func (f *Form) handleColorKey(keyStr string, field *FormField) bool {
 	switch keyStr {
 	case "esc", "enter":
 		f.Editing = false
+		f.blinkTimerActive = false
 		return true
 	case "left", "h":
 		if f.ColorWheel.MoveLeft() {
@@ -375,10 +414,18 @@ func (f *Form) activateField(field *FormField) {
 
 	case FormFieldColor:
 		f.ColorWheel.SetOriginal(field.ColorX, field.ColorY)
-		f.ColorWheel.PosValid = false // Reset so SetColor calculates position from color
-		f.ColorWheel.SetColor(field.ColorX, field.ColorY)
+		// Only reset position if colors don't match (indicating we need to recalculate)
+		// Otherwise preserve the existing position to avoid jumping
+		if f.ColorWheel.ColorX != field.ColorX || f.ColorWheel.ColorY != field.ColorY {
+			f.ColorWheel.PosValid = false // Reset so SetColor calculates position from color
+			f.ColorWheel.SetColor(field.ColorX, field.ColorY)
+		}
+		// Sync color values even if position is preserved
+		f.ColorWheel.ColorX = field.ColorX
+		f.ColorWheel.ColorY = field.ColorY
 		f.ColorWheel.BlinkOn = false // Start with indicator visible (dark bg), timer will toggle for blinking
 		f.Editing = true
+		f.blinkTimerActive = true
 
 	case FormFieldText:
 		f.OriginalText = field.TextValue
@@ -509,6 +556,7 @@ func (f *Form) cancelEdit(field *FormField) {
 			field.Blue = orig.Blue
 		}
 	}
+	f.blinkTimerActive = false
 	f.Editing = false
 }
 
@@ -617,10 +665,16 @@ func (f *Form) View() string {
 					// Don't set BlinkOn here - let it toggle naturally or remain as set
 				}
 			} else {
-				// Not editing or not focused - update position from color to show current indicator
-				// Reset PosValid so SetColor calculates position from color
-				f.ColorWheel.PosValid = false
-				f.ColorWheel.SetColor(field.ColorX, field.ColorY)
+				// Not editing or not focused - sync color values but preserve position
+				// This prevents the indicator from jumping when exiting edit mode
+				f.ColorWheel.ColorX = field.ColorX
+				f.ColorWheel.ColorY = field.ColorY
+				// Ensure indicator is visible (not blinking) when not editing
+				f.ColorWheel.BlinkOn = false
+				// Only recalculate position if PosValid is false (shouldn't happen here, but just in case)
+				if !f.ColorWheel.PosValid {
+					f.ColorWheel.SetColor(field.ColorX, field.ColorY)
+				}
 			}
 
 			// Don't force BlinkOn - let it be set by activateField or previous state

@@ -48,11 +48,11 @@ func (m *Model) buildHomeTree(_ *hue.BridgeState) {
 			Depth:    0,
 			Expanded: true, // Start expanded
 			Item: &panels.EntityItem{
-				ID:         bridge.Info.ID,
-				Name:       bridgeName,
-				Type:       panels.EntityBridge,
-				IsOn:       bridge.IsConnected(), // Use connection status for IsOn
-				RawPtr:     bridge,
+				ID:     bridge.Info.ID,
+				Name:   bridgeName,
+				Type:   panels.EntityBridge,
+				IsOn:   bridge.IsConnected(), // Use connection status for IsOn
+				RawPtr: bridge,
 				Brightness: func() float64 {
 					if isBlinking {
 						return 100.0 // Full brightness when blinking
@@ -104,7 +104,7 @@ func (m *Model) buildBridgeChildren(bridgeNode *panels.TreeNode, state *hue.Brid
 
 			// Get lights for this room
 			lights := state.RoomLights(room)
-			
+
 			// Calculate aggregate brightness and color from room lights
 			brightness, indicatorColor := m.calculateRoomAggregate(lights)
 
@@ -276,7 +276,7 @@ func (m *Model) buildBridgeChildren(bridgeNode *panels.TreeNode, state *hue.Brid
 
 			// Get lights for this zone
 			lights := state.RoomLights(zone)
-			
+
 			// Calculate aggregate brightness and color from zone lights
 			brightness, indicatorColor := m.calculateRoomAggregate(lights)
 
