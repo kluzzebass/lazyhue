@@ -463,7 +463,7 @@ func (b *Bridge) RenameZone(zoneID, newName string) error {
 
 	zoneName := "Unknown"
 	if zone, ok := b.state.GetZone(zoneID); ok {
-		zoneName = b.state.GetRoomName(zone)
+		zoneName = zone.RoomName("")
 	}
 	b.logRequest(fmt.Sprintf("%s: renamed to \"%s\"", zoneName, newName))
 	_, err := client.UpdateZone(context.Background(), zoneID, hueclient.UpdateZoneJSONRequestBody{
@@ -603,7 +603,7 @@ func (b *Bridge) DeleteZone(zoneID string) error {
 
 	zoneName := "Unknown"
 	if zone, ok := b.state.GetZone(zoneID); ok {
-		zoneName = b.state.GetRoomName(zone)
+		zoneName = zone.RoomName("")
 		}
 	b.logRequest(fmt.Sprintf("%s: deleted", zoneName))
 	_, err := client.DeleteZone(context.Background(), zoneID)
@@ -702,7 +702,7 @@ func (b *Bridge) SetZoneArchetype(zoneID string, archetype hueclient.RoomArchety
 
 	zoneName := "Unknown"
 	if zone, ok := b.state.GetZone(zoneID); ok {
-		zoneName = b.state.GetRoomName(zone)
+		zoneName = zone.RoomName("")
 		}
 	b.logRequest(fmt.Sprintf("%s: renamed to \"%s\"", zoneName, zoneName))
 	_, err := client.UpdateZone(context.Background(), zoneID, hueclient.UpdateZoneJSONRequestBody{

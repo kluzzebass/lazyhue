@@ -54,7 +54,7 @@ type Model struct {
 	focusedPane      string
 	activeBridgeID   string
 	status           string
-	logEntries       []LogEntry
+	activities       []Activity
 	quitting         bool
 	eventChan        chan bridgeEventMsg
 	eventCancelFuncs map[string]context.CancelFunc
@@ -118,7 +118,7 @@ func New(creds *config.CredentialStore) Model {
 		layout:           layoutTree,
 		focusedPane:      PanelTree,
 		status:           "Loading bridges...",
-		logEntries:       []LogEntry{},
+		activities:       []Activity{},
 		eventChan:        make(chan bridgeEventMsg, 100),
 		eventCancelFuncs: make(map[string]context.CancelFunc),
 		bridgeBlinkUntil: make(map[string]time.Time),
@@ -192,10 +192,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		bridge := m.manager.GetBridge(msg.bridgeID)
 		if bridge != nil {
 			bridge.OnRequest(func(bridgeID, message string) {
-				m.logEntries = append(m.logEntries, LogEntry{
-					Time:    time.Now(),
-					Type:    "request",
-					Message: message,
+				m.activities = append(m.activities, &RequestActivity{
+					timestamp: time.Now(),
+					message:   message,
 				})
 				m.updateLogContent()
 			})
@@ -238,17 +237,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.Batch(cmds...)
 
 	case bridgeEventMsg:
-		details := m.buildEventDetails(msg)
-		m.logEntries = append(m.logEntries, LogEntry{
-			Time:           time.Now(),
-			Type:           "event",
-			ResourceType:   details.ResourceType,
-			ResourceName:   details.ResourceName,
-			Details:        details.Details,
-			IndicatorColor: details.IndicatorColor,
-			Brightness:     details.Brightness,
-			IsOn:           details.IsOn,
-		})
+		bridge := m.manager.GetBridge(msg.bridgeID)
+		var state *hue.BridgeState
+		if bridge != nil {
+			state = bridge.GetState()
+		}
+		event := parseEventFromBridgeCallback(msg.bridgeID, msg.resourceType, msg.resourceID, msg.eventType, state)
+		m.activities = append(m.activities, event)
 		m.updateLogContent()
 
 		// Trigger blink for the bridge that received the event
@@ -274,10 +269,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case errMsg:
 		m.status = fmt.Sprintf("Error: %v", msg.err)
-		m.logEntries = append(m.logEntries, LogEntry{
-			Time:    time.Now(),
-			Type:    "error",
-			Message: m.status,
+		m.activities = append(m.activities, &ErrorActivity{
+			timestamp: time.Now(),
+			message:   m.status,
 		})
 		m.updateLogContent()
 		return m, nil
