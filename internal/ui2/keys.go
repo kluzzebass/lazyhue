@@ -189,6 +189,7 @@ func (k KeyMap) FullHelp() [][]key.Binding {
 		{k.Enter, k.Space, k.Escape},
 		{k.Edit, k.Delete, k.Create},
 		{k.NextPanel, k.PrevPanel},
+		{k.TestForm, k.ToggleLog},
 		{k.Help, k.Quit},
 	}
 }

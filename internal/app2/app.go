@@ -17,6 +17,7 @@ import (
 	"github.com/kluzzebass/lazyhue/internal/config"
 	"github.com/kluzzebass/lazyhue/internal/hue"
 	"github.com/kluzzebass/lazyhue/internal/ui2"
+	"github.com/kluzzebass/lazyhue/internal/ui2/components"
 	"github.com/kluzzebass/lazyhue/internal/ui2/layout"
 	"github.com/kluzzebass/lazyhue/internal/ui2/panels"
 )
@@ -58,6 +59,7 @@ type Model struct {
 	eventChan        chan bridgeEventMsg
 	eventCancelFuncs map[string]context.CancelFunc
 	bridgeBlinkUntil map[string]time.Time // Track when bridge blink indicators should stop
+	testForm         *components.Form     // Test form for form field demo
 }
 
 // New creates a new application model.
@@ -365,6 +367,19 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 	case PanelDetail:
+		// Update test form if it exists
+		if m.testForm != nil {
+			var cmd tea.Cmd
+			m.testForm, cmd = m.testForm.Update(msg)
+			if cmd != nil {
+				cmds = append(cmds, cmd)
+			}
+			// Re-render form content after any update
+			var content strings.Builder
+			content.WriteString(m.styles.Title.Render("Form Field Demo") + "\n\n")
+			content.WriteString(m.testForm.View())
+			m.detailViewport.SetContent(content.String())
+		}
 		var cmd tea.Cmd
 		m.detailViewport, cmd = m.detailViewport.Update(msg)
 		if cmd != nil {

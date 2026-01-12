@@ -221,6 +221,9 @@ func (w *ColorWheel) updatePositionFromColor() {
 	if w.SelCol > w.RadiusX*2 {
 		w.SelCol = w.RadiusX * 2
 	}
+
+	// Mark position as valid after updating from color
+	w.PosValid = true
 }
 
 // updateColorFromPosition updates the XY color from the current cursor position.

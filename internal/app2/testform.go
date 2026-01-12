@@ -8,8 +8,6 @@ import (
 )
 
 // showTestForm creates and displays a test form with all field types.
-// For now, this is a simple display-only version that shows all the form fields.
-// Full interaction can be added later.
 func (m *Model) showTestForm() {
 	// Create test fields matching v1 test form
 	fields := []components.FormField{
@@ -133,78 +131,21 @@ func (m *Model) showTestForm() {
 		},
 	}
 
+	// Create form component
+	m.testForm = components.NewForm(&m.styles, m.zones)
+	m.testForm.SetFields(fields)
+	m.testForm.OnChange = func(field components.FormField) {
+		// Re-render form when fields change
+		var content strings.Builder
+		content.WriteString(m.styles.Title.Render("Form Field Demo") + "\n\n")
+		content.WriteString(m.testForm.View())
+		m.detailViewport.SetContent(content.String())
+	}
+
 	// Render the form
 	var content strings.Builder
 	content.WriteString(m.styles.Title.Render("Form Field Demo") + "\n\n")
-
-	// Find max label width
-	maxLabelWidth := 0
-	for _, field := range fields {
-		labelLen := len(field.Label)
-		if labelLen > maxLabelWidth {
-			maxLabelWidth = labelLen
-		}
-	}
-
-	// Render each field
-	for _, field := range fields {
-		// Determine how many rows this field needs
-		rows := 1
-		if field.Type == components.FormFieldHSL || field.Type == components.FormFieldRGB {
-			rows = 3 // HSL and RGB have 3 sliders each
-		} else if field.Type == components.FormFieldRadio && field.Vertical {
-			rows = len(field.Options) // Vertical radio has one row per option
-		} else if field.Type == components.FormFieldColor {
-			// Color wheel needs its height + 1 for the label row
-			wheel := components.NewColorWheel()
-			rows = wheel.Height() + 1
-		}
-
-		// Special handling for color wheel - render it as a block
-		if field.Type == components.FormFieldColor {
-			// Label row (with cursor space like other fields)
-			labelStr := field.Label + ":"
-			padding := maxLabelWidth - len(field.Label) + 1
-			label := m.styles.Label.Render(labelStr + strings.Repeat(" ", padding))
-			content.WriteString("  " + label + "\n")
-			
-			// Color wheel rows - need to align with value position (after label + padding)
-			// Calculate value start position: cursor (2) + label + ":" + padding
-			// "  " + "Color" + ":" + " " + padding spaces
-			valueStart := 2 + len(field.Label) + 1 + padding // cursor + label + ":" + padding
-			indent := strings.Repeat(" ", valueStart)
-			
-			// Get the raw wheel (without RenderColorWheel's "    " prefix)
-			wheel := components.NewColorWheel()
-			wheel.SetColor(field.ColorX, field.ColorY)
-			wheel.BlinkOn = true
-			wheelLines := strings.Split(wheel.Render(), "\n")
-			for _, line := range wheelLines {
-				if line != "" {
-					content.WriteString(indent + line + "\n")
-				}
-			}
-			continue
-		}
-
-		for row := 0; row < rows; row++ {
-			// Label only on first row
-			var label string
-			if row == 0 {
-				labelStr := field.Label + ":"
-				padding := maxLabelWidth - len(field.Label) + 1
-				label = m.styles.Label.Render(labelStr + strings.Repeat(" ", padding))
-			} else {
-				// Subsequent rows: indent to match label width
-				label = strings.Repeat(" ", maxLabelWidth+2)
-			}
-
-			valueStr := components.RenderFieldValue(&field, false, &m.styles, row)
-
-			line := "  " + label + valueStr + "\n"
-			content.WriteString(line)
-		}
-	}
+	content.WriteString(m.testForm.View())
 
 	// Set the detail viewport content to show the form
 	m.detailViewport.SetContent(content.String())
