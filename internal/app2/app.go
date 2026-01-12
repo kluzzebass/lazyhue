@@ -57,9 +57,12 @@ type Model struct {
 	activities       []Activity
 	quitting         bool
 	eventChan        chan bridgeEventMsg
+	requestChan      chan requestMsg
+	errorChan        chan errorMsg
 	eventCancelFuncs map[string]context.CancelFunc
 	bridgeBlinkUntil map[string]time.Time // Track when bridge blink indicators should stop
-	testForm         *components.Form     // Test form for form field demo
+	lightForm        *components.Form     // Form for light controls in detail panel
+	selectedLightID   string               // ID of currently selected light (for form updates)
 }
 
 // New creates a new application model.
@@ -120,8 +123,12 @@ func New(creds *config.CredentialStore) Model {
 		status:           "Loading bridges...",
 		activities:       []Activity{},
 		eventChan:        make(chan bridgeEventMsg, 100),
+		requestChan:      make(chan requestMsg, 100),
+		errorChan:        make(chan errorMsg, 100),
 		eventCancelFuncs: make(map[string]context.CancelFunc),
 		bridgeBlinkUntil: make(map[string]time.Time),
+		lightForm:        components.NewForm(&styles, zones),
+		selectedLightID:  "",
 	}
 }
 
@@ -133,6 +140,20 @@ func (m Model) Init() tea.Cmd {
 // Update implements tea.Model.
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmds []tea.Cmd
+
+	// Handle blink tick messages from form first (before switch)
+	if _, ok := msg.(components.BlinkTickMsg); ok {
+		if m.lightForm != nil && len(m.lightForm.Fields) > 0 {
+			var cmd tea.Cmd
+			m.lightForm, cmd = m.lightForm.Update(msg)
+			if cmd != nil {
+				cmds = append(cmds, cmd)
+			}
+			// Update detail content to reflect blink state change
+			m.updateDetailContent()
+			return m, tea.Batch(cmds...)
+		}
+	}
 
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
@@ -188,16 +209,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case bridgeConnectedMsg:
-		// Set up request logging callback
+		// Set up request and error logging callbacks
 		bridge := m.manager.GetBridge(msg.bridgeID)
 		if bridge != nil {
-			bridge.OnRequest(func(bridgeID, message string) {
-				m.activities = append(m.activities, &RequestActivity{
-					timestamp: time.Now(),
-					message:   message,
-				})
-				m.updateLogContent()
-			})
+			ctx := context.Background()
+			m.startRequestListener(ctx, bridge)
+			m.startErrorListener(ctx, bridge)
+			cmds = append(cmds, m.listenForRequests())
+			cmds = append(cmds, m.listenForErrors())
 		}
 
 		// If this is the first connected bridge, make it active
@@ -254,9 +273,37 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		if bridge := m.manager.GetBridge(msg.bridgeID); bridge != nil {
 			m.rebuildTreeForActiveTab()
+			// Update form if the event is for the currently selected light
+			if msg.resourceType == "light" && msg.resourceID == m.selectedLightID && state != nil {
+				if light, ok := state.GetLight(msg.resourceID); ok {
+					fields := m.buildLightFormFields(light)
+					m.lightForm.SetFields(fields)
+				}
+			}
 		}
 
 		cmds = append(cmds, m.listenForEvents())
+		return m, tea.Batch(cmds...)
+
+	case requestMsg:
+		m.activities = append(m.activities, &RequestActivity{
+			timestamp: time.Now(),
+			message:   msg.message,
+		})
+		m.updateLogContent()
+		// Keep listening for more requests
+		cmds = append(cmds, m.listenForRequests())
+		return m, tea.Batch(cmds...)
+
+	case errorMsg:
+		m.activities = append(m.activities, &ErrorActivity{
+			timestamp: time.Now(),
+			message:   msg.message,
+		})
+		m.updateLogContent()
+		m.status = fmt.Sprintf("Error: %s", msg.message)
+		// Keep listening for more errors
+		cmds = append(cmds, m.listenForErrors())
 		return m, tea.Batch(cmds...)
 
 	case bridgeBlinkTickMsg:
@@ -361,23 +408,53 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 	case PanelDetail:
-		// Update test form if it exists
-		if m.testForm != nil {
+		// Update light form if it exists and has fields
+		formHandledKey := false
+		if m.lightForm != nil && len(m.lightForm.Fields) > 0 {
+			// Check if this is a key the form handles
+			if keyMsg, ok := msg.(tea.KeyMsg); ok {
+				keyStr := keyMsg.String()
+				// These are keys the form handles for navigation/editing - always consume them
+				formNavigationKeys := map[string]bool{
+					"up": true, "down": true, "k": true, "j": true,
+					"left": true, "right": true, "h": true, "l": true,
+					"enter": true, " ": true, "esc": true,
+				}
+				if formNavigationKeys[keyStr] {
+					// Always let form handle these keys when it has fields
+					formHandledKey = true
+					var cmd tea.Cmd
+					m.lightForm, cmd = m.lightForm.Update(msg)
+					if cmd != nil {
+						cmds = append(cmds, cmd)
+					}
+					// Update detail content to reflect form changes
+					// updateDetailContent preserves form state when editing, so this is safe
+					m.updateDetailContent()
+				} else {
+					// Other keys, let form try to handle them first
+					var cmd tea.Cmd
+					m.lightForm, cmd = m.lightForm.Update(msg)
+					if cmd != nil {
+						cmds = append(cmds, cmd)
+					}
+				}
+			} else {
+				// Non-key messages (mouse, etc.), let form handle them
+				var cmd tea.Cmd
+				m.lightForm, cmd = m.lightForm.Update(msg)
+				if cmd != nil {
+					cmds = append(cmds, cmd)
+				}
+			}
+		}
+		// Only update viewport if form didn't handle the key
+		if !formHandledKey {
 			var cmd tea.Cmd
-			m.testForm, cmd = m.testForm.Update(msg)
+			m.detailViewport, cmd = m.detailViewport.Update(msg)
 			if cmd != nil {
 				cmds = append(cmds, cmd)
 			}
-			// Re-render form content after any update
-			var content strings.Builder
-			content.WriteString(m.styles.Title.Render("Form Field Demo") + "\n\n")
-			content.WriteString(m.testForm.View())
-			m.detailViewport.SetContent(content.String())
-		}
-		var cmd tea.Cmd
-		m.detailViewport, cmd = m.detailViewport.Update(msg)
-		if cmd != nil {
-			cmds = append(cmds, cmd)
 		}
 
 	case PanelLog:

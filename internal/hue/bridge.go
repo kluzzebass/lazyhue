@@ -54,15 +54,25 @@ type Bridge struct {
 	eventCancel context.CancelFunc
 	onEvent func(bridgeID, resourceType, resourceID, eventType string) // Callback when events are received
 	onRequest func(bridgeID, message string)                           // Callback when API requests are made
+	onError   func(bridgeID, message string)                           // Callback when API errors occur
 	mu          sync.RWMutex
+	
+	// Debounce timers for rapid adjustments
+	brightnessDebounce map[string]*time.Timer // lightID -> timer
+	colorTempDebounce  map[string]*time.Timer // lightID -> timer
+	colorDebounce      map[string]*time.Timer // lightID -> timer
+	debounceMu         sync.Mutex             // Protects debounce timers
 }
 
 // NewBridge creates a new bridge connection.
 func NewBridge(info BridgeInfo) *Bridge {
 	return &Bridge{
-		Info:   info,
-		Status: StatusDisconnected,
-		state:  NewBridgeState(),
+		Info:              info,
+		Status:            StatusDisconnected,
+		state:             NewBridgeState(),
+		brightnessDebounce: make(map[string]*time.Timer),
+		colorTempDebounce:  make(map[string]*time.Timer),
+		colorDebounce:      make(map[string]*time.Timer),
 	}
 }
 
@@ -132,6 +142,24 @@ func (b *Bridge) OnRequest(fn func(bridgeID, message string)) {
 func (b *Bridge) logRequest(message string) {
 	b.mu.RLock()
 	callback := b.onRequest
+	b.mu.RUnlock()
+	if callback != nil {
+		callback(b.Info.ID, message)
+	}
+}
+
+// OnError sets a callback for when the bridge encounters API errors.
+// The callback receives bridgeID and an error message.
+func (b *Bridge) OnError(fn func(bridgeID, message string)) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.onError = fn
+}
+
+// logError calls the error callback if set.
+func (b *Bridge) logError(message string) {
+	b.mu.RLock()
+	callback := b.onError
 	b.mu.RUnlock()
 	if callback != nil {
 		callback(b.Info.ID, message)

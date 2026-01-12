@@ -3,6 +3,7 @@ package hue
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/kluzzebass/lazyhue/internal/hueclient"
 )
@@ -46,10 +47,19 @@ func (b *Bridge) ToggleLight(lightID string) error {
 		action = "off"
 	}
 	b.logRequest(fmt.Sprintf("%s: %s", lightName, action))
-	_, err := client.UpdateLight(context.Background(), lightID, hueclient.UpdateLightJSONRequestBody{
+	httpResp, err := client.UpdateLightWithResponse(context.Background(), lightID, hueclient.UpdateLightJSONRequestBody{
 		On: &hueclient.On{On: &newState},
 	})
-	return err
+	if err != nil {
+		b.logError(fmt.Sprintf("%s: %s failed: %v", lightName, action, err))
+		return err
+	}
+	if httpResp != nil && httpResp.HTTPResponse != nil && httpResp.HTTPResponse.StatusCode >= 400 {
+		errMsg := fmt.Sprintf("%s: %s failed: HTTP %d", lightName, action, httpResp.HTTPResponse.StatusCode)
+		b.logError(errMsg)
+		return fmt.Errorf(errMsg)
+	}
+	return nil
 }
 
 // SetLightOn turns a light on or off.
@@ -74,13 +84,23 @@ func (b *Bridge) SetLightOn(lightID string, on bool) error {
 		action = "off"
 	}
 	b.logRequest(fmt.Sprintf("%s: %s", lightName, action))
-	_, err := client.UpdateLight(context.Background(), lightID, hueclient.UpdateLightJSONRequestBody{
+	httpResp, err := client.UpdateLightWithResponse(context.Background(), lightID, hueclient.UpdateLightJSONRequestBody{
 		On: &hueclient.On{On: &on},
 	})
-	return err
+	if err != nil {
+		b.logError(fmt.Sprintf("%s: %s failed: %v", lightName, action, err))
+		return err
+	}
+	if httpResp != nil && httpResp.HTTPResponse != nil && httpResp.HTTPResponse.StatusCode >= 400 {
+		errMsg := fmt.Sprintf("%s: %s failed: HTTP %d", lightName, action, httpResp.HTTPResponse.StatusCode)
+		b.logError(errMsg)
+		return fmt.Errorf(errMsg)
+	}
+	return nil
 }
 
 // SetLightBrightness sets a light's brightness (0-100).
+// Rapid calls are debounced - state is updated immediately, but API call is delayed.
 func (b *Bridge) SetLightBrightness(lightID string, brightness float64) error {
 	b.mu.RLock()
 	client := b.client
@@ -93,19 +113,47 @@ func (b *Bridge) SetLightBrightness(lightID string, brightness float64) error {
 	// Optimistic update: apply to cache immediately so rapid keypresses accumulate
 	b.state.SetLightBrightness(lightID, brightness)
 
+	// Debounce the actual API call
+	b.debounceMu.Lock()
+	if timer, ok := b.brightnessDebounce[lightID]; ok {
+		timer.Stop()
+	}
+	
 	lightName := "Unknown"
 	if light, ok := b.state.GetLight(lightID); ok {
 		lightName = b.state.GetLightName(light)
 	}
-	b.logRequest(fmt.Sprintf("%s: brightness %.0f%%", lightName, brightness))
+	
 	br := float32(brightness)
-	_, err := client.UpdateLight(context.Background(), lightID, hueclient.UpdateLightJSONRequestBody{
-		Dimming: &hueclient.Dimming{Brightness: &br},
+	b.brightnessDebounce[lightID] = time.AfterFunc(50*time.Millisecond, func() {
+		b.mu.RLock()
+		client := b.client
+		b.mu.RUnlock()
+		
+		if client != nil {
+			b.logRequest(fmt.Sprintf("%s: brightness %.0f%%", lightName, brightness))
+			httpResp, err := client.UpdateLightWithResponse(context.Background(), lightID, hueclient.UpdateLightJSONRequestBody{
+				Dimming: &hueclient.Dimming{Brightness: &br},
+			})
+			if err != nil {
+				b.logError(fmt.Sprintf("%s: brightness failed: %v", lightName, err))
+			} else if httpResp != nil && httpResp.HTTPResponse != nil && httpResp.HTTPResponse.StatusCode >= 400 {
+				b.logError(fmt.Sprintf("%s: brightness failed: HTTP %d", lightName, httpResp.HTTPResponse.StatusCode))
+			}
+		}
+		
+		// Clean up timer
+		b.debounceMu.Lock()
+		delete(b.brightnessDebounce, lightID)
+		b.debounceMu.Unlock()
 	})
-	return err
+	b.debounceMu.Unlock()
+
+	return nil
 }
 
 // SetLightColor sets a light's color using CIE XY coordinates.
+// Rapid calls are debounced - state is updated immediately, but API call is delayed.
 func (b *Bridge) SetLightColor(lightID string, x, y float64) error {
 	b.mu.RLock()
 	client := b.client
@@ -118,21 +166,49 @@ func (b *Bridge) SetLightColor(lightID string, x, y float64) error {
 	// Optimistic update
 	b.state.SetLightColor(lightID, x, y)
 
+	// Debounce the actual API call
+	b.debounceMu.Lock()
+	if timer, ok := b.colorDebounce[lightID]; ok {
+		timer.Stop()
+	}
+	
 	lightName := "Unknown"
 	if light, ok := b.state.GetLight(lightID); ok {
 		lightName = b.state.GetLightName(light)
 	}
-	b.logRequest(fmt.Sprintf("%s: color", lightName))
+	
 	xf, yf := float32(x), float32(y)
-	_, err := client.UpdateLight(context.Background(), lightID, hueclient.UpdateLightJSONRequestBody{
-		Color: &hueclient.Color{
-		Xy: &hueclient.GamutPosition{X: &xf, Y: &yf},
-		},
+	b.colorDebounce[lightID] = time.AfterFunc(50*time.Millisecond, func() {
+		b.mu.RLock()
+		client := b.client
+		b.mu.RUnlock()
+		
+		if client != nil {
+			b.logRequest(fmt.Sprintf("%s: color", lightName))
+			httpResp, err := client.UpdateLightWithResponse(context.Background(), lightID, hueclient.UpdateLightJSONRequestBody{
+				Color: &hueclient.Color{
+					Xy: &hueclient.GamutPosition{X: &xf, Y: &yf},
+				},
+			})
+			if err != nil {
+				b.logError(fmt.Sprintf("%s: color failed: %v", lightName, err))
+			} else if httpResp != nil && httpResp.HTTPResponse != nil && httpResp.HTTPResponse.StatusCode >= 400 {
+				b.logError(fmt.Sprintf("%s: color failed: HTTP %d", lightName, httpResp.HTTPResponse.StatusCode))
+			}
+		}
+		
+		// Clean up timer
+		b.debounceMu.Lock()
+		delete(b.colorDebounce, lightID)
+		b.debounceMu.Unlock()
 	})
-	return err
+	b.debounceMu.Unlock()
+
+	return nil
 }
 
 // SetLightColorTemperature sets a light's color temperature in mirek (153-500).
+// Rapid calls are debounced - state is updated immediately, but API call is delayed.
 func (b *Bridge) SetLightColorTemperature(lightID string, mirek int) error {
 	b.mu.RLock()
 	client := b.client
@@ -145,15 +221,42 @@ func (b *Bridge) SetLightColorTemperature(lightID string, mirek int) error {
 	// Optimistic update
 	b.state.SetLightColorTemperature(lightID, mirek)
 
+	// Debounce the actual API call
+	b.debounceMu.Lock()
+	if timer, ok := b.colorTempDebounce[lightID]; ok {
+		timer.Stop()
+	}
+	
 	lightName := "Unknown"
 	if light, ok := b.state.GetLight(lightID); ok {
 		lightName = b.state.GetLightName(light)
 	}
-	b.logRequest(fmt.Sprintf("%s: color temp %d mirek", lightName, mirek))
-	_, err := client.UpdateLight(context.Background(), lightID, hueclient.UpdateLightJSONRequestBody{
-		ColorTemperature: &hueclient.ColorTemperature{Mirek: &mirek},
+	
+	b.colorTempDebounce[lightID] = time.AfterFunc(50*time.Millisecond, func() {
+		b.mu.RLock()
+		client := b.client
+		b.mu.RUnlock()
+		
+		if client != nil {
+			b.logRequest(fmt.Sprintf("%s: color temp %d mirek", lightName, mirek))
+			httpResp, err := client.UpdateLightWithResponse(context.Background(), lightID, hueclient.UpdateLightJSONRequestBody{
+				ColorTemperature: &hueclient.ColorTemperature{Mirek: &mirek},
+			})
+			if err != nil {
+				b.logError(fmt.Sprintf("%s: color temp failed: %v", lightName, err))
+			} else if httpResp != nil && httpResp.HTTPResponse != nil && httpResp.HTTPResponse.StatusCode >= 400 {
+				b.logError(fmt.Sprintf("%s: color temp failed: HTTP %d", lightName, httpResp.HTTPResponse.StatusCode))
+			}
+		}
+		
+		// Clean up timer
+		b.debounceMu.Lock()
+		delete(b.colorTempDebounce, lightID)
+		b.debounceMu.Unlock()
 	})
-	return err
+	b.debounceMu.Unlock()
+
+	return nil
 }
 
 // SetLightEffect sets a light's effect (candle, fire, prism, etc.).
@@ -175,10 +278,19 @@ func (b *Bridge) SetLightEffect(lightID string, effect hueclient.SupportedEffect
 	}
 	effectName := EffectDisplayName(string(effect))
 	b.logRequest(fmt.Sprintf("%s: effect %s", lightName, effectName))
-	_, err := client.UpdateLight(context.Background(), lightID, hueclient.UpdateLightJSONRequestBody{
+	httpResp, err := client.UpdateLightWithResponse(context.Background(), lightID, hueclient.UpdateLightJSONRequestBody{
 		Effects: &hueclient.Effects{Effect: &effect},
 	})
-	return err
+	if err != nil {
+		b.logError(fmt.Sprintf("%s: effect %s failed: %v", lightName, effectName, err))
+		return err
+	}
+	if httpResp != nil && httpResp.HTTPResponse != nil && httpResp.HTTPResponse.StatusCode >= 400 {
+		errMsg := fmt.Sprintf("%s: effect %s failed: HTTP %d", lightName, effectName, httpResp.HTTPResponse.StatusCode)
+		b.logError(errMsg)
+		return fmt.Errorf(errMsg)
+	}
+	return nil
 }
 
 // ToggleGroupedLight toggles a grouped light (room/zone).
@@ -620,6 +732,12 @@ func (b *Bridge) UpdateRoomDevices(roomID string, deviceIDs []string) error {
 		return ErrAuthFailed
 	}
 
+	roomName := "Unknown"
+	if room, ok := b.state.GetRoom(roomID); ok {
+		roomName = b.state.GetRoomName(room)
+	}
+	b.logRequest(fmt.Sprintf("%s: updated devices (%d)", roomName, len(deviceIDs)))
+
 	// Build children list from device IDs
 	children := make([]hueclient.ResourceIdentifier, len(deviceIDs))
 	deviceType := hueclient.ResourceIdentifierRtypeDevice
@@ -646,6 +764,12 @@ func (b *Bridge) UpdateZoneServices(zoneID string, serviceIDs []string) error {
 	if client == nil {
 		return ErrAuthFailed
 	}
+
+	zoneName := "Unknown"
+	if zone, ok := b.state.GetZone(zoneID); ok {
+		zoneName = zone.RoomName("")
+	}
+	b.logRequest(fmt.Sprintf("%s: updated services (%d)", zoneName, len(serviceIDs)))
 
 	// Build children list from service IDs
 	children := make([]hueclient.ResourceIdentifier, len(serviceIDs))

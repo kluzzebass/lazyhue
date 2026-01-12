@@ -38,4 +38,16 @@ type (
 	bridgeBlinkTickMsg struct {
 		bridgeID string
 	}
+
+	// requestMsg wraps API request messages from bridges.
+	requestMsg struct {
+		bridgeID string
+		message  string
+	}
+
+	// errorMsg wraps API error messages from bridges.
+	errorMsg struct {
+		bridgeID string
+		message  string
+	}
 )

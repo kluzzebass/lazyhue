@@ -94,3 +94,47 @@ func (m *Model) listenForEvents() tea.Cmd {
 		return <-m.eventChan
 	}
 }
+
+// startRequestListener starts listening to request messages from a bridge.
+// This runs in a goroutine and sends requests to m.requestChan.
+func (m *Model) startRequestListener(ctx context.Context, bridge *hue.Bridge) {
+	bridge.OnRequest(func(bridgeID, message string) {
+		select {
+		case <-ctx.Done():
+			return
+		case m.requestChan <- requestMsg{
+			bridgeID: bridgeID,
+			message:  message,
+		}:
+		}
+	})
+}
+
+// listenForRequests returns a command that listens for requests from the channel.
+func (m *Model) listenForRequests() tea.Cmd {
+	return func() tea.Msg {
+		return <-m.requestChan
+	}
+}
+
+// startErrorListener starts listening to error messages from a bridge.
+// This runs in a goroutine and sends errors to m.errorChan.
+func (m *Model) startErrorListener(ctx context.Context, bridge *hue.Bridge) {
+	bridge.OnError(func(bridgeID, message string) {
+		select {
+		case <-ctx.Done():
+			return
+		case m.errorChan <- errorMsg{
+			bridgeID: bridgeID,
+			message:  message,
+		}:
+		}
+	})
+}
+
+// listenForErrors returns a command that listens for errors from the channel.
+func (m *Model) listenForErrors() tea.Cmd {
+	return func() tea.Msg {
+		return <-m.errorChan
+	}
+}

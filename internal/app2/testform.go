@@ -131,21 +131,21 @@ func (m *Model) showTestForm() {
 		},
 	}
 
-	// Create form component
-	m.testForm = components.NewForm(&m.styles, m.zones)
-	m.testForm.SetFields(fields)
-	m.testForm.OnChange = func(field components.FormField) {
+	// Create form component (temporary for test)
+	testForm := components.NewForm(&m.styles, m.zones)
+	testForm.SetFields(fields)
+	testForm.OnChange = func(field components.FormField) {
 		// Re-render form when fields change
 		var content strings.Builder
 		content.WriteString(m.styles.Title.Render("Form Field Demo") + "\n\n")
-		content.WriteString(m.testForm.View())
+		content.WriteString(testForm.View())
 		m.detailViewport.SetContent(content.String())
 	}
 
 	// Render the form
 	var content strings.Builder
 	content.WriteString(m.styles.Title.Render("Form Field Demo") + "\n\n")
-	content.WriteString(m.testForm.View())
+	content.WriteString(testForm.View())
 
 	// Set the detail viewport content to show the form
 	m.detailViewport.SetContent(content.String())

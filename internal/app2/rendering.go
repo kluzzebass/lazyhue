@@ -10,6 +10,7 @@ import (
 	"github.com/kluzzebass/lazyhue/internal/hue"
 	"github.com/kluzzebass/lazyhue/internal/hueclient"
 	"github.com/kluzzebass/lazyhue/internal/ui2"
+	"github.com/kluzzebass/lazyhue/internal/ui2/components"
 	"github.com/kluzzebass/lazyhue/internal/ui2/panels"
 )
 
@@ -55,8 +56,56 @@ func (m *Model) updateDetailContent() {
 	var content strings.Builder
 	switch node.Item.Type {
 	case panels.EntityLight:
+		// Get light for form fields
+		var light hueclient.LightGet
+		var ok bool
+		if node.Item.RawPtr != nil {
+			if l, typeOk := node.Item.RawPtr.(hueclient.LightGet); typeOk {
+				light = l
+				ok = true
+			}
+		}
+		if !ok && state != nil {
+			light, ok = state.GetLight(node.Item.ID)
+		}
+		if ok {
+			// Only rebuild form fields if light ID changed or form is empty
+			if m.selectedLightID != node.Item.ID || len(m.lightForm.Fields) == 0 {
+				fields := m.buildLightFormFields(light)
+				m.lightForm.SetFields(fields)
+				m.selectedLightID = node.Item.ID
+				// Set onChange callback
+				m.lightForm.OnChange = func(field components.FormField) {
+					m.handleLightFieldChange(field, node.Item.ID)
+				}
+			} else if !m.lightForm.Editing {
+				// Light ID unchanged and not editing - sync form fields from state
+				// This prevents overwriting user input during color wheel adjustments
+				fields := m.buildLightFormFields(light)
+				// Preserve cursor position
+				oldCursor := m.lightForm.Cursor
+				m.lightForm.SetFields(fields)
+				if oldCursor < len(fields) {
+					m.lightForm.Cursor = oldCursor
+				}
+				// Ensure callback is set
+				m.lightForm.OnChange = func(field components.FormField) {
+					m.handleLightFieldChange(field, node.Item.ID)
+				}
+			}
+			// Add form FIRST (controls at the top for efficiency)
+			if len(m.lightForm.Fields) > 0 {
+				formContent := m.lightForm.View()
+				content.WriteString(formContent)
+				content.WriteString("\n")
+			}
+		}
+		// Then add details
 		content.WriteString(m.buildLightDetails(node.Item, state))
 	default:
+		// Clear form for non-light entities
+		m.lightForm.SetFields([]components.FormField{})
+		m.selectedLightID = ""
 		content.WriteString(fmt.Sprintf("Type: %s\n", node.Item.Type))
 		content.WriteString(fmt.Sprintf("ID: %s\n", node.Item.ID))
 	}
@@ -80,8 +129,6 @@ func (m *Model) renderDetailPanel(width, height int, focused bool, key string) s
 
 	topBorder := m.renderPanelHeader(width, key, title, focused, borderColor)
 
-	content := m.detailViewport.View()
-
 	innerWidth := width - 2
 	if innerWidth < 1 {
 		innerWidth = 1
@@ -91,8 +138,10 @@ func (m *Model) renderDetailPanel(width, height int, focused bool, key string) s
 		innerHeight = 1
 	}
 
+	// Get content from viewport (includes details + form if light is selected)
+	content := m.detailViewport.View()
 	contentLines := strings.Split(content, "\n")
-	// Remove trailing empty line if present (viewport may add trailing newline)
+	// Remove trailing empty line if present
 	if len(contentLines) > 0 && contentLines[len(contentLines)-1] == "" {
 		contentLines = contentLines[:len(contentLines)-1]
 	}
@@ -244,6 +293,113 @@ func (m *Model) renderPanelHeader(width int, keyStr, title string, focused bool,
 		borderStyle.Render(border.TopRight)
 }
 
+// buildLightFormFields builds form fields for controlling a light.
+func (m *Model) buildLightFormFields(light hueclient.LightGet) []components.FormField {
+	var fields []components.FormField
+
+	// On/Off toggle
+	onValue := 0
+	if light.On != nil && light.On.On != nil && *light.On.On {
+		onValue = 1
+	}
+	fields = append(fields, components.FormField{
+		ID:             "on",
+		Label:          "Power",
+		Type:           components.FormFieldToggle,
+		Value:          onValue,
+		ToggleOnLabel:  "On",
+		ToggleOffLabel: "Off",
+	})
+
+	// Brightness (if dimmable)
+	if light.Dimming != nil && light.Dimming.Brightness != nil {
+		brightness := int(*light.Dimming.Brightness)
+		fields = append(fields, components.FormField{
+			ID:    "brightness",
+			Label: "Brightness",
+			Type:  components.FormFieldBrightness,
+			Value: brightness,
+			Min:   0,
+			Max:   100,
+		})
+	}
+
+	// Color temperature (if supported)
+	if light.ColorTemperature != nil && light.ColorTemperature.MirekSchema != nil {
+		mirek := 250
+		if light.ColorTemperature.Mirek != nil {
+			mirek = *light.ColorTemperature.Mirek
+		}
+		minMirek := 153
+		maxMirek := 500
+		if light.ColorTemperature.MirekSchema.MirekMinimum != nil {
+			minMirek = *light.ColorTemperature.MirekSchema.MirekMinimum
+		}
+		if light.ColorTemperature.MirekSchema.MirekMaximum != nil {
+			maxMirek = *light.ColorTemperature.MirekSchema.MirekMaximum
+		}
+		fields = append(fields, components.FormField{
+			ID:    "colortemp",
+			Label: "Color Temp",
+			Type:  components.FormFieldColorTemp,
+			Value: mirek,
+			Min:   minMirek,
+			Max:   maxMirek,
+		})
+	}
+
+	// Color (if supported)
+	if light.Color != nil && light.Color.Xy != nil {
+		x, y := 0.3127, 0.329
+		if light.Color.Xy.X != nil {
+			x = float64(*light.Color.Xy.X)
+		}
+		if light.Color.Xy.Y != nil {
+			y = float64(*light.Color.Xy.Y)
+		}
+		fields = append(fields, components.FormField{
+			ID:     "color",
+			Label:  "Color",
+			Type:   components.FormFieldColor,
+			ColorX: x,
+			ColorY: y,
+		})
+	}
+
+	// Effect (if supported)
+	if light.Effects != nil && light.Effects.EffectValues != nil {
+		var options []components.FormSelectOption
+		currentEffect := -1
+		if light.Effects.Status != nil {
+			for i, effect := range *light.Effects.EffectValues {
+				effectStr := string(effect)
+				displayName := hue.EffectDisplayName(effectStr)
+				options = append(options, components.FormSelectOption{
+					Label: displayName,
+					Value: i,
+				})
+				if effect == *light.Effects.Status {
+					currentEffect = i
+				}
+			}
+		}
+		if len(options) > 0 {
+			if currentEffect == -1 {
+				currentEffect = 0
+			}
+			fields = append(fields, components.FormField{
+				ID:      "effect",
+				Label:   "Effect",
+				Type:    components.FormFieldSelect,
+				Value:   currentEffect,
+				Options: options,
+			})
+		}
+	}
+
+	return fields
+}
+
 // buildLightDetails builds the detail content for a light entity.
 // Formatting matches v1 UI: aligned fields, proper headers, consistent spacing.
 func (m *Model) buildLightDetails(item *panels.EntityItem, state *hue.BridgeState) string {
@@ -338,11 +494,11 @@ func (m *Model) buildLightDetails(item *panels.EntityItem, state *hue.BridgeStat
 		nameFields = append(nameFields, fieldInfo{"Name", currentName})
 		hasNameSection = true
 	}
-	// Show light name (deprecated - names are now stored on device) if available and different from current name
+	// Show alternate name (from light.Metadata.Name) if available and different from current name
 	if light.Metadata != nil && light.Metadata.Name != nil {
-		lightName := *light.Metadata.Name
-		if lightName != currentName {
-			nameFields = append(nameFields, fieldInfo{"Light name", lightName})
+		alternateName := *light.Metadata.Name
+		if alternateName != currentName {
+			nameFields = append(nameFields, fieldInfo{"Alternate name", alternateName})
 			hasNameSection = true
 		}
 	}
@@ -491,7 +647,7 @@ func (m *Model) buildLightDetails(item *panels.EntityItem, state *hue.BridgeStat
 	if hasNameSection {
 		renderHeader("Name")
 		for _, f := range nameFields {
-			if f.label == "Light name" {
+			if f.label == "Alternate name" {
 				renderMutedField(f.label, f.value)
 			} else {
 				renderField(f.label, f.value)
@@ -630,4 +786,47 @@ func (m *Model) buildLightDetails(item *panels.EntityItem, state *hue.BridgeStat
 	}
 
 	return content.String()
+}
+
+// handleLightFieldChange handles changes to light form fields and updates the light via bridge actions.
+func (m *Model) handleLightFieldChange(field components.FormField, lightID string) {
+	bridge := m.manager.GetBridge(m.activeBridgeID)
+	if bridge == nil {
+		return
+	}
+
+	var err error
+	switch field.ID {
+	case "on":
+		newOn := field.Value != 0
+		err = bridge.SetLightOn(lightID, newOn)
+	case "brightness":
+		err = bridge.SetLightBrightness(lightID, float64(field.Value))
+	case "colortemp":
+		err = bridge.SetLightColorTemperature(lightID, field.Value)
+	case "color":
+		err = bridge.SetLightColor(lightID, field.ColorX, field.ColorY)
+	case "effect":
+		// Get the effect from the options based on the Value (index)
+		if state := bridge.GetState(); state != nil {
+			if light, ok := state.GetLight(lightID); ok {
+				if light.Effects != nil && light.Effects.EffectValues != nil {
+					effects := *light.Effects.EffectValues
+					if field.Value >= 0 && field.Value < len(effects) {
+						effect := effects[field.Value]
+						err = bridge.SetLightEffect(lightID, effect)
+					}
+				}
+			}
+		}
+	}
+
+	if err != nil {
+		m.status = fmt.Sprintf("Error: %v", err)
+	} else {
+		// Update detail content immediately to reflect changes (optimistic update)
+		m.updateDetailContent()
+		// Rebuild tree to update indicators
+		m.rebuildTreeForActiveTab()
+	}
 }

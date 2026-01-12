@@ -49,10 +49,6 @@ type Form struct {
 	MouseCaptureIdx  int           // Field index being dragged (-1 if none)
 	MouseCaptureType FormFieldType // Type of field being captured
 
-	// Debouncing
-	DebounceTimer *time.Timer
-	DebounceField *FormField
-
 	// Callbacks
 	OnChange func(field FormField) // Called when a field value changes
 
@@ -62,10 +58,14 @@ type Form struct {
 
 	// Blink timer
 	blinkTimerActive bool
+	blinkTimerScheduled bool // Track if timer is already scheduled to avoid duplicates
 }
 
 // blinkTickMsg is sent by the blink timer to toggle the indicator.
 type blinkTickMsg struct{}
+
+// BlinkTickMsg is the exported type for blink tick messages (for use in app2).
+type BlinkTickMsg = blinkTickMsg
 
 // NewForm creates a new form.
 func NewForm(styles *ui2.Styles, zones *zone.Manager) *Form {
@@ -130,10 +130,16 @@ func (f *Form) Update(msg tea.Msg) (*Form, tea.Cmd) {
 		if f.blinkTimerActive && f.Editing && f.Cursor < len(f.Fields) {
 			if f.Fields[f.Cursor].Type == FormFieldColor {
 				f.ColorWheel.BlinkOn = !f.ColorWheel.BlinkOn
+				f.blinkTimerScheduled = false // Timer just fired, can schedule next one
 				// Schedule next tick
 				cmds = append(cmds, tea.Tick(500*time.Millisecond, func(t time.Time) tea.Msg {
 					return blinkTickMsg{}
 				}))
+				f.blinkTimerScheduled = true
+			} else {
+				// Not editing color anymore, stop timer
+				f.blinkTimerActive = false
+				f.blinkTimerScheduled = false
 			}
 		}
 		return f, tea.Batch(cmds...)
@@ -143,11 +149,12 @@ func (f *Form) Update(msg tea.Msg) (*Form, tea.Cmd) {
 		if f.handleKey(msg) {
 			// Check if we just entered edit mode for color field
 			isNowEditingColor := f.Editing && f.Cursor < len(f.Fields) && f.Fields[f.Cursor].Type == FormFieldColor
-			if !wasEditingColor && isNowEditingColor && f.blinkTimerActive {
-				// Start blink timer
+			if !wasEditingColor && isNowEditingColor && f.blinkTimerActive && !f.blinkTimerScheduled {
+				// Start blink timer (only if not already scheduled)
 				cmds = append(cmds, tea.Tick(500*time.Millisecond, func(t time.Time) tea.Msg {
 					return blinkTickMsg{}
 				}))
+				f.blinkTimerScheduled = true
 			}
 			return f, tea.Batch(cmds...)
 		}
@@ -157,11 +164,12 @@ func (f *Form) Update(msg tea.Msg) (*Form, tea.Cmd) {
 		if f.handleMouseClick(msg) {
 			// Check if we just entered edit mode for color field
 			isNowEditingColor := f.Editing && f.Cursor < len(f.Fields) && f.Fields[f.Cursor].Type == FormFieldColor
-			if !wasEditingColor && isNowEditingColor && f.blinkTimerActive {
-				// Start blink timer
+			if !wasEditingColor && isNowEditingColor && f.blinkTimerActive && !f.blinkTimerScheduled {
+				// Start blink timer (only if not already scheduled)
 				cmds = append(cmds, tea.Tick(500*time.Millisecond, func(t time.Time) tea.Msg {
 					return blinkTickMsg{}
 				}))
+				f.blinkTimerScheduled = true
 			}
 			return f, tea.Batch(cmds...)
 		}
@@ -557,6 +565,7 @@ func (f *Form) cancelEdit(field *FormField) {
 		}
 	}
 	f.blinkTimerActive = false
+	f.blinkTimerScheduled = false
 	f.Editing = false
 }
 
@@ -567,20 +576,12 @@ func (f *Form) notifyChange(field FormField) {
 	}
 }
 
-// debounceSave debounces save calls for rapid adjustments.
+// debounceSave immediately calls OnChange (debouncing is handled in service layer).
 func (f *Form) debounceSave(field *FormField) {
-	if f.DebounceTimer != nil {
-		f.DebounceTimer.Stop()
+	// Service layer handles debouncing, so we can call OnChange immediately
+	if f.OnChange != nil {
+		f.OnChange(*field)
 	}
-
-	fieldCopy := *field
-	f.DebounceField = &fieldCopy
-
-	f.DebounceTimer = time.AfterFunc(50*time.Millisecond, func() {
-		if f.OnChange != nil {
-			f.OnChange(fieldCopy)
-		}
-	})
 }
 
 // View renders the form fields.
