@@ -13,6 +13,7 @@ import (
 	"github.com/kluzzebass/lazyhue/internal/ui2"
 )
 
+
 // Form handles rendering and interaction for a list of form fields.
 type Form struct {
 	Fields  []FormField
@@ -46,8 +47,11 @@ type Form struct {
 	OriginalText string
 
 	// Mouse capture for dragging
-	MouseCaptureIdx  int           // Field index being dragged (-1 if none)
-	MouseCaptureType FormFieldType // Type of field being captured
+	MouseCaptureIdx       int           // Field index being dragged (-1 if none)
+	MouseCaptureType      FormFieldType // Type of field being captured
+	MouseCaptureX         int           // Initial X position when capture started
+	MouseCaptureY         int           // Initial Y position when capture started
+	MouseCaptureZoneStartX int          // Zone start X position when capture started (for slider dragging)
 
 	// Callbacks
 	OnChange func(field FormField) // Called when a field value changes
@@ -74,7 +78,10 @@ func NewForm(styles *ui2.Styles, zones *zone.Manager) *Form {
 		ColorWheel:        NewColorWheel(),
 		Styles:            styles,
 		Zones:             zones,
-		MouseCaptureIdx:   -1,
+		MouseCaptureIdx:        -1,
+		MouseCaptureX:          -1,
+		MouseCaptureY:          -1,
+		MouseCaptureZoneStartX: -1,
 		HSLSliderFocus:    make(map[int]int),
 		RGBSliderFocus:    make(map[int]int),
 		HSLOriginalValues: make(map[int]struct{ Hue, Sat, Light int }),
@@ -159,8 +166,92 @@ func (f *Form) Update(msg tea.Msg) (*Form, tea.Cmd) {
 			return f, tea.Batch(cmds...)
 		}
 
+	case tea.MouseReleaseMsg:
+		// Clear mouse capture on release
+		if f.MouseCaptureIdx >= 0 {
+			f.MouseCaptureIdx = -1
+			f.MouseCaptureX = -1
+			f.MouseCaptureY = -1
+			f.MouseCaptureZoneStartX = -1
+		}
+		return f, nil
+
+	case tea.MouseMotionMsg:
+		// Handle dragging when we have an active capture
+		if f.MouseCaptureIdx >= 0 && f.MouseCaptureIdx < len(f.Fields) {
+			capturedField := &f.Fields[f.MouseCaptureIdx]
+
+			switch f.MouseCaptureType {
+			case FormFieldBrightness, FormFieldColorTemp:
+				// Continue dragging slider - use stored zone start for position calculation
+				zoneID := ui2.FormFieldZone(capturedField.ID)
+				var zoneInfo *zone.ZoneInfo
+				if f.Zones != nil {
+					zoneInfo = f.Zones.Get(zoneID)
+				}
+				f.handleSliderClick(f.MouseCaptureIdx, capturedField, msg.X, msg.Y, zoneInfo)
+				return f, nil
+			case FormFieldColor:
+				// Continue dragging color wheel
+				if f.Editing && f.ColorWheel != nil {
+					f.handleColorWheelClick(capturedField, msg.X, msg.Y)
+				}
+				return f, nil
+			}
+		}
+		return f, nil
+
 	case tea.MouseClickMsg:
 		wasEditingColor := f.Editing && f.Cursor < len(f.Fields) && f.Fields[f.Cursor].Type == FormFieldColor
+
+		// If we have an active capture, check if click is on a different field
+		// If it's on a different field, clear capture and handle as new click
+		// If it's on the same field or outside, treat as drag continuation
+		if f.MouseCaptureIdx >= 0 && f.MouseCaptureIdx < len(f.Fields) && f.Zones != nil {
+			// Check which field this click is on
+			clickedFieldIdx := -1
+			for i := range f.Fields {
+				field := &f.Fields[i]
+				zoneID := ui2.FormFieldZone(field.ID)
+				zoneInfo := f.Zones.Get(zoneID)
+				if zoneInfo != nil && zoneInfo.InBounds(msg) {
+					clickedFieldIdx = i
+					break
+				}
+			}
+			
+			// If click is on a different field, clear capture and handle as new click
+			if clickedFieldIdx >= 0 && clickedFieldIdx != f.MouseCaptureIdx {
+				f.MouseCaptureIdx = -1
+				f.MouseCaptureX = -1
+				f.MouseCaptureY = -1
+				f.MouseCaptureZoneStartX = -1
+				// Fall through to handleMouseClick to handle the new click
+			} else {
+				// Same field or outside - treat as drag continuation
+				capturedField := &f.Fields[f.MouseCaptureIdx]
+				zoneID := ui2.FormFieldZone(capturedField.ID)
+				zoneInfo := f.Zones.Get(zoneID)
+
+				// During dragging, we don't check zone bounds - allow dragging anywhere
+				// But we still need zoneInfo to calculate slider position
+				switch f.MouseCaptureType {
+				case FormFieldBrightness, FormFieldColorTemp:
+					// Continue dragging slider - get zone info for position calculation, but don't check bounds
+					f.handleSliderClick(f.MouseCaptureIdx, capturedField, msg.X, msg.Y, zoneInfo)
+					return f, tea.Batch(cmds...)
+				case FormFieldColor:
+					// Continue dragging color wheel
+					if f.Editing && f.ColorWheel != nil {
+						f.handleColorWheelClick(capturedField, msg.X, msg.Y)
+					}
+					return f, tea.Batch(cmds...)
+				}
+			}
+		}
+		
+		// Handle clicks (new clicks when no capture is active, or after clearing capture)
+		// handleMouseClick will check if click is on a different field and clear capture if needed
 		if f.handleMouseClick(msg) {
 			// Check if we just entered edit mode for color field
 			isNowEditingColor := f.Editing && f.Cursor < len(f.Fields) && f.Fields[f.Cursor].Type == FormFieldColor
@@ -270,9 +361,25 @@ func (f *Form) handleMouseClick(msg tea.MouseClickMsg) bool {
 	for i := range f.Fields {
 		field := &f.Fields[i]
 		zoneID := ui2.FormFieldZone(field.ID)
-		if f.Zones.Get(zoneID).InBounds(msg) {
+		zoneInfo := f.Zones.Get(zoneID)
+		if zoneInfo.InBounds(msg) {
+			// If we had a capture on a different field, clear it
+			if f.MouseCaptureIdx >= 0 && f.MouseCaptureIdx != i {
+				f.MouseCaptureIdx = -1
+				f.MouseCaptureX = -1
+				f.MouseCaptureY = -1
+				f.MouseCaptureZoneStartX = -1
+			}
 			return f.handleFieldClick(i, field, msg)
 		}
+	}
+
+	// If click is outside all fields, clear capture
+	if f.MouseCaptureIdx >= 0 {
+		f.MouseCaptureIdx = -1
+		f.MouseCaptureX = -1
+		f.MouseCaptureY = -1
+		f.MouseCaptureZoneStartX = -1
 	}
 
 	return false
@@ -289,10 +396,10 @@ func (f *Form) handleFieldClick(fieldIdx int, field *FormField, msg tea.MouseCli
 			f.notifyChange(*field)
 
 		case FormFieldBrightness, FormFieldColorTemp:
-			// Slider clicks need coordinate calculation
-			// This will be handled by special zone marking for slider tracks
-			f.MouseCaptureIdx = fieldIdx
-			f.MouseCaptureType = field.Type
+			// Slider clicks - calculate value from click position
+			zoneID := ui2.FormFieldZone(field.ID)
+			zoneInfo := f.Zones.Get(zoneID)
+			f.handleSliderClick(fieldIdx, field, msg.X, msg.Y, zoneInfo)
 
 		case FormFieldSelect:
 			if !f.DropdownOpen {
@@ -308,8 +415,10 @@ func (f *Form) handleFieldClick(fieldIdx int, field *FormField, msg tea.MouseCli
 				f.ColorWheel.SetOriginal(field.ColorX, field.ColorY)
 				f.ColorWheel.SetColor(field.ColorX, field.ColorY)
 			}
+			// Process the click on the wheel and start capture
 			f.MouseCaptureIdx = fieldIdx
 			f.MouseCaptureType = FormFieldColor
+			f.handleColorWheelClick(field, msg.X, msg.Y)
 		}
 		return true
 	}
@@ -584,6 +693,195 @@ func (f *Form) debounceSave(field *FormField) {
 	}
 }
 
+// handleSliderClick calculates slider value from mouse X coordinate.
+// Note: Zone bounds check is already done in handleMouseClick, so we can trust mouseX is valid.
+// zoneInfo is passed but we can't get its X directly, so we'll use a binary search approach
+// or calculate based on the zone's actual position by testing bounds.
+func (f *Form) handleSliderClick(fieldIdx int, field *FormField, mouseX, mouseY int, zoneInfo *zone.ZoneInfo) {
+	if zoneInfo == nil {
+		return
+	}
+	
+	// Slider bar is 20 chars wide (for brightness/color temp)
+	barWidth := 20
+	
+	var zoneStartX int
+	// If we're dragging (zone start X is already stored), use it
+	if f.MouseCaptureZoneStartX >= 0 && f.MouseCaptureIdx == fieldIdx {
+		zoneStartX = f.MouseCaptureZoneStartX
+	} else {
+		// Find the zone's left edge by testing different X positions
+		// We know mouseX is in bounds, so we can search backwards to find the zone start
+		// Use binary search for efficiency (zone could be 25+ chars wide including percentage)
+		var leftBound, rightBound int
+		testMsg := tea.MouseClickMsg{X: mouseX, Y: mouseY, Button: tea.MouseLeft}
+		
+		// First, find a point that's definitely outside the zone (to the left)
+		leftBound = mouseX - 100 // Start searching from well to the left
+		if leftBound < 0 {
+			leftBound = 0
+		}
+		testMsg.X = leftBound
+		if zoneInfo.InBounds(testMsg) {
+			// If even leftBound is in bounds, the zone might be very wide or we're at screen edge
+			// Just use mouseX as a fallback
+			zoneStartX = mouseX - barWidth
+			if zoneStartX < 0 {
+				zoneStartX = 0
+			}
+			rightBound = mouseX
+		} else {
+			// Binary search between leftBound and mouseX to find the zone start
+			rightBound = mouseX
+			for rightBound - leftBound > 1 {
+				mid := (leftBound + rightBound) / 2
+				testMsg.X = mid
+				if zoneInfo.InBounds(testMsg) {
+					rightBound = mid
+				} else {
+					leftBound = mid
+				}
+			}
+			zoneStartX = rightBound
+		}
+	}
+	
+	// Calculate relative position within the slider (first 20 chars of zone)
+	relativeX := mouseX - zoneStartX
+	
+	// Clamp to slider bar width (first 20 chars of the zone)
+	if relativeX < 0 {
+		relativeX = 0
+	}
+	if relativeX > barWidth {
+		relativeX = barWidth
+	}
+
+	// Calculate value based on position within slider bar
+	if field.Type == FormFieldBrightness {
+		value := relativeX * field.Max / barWidth
+		if value < field.Min {
+			value = field.Min
+		}
+		if value > field.Max {
+			value = field.Max
+		}
+		field.Value = value
+		f.notifyChange(*field)
+
+		// Start mouse capture for dragging
+		f.MouseCaptureX = mouseX
+		f.MouseCaptureY = mouseY
+		f.MouseCaptureIdx = fieldIdx
+		f.MouseCaptureType = field.Type
+		f.MouseCaptureZoneStartX = zoneStartX
+	} else if field.Type == FormFieldColorTemp {
+		// Inverted: left = Max (warm), right = Min (cool)
+		value := field.Max - (relativeX * (field.Max - field.Min) / barWidth)
+		if value < field.Min {
+			value = field.Min
+		}
+		if value > field.Max {
+			value = field.Max
+		}
+		field.Value = value
+		f.notifyChange(*field)
+
+		// Start mouse capture for dragging
+		f.MouseCaptureX = mouseX
+		f.MouseCaptureY = mouseY
+		f.MouseCaptureIdx = fieldIdx
+		f.MouseCaptureType = field.Type
+		f.MouseCaptureZoneStartX = zoneStartX
+	}
+}
+
+// handleColorWheelClick handles color wheel interaction from mouse coordinates.
+func (f *Form) handleColorWheelClick(field *FormField, mouseX, mouseY int) {
+	if f.ColorWheel == nil {
+		return
+	}
+	
+	// Enter edit mode if not already
+	if !f.Editing {
+		f.Editing = true
+		f.blinkTimerActive = true
+		f.ColorWheel.SetOriginal(field.ColorX, field.ColorY)
+		f.ColorWheel.SetColor(field.ColorX, field.ColorY)
+	}
+	
+	// Calculate which field row this is
+	fieldStartY := 0
+	captureIdx := f.MouseCaptureIdx
+	if captureIdx < 0 {
+		captureIdx = f.Cursor
+	}
+	for i := 0; i < captureIdx; i++ {
+		fieldStartY += f.fieldHeight(i)
+	}
+	
+	// Find max label width for X offset
+	maxLabelWidth := 0
+	for _, fld := range f.Fields {
+		if len(fld.Label) > maxLabelWidth {
+			maxLabelWidth = len(fld.Label)
+		}
+	}
+	
+	// Estimate wheel position
+	// Wheel starts after label line, so Y offset is fieldStartY + 1
+	// X offset is maxLabelWidth + 4
+	wheelStartX := maxLabelWidth + 4
+	wheelStartY := fieldStartY + 1
+	
+	if f.MouseCaptureX < 0 || f.MouseCaptureY < 0 {
+		// First click - set initial position
+		f.MouseCaptureX = mouseX
+		f.MouseCaptureY = mouseY
+		f.MouseCaptureIdx = f.Cursor
+		f.MouseCaptureType = FormFieldColor
+		
+		// Calculate relative coordinates within wheel
+		wheelY := mouseY - wheelStartY
+		wheelX := mouseX - wheelStartX
+		
+		if f.ColorWheel.HandleClick(wheelY, wheelX) {
+			field.ColorX = f.ColorWheel.ColorX
+			field.ColorY = f.ColorWheel.ColorY
+			f.debounceSave(field)
+		}
+	} else {
+		// Subsequent clicks/motion - calculate delta
+		deltaX := mouseX - f.MouseCaptureX
+		deltaY := mouseY - f.MouseCaptureY
+		
+		// Move wheel by delta (approximate: 1 pixel ≈ 1 cell for monospace)
+		newY := f.ColorWheel.SelRow + deltaY
+		newX := f.ColorWheel.SelCol + deltaX
+		
+		if f.ColorWheel.HandleClick(newY, newX) {
+			field.ColorX = f.ColorWheel.ColorX
+			field.ColorY = f.ColorWheel.ColorY
+			f.debounceSave(field)
+		}
+		
+		// Update capture position for next delta
+		f.MouseCaptureX = mouseX
+		f.MouseCaptureY = mouseY
+	}
+}
+
+// clampInt clamps a value between min and max.
+func clampInt(v, min, max int) int {
+	if v < min {
+		return min
+	}
+	if v > max {
+		return max
+	}
+	return v
+}
+
 // View renders the form fields.
 func (f *Form) View() string {
 	if len(f.Fields) == 0 {
@@ -685,11 +983,20 @@ func (f *Form) View() string {
 			wheelLines := strings.Split(f.ColorWheel.Render(), "\n")
 			valueStart := 2 + maxLabelWidth + 2 // "> " + label + ": " = 2 + maxLabelWidth + 2
 			indent := strings.Repeat(" ", valueStart)
+			
+			// Mark color wheel with zone for mouse interaction
+			zoneID := ui2.FormFieldZone(field.ID)
+			var wheelContent strings.Builder
 			for _, line := range wheelLines {
 				if line != "" {
-					content.WriteString(indent + line + "\n")
+					wheelContent.WriteString(indent + line + "\n")
 				}
 			}
+			wheelStr := wheelContent.String()
+			if f.Zones != nil {
+				wheelStr = f.Zones.Mark(zoneID, wheelStr)
+			}
+			content.WriteString(wheelStr)
 			continue
 		}
 
