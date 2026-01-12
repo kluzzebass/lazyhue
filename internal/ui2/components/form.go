@@ -351,6 +351,7 @@ func (f *Form) handleKey(msg tea.KeyMsg) bool {
 	return false
 }
 
+
 // handleMouseClick handles mouse click input using zones.
 func (f *Form) handleMouseClick(msg tea.MouseClickMsg) bool {
 	if f.Zones == nil {
@@ -360,8 +361,31 @@ func (f *Form) handleMouseClick(msg tea.MouseClickMsg) bool {
 	// Check zones to find which field was clicked
 	for i := range f.Fields {
 		field := &f.Fields[i]
+
+		// Color wheel has row-specific zones - check all rows
+		if field.Type == FormFieldColor {
+			for row := 0; row < f.ColorWheel.Height(); row++ {
+				rowZoneID := fmt.Sprintf("%s-%d", ui2.FormFieldZone(field.ID), row)
+				zoneInfo := f.Zones.Get(rowZoneID)
+				if zoneInfo != nil && !zoneInfo.IsZero() && zoneInfo.InBounds(msg) {
+					// Clear capture if switching fields
+					if f.MouseCaptureIdx >= 0 && f.MouseCaptureIdx != i {
+						f.MouseCaptureIdx = -1
+						f.MouseCaptureX = -1
+						f.MouseCaptureY = -1
+						f.MouseCaptureZoneStartX = -1
+					}
+					return f.handleFieldClick(i, field, msg)
+				}
+			}
+			continue
+		}
+
 		zoneID := ui2.FormFieldZone(field.ID)
 		zoneInfo := f.Zones.Get(zoneID)
+		if zoneInfo == nil || zoneInfo.IsZero() {
+			continue
+		}
 		if zoneInfo.InBounds(msg) {
 			// If we had a capture on a different field, clear it
 			if f.MouseCaptureIdx >= 0 && f.MouseCaptureIdx != i {
@@ -798,10 +822,10 @@ func (f *Form) handleSliderClick(fieldIdx int, field *FormField, mouseX, mouseY 
 
 // handleColorWheelClick handles color wheel interaction from mouse coordinates.
 func (f *Form) handleColorWheelClick(field *FormField, mouseX, mouseY int) {
-	if f.ColorWheel == nil {
+	if f.ColorWheel == nil || f.Zones == nil {
 		return
 	}
-	
+
 	// Enter edit mode if not already
 	if !f.Editing {
 		f.Editing = true
@@ -809,77 +833,57 @@ func (f *Form) handleColorWheelClick(field *FormField, mouseX, mouseY int) {
 		f.ColorWheel.SetOriginal(field.ColorX, field.ColorY)
 		f.ColorWheel.SetColor(field.ColorX, field.ColorY)
 	}
-	
-	// Calculate which field row this is
-	fieldStartY := 0
-	captureIdx := f.MouseCaptureIdx
-	if captureIdx < 0 {
-		captureIdx = f.Cursor
+
+	// Find which row zone was clicked and get its bounds
+	// Color wheel uses row-specific zones: form-field-color-0, form-field-color-1, etc.
+	var clickedRow int = -1
+	var zoneStartX int
+	var firstRowStartY int = -1
+
+	for row := 0; row < f.ColorWheel.Height(); row++ {
+		rowZoneID := fmt.Sprintf("%s-%d", ui2.FormFieldZone(field.ID), row)
+		zoneInfo := f.Zones.Get(rowZoneID)
+		if zoneInfo != nil && !zoneInfo.IsZero() {
+			if firstRowStartY < 0 {
+				firstRowStartY = zoneInfo.StartY
+				zoneStartX = zoneInfo.StartX
+			}
+			if zoneInfo.InBounds(tea.MouseClickMsg{X: mouseX, Y: mouseY, Button: tea.MouseLeft}) {
+				clickedRow = row
+				break
+			}
+		}
 	}
-	for i := 0; i < captureIdx; i++ {
-		fieldStartY += f.fieldHeight(i)
+
+	if clickedRow < 0 || firstRowStartY < 0 {
+		return
 	}
-	
-	// Find max label width for X offset
+
+	// Calculate indent width (must match View rendering)
 	maxLabelWidth := 0
 	for _, fld := range f.Fields {
 		if len(fld.Label) > maxLabelWidth {
 			maxLabelWidth = len(fld.Label)
 		}
 	}
-	
-	// Estimate wheel position
-	// Wheel starts after label line, so Y offset is fieldStartY + 1
-	// X offset is maxLabelWidth + 4
-	wheelStartX := maxLabelWidth + 4
-	wheelStartY := fieldStartY + 1
-	
-	if f.MouseCaptureX < 0 || f.MouseCaptureY < 0 {
-		// First click - set initial position
-		f.MouseCaptureX = mouseX
-		f.MouseCaptureY = mouseY
+	indentWidth := 2 + maxLabelWidth + 2 // "> " + label + ": "
+
+	// Convert screen coordinates to wheel-relative coordinates
+	wheelX := mouseX - zoneStartX - indentWidth
+	wheelY := mouseY - firstRowStartY
+
+	// Set up capture for dragging
+	if f.MouseCaptureIdx < 0 {
 		f.MouseCaptureIdx = f.Cursor
 		f.MouseCaptureType = FormFieldColor
-		
-		// Calculate relative coordinates within wheel
-		wheelY := mouseY - wheelStartY
-		wheelX := mouseX - wheelStartX
-		
-		if f.ColorWheel.HandleClick(wheelY, wheelX) {
-			field.ColorX = f.ColorWheel.ColorX
-			field.ColorY = f.ColorWheel.ColorY
-			f.debounceSave(field)
-		}
-	} else {
-		// Subsequent clicks/motion - calculate delta
-		deltaX := mouseX - f.MouseCaptureX
-		deltaY := mouseY - f.MouseCaptureY
-		
-		// Move wheel by delta (approximate: 1 pixel ≈ 1 cell for monospace)
-		newY := f.ColorWheel.SelRow + deltaY
-		newX := f.ColorWheel.SelCol + deltaX
-		
-		if f.ColorWheel.HandleClick(newY, newX) {
-			field.ColorX = f.ColorWheel.ColorX
-			field.ColorY = f.ColorWheel.ColorY
-			f.debounceSave(field)
-		}
-		
-		// Update capture position for next delta
-		f.MouseCaptureX = mouseX
-		f.MouseCaptureY = mouseY
 	}
-}
 
-// clampInt clamps a value between min and max.
-func clampInt(v, min, max int) int {
-	if v < min {
-		return min
+	// Try to select this position on the wheel
+	if f.ColorWheel.HandleClick(wheelY, wheelX) {
+		field.ColorX = f.ColorWheel.ColorX
+		field.ColorY = f.ColorWheel.ColorY
+		f.debounceSave(field)
 	}
-	if v > max {
-		return max
-	}
-	return v
 }
 
 // View renders the form fields.
@@ -983,20 +987,22 @@ func (f *Form) View() string {
 			wheelLines := strings.Split(f.ColorWheel.Render(), "\n")
 			valueStart := 2 + maxLabelWidth + 2 // "> " + label + ": " = 2 + maxLabelWidth + 2
 			indent := strings.Repeat(" ", valueStart)
-			
-			// Mark color wheel with zone for mouse interaction
-			zoneID := ui2.FormFieldZone(field.ID)
-			var wheelContent strings.Builder
+
+			// Mark each line of the color wheel with a unique zone ID
+			// Bubblezone overwrites bounds when same ID is used multiple times,
+			// so we use row-specific IDs: form-field-color-0, form-field-color-1, etc.
+			rowIdx := 0
 			for _, line := range wheelLines {
 				if line != "" {
-					wheelContent.WriteString(indent + line + "\n")
+					lineContent := indent + line
+					if f.Zones != nil {
+						rowZoneID := fmt.Sprintf("%s-%d", ui2.FormFieldZone(field.ID), rowIdx)
+						lineContent = f.Zones.Mark(rowZoneID, lineContent)
+					}
+					content.WriteString(lineContent + "\n")
+					rowIdx++
 				}
 			}
-			wheelStr := wheelContent.String()
-			if f.Zones != nil {
-				wheelStr = f.Zones.Mark(zoneID, wheelStr)
-			}
-			content.WriteString(wheelStr)
 			continue
 		}
 
