@@ -20,7 +20,7 @@ func (p *DetailsPanel) buildEntertainmentView(cfgAny interface{}) *details.View 
 	ids := details.NewFields()
 	ids.AddMuted("ID", cfg.ID)
 
-	name := hue.EntertainmentName(cfg, cfg.ID)
+	name := cfg.EntertainmentName(cfg.ID)
 	ids.Add("Name", name)
 
 	// Status with styling

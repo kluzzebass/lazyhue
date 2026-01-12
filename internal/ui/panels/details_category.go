@@ -6,7 +6,6 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
-	"github.com/kluzzebass/lazyhue/internal/hue"
 	"github.com/kluzzebass/lazyhue/internal/hueclient"
 	"github.com/kluzzebass/lazyhue/internal/ui/panels/details"
 )
@@ -21,14 +20,14 @@ func (p *DetailsPanel) buildLightsCategoryView(data LightsCategoryData) *details
 	// Refresh lights from current state if possible
 	if p.state != nil {
 		for _, room := range p.state.AllRooms() {
-			if hue.RoomName(room, "") == data.ParentName {
+			if room.RoomName("") == data.ParentName {
 				data.Lights = p.state.RoomLights(room)
 				break
 			}
 		}
 		if len(data.Lights) == 0 {
 			for _, zone := range p.state.AllZones() {
-				if hue.RoomName(zone, "") == data.ParentName {
+				if zone.RoomName("") == data.ParentName {
 					data.Lights = p.state.RoomLights(zone)
 					break
 				}
@@ -150,7 +149,7 @@ func (p *DetailsPanel) buildDevicesCategoryView(data DevicesCategoryData) *detai
 	view.Add(details.Blank())
 	devicesList := details.NewList()
 	for _, device := range data.Devices {
-		name := hue.DeviceName(device, "")
+		name := device.DeviceName("")
 		productName := ""
 		if device.ProductData != nil && device.ProductData.ProductName != nil {
 			productName = *device.ProductData.ProductName
@@ -176,7 +175,7 @@ func (p *DetailsPanel) buildScenesCategoryView(data ScenesCategoryData) *details
 	// Refresh scenes from current state if possible
 	if p.state != nil {
 		for _, room := range p.state.AllRooms() {
-			if hue.RoomName(room, "") == data.ParentName {
+			if room.RoomName("") == data.ParentName {
 				if room.Id != nil {
 					data.Scenes = p.state.RoomScenes(*room.Id)
 				}
@@ -185,7 +184,7 @@ func (p *DetailsPanel) buildScenesCategoryView(data ScenesCategoryData) *details
 		}
 		if len(data.Scenes) == 0 {
 			for _, zone := range p.state.AllZones() {
-				if hue.RoomName(zone, "") == data.ParentName {
+				if zone.RoomName("") == data.ParentName {
 					if zone.Id != nil {
 						data.Scenes = p.state.RoomScenes(*zone.Id)
 					}
@@ -210,7 +209,7 @@ func (p *DetailsPanel) buildScenesCategoryView(data ScenesCategoryData) *details
 	scenesList := details.NewList()
 
 	for _, scene := range data.Scenes {
-		name := hue.SceneName(scene, "")
+		name := scene.SceneName("")
 
 		isActive := false
 		statusStr := ""

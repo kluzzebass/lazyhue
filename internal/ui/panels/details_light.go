@@ -67,6 +67,29 @@ func (p *DetailsPanel) buildLightView(lightAny interface{}) *details.View {
 		view.Add(details.Blank())
 	}
 
+	// Name section
+	nameFields := details.NewFields()
+	if device != nil {
+		if device.Metadata != nil && device.Metadata.Name != nil {
+			nameFields.Add("Name", *device.Metadata.Name)
+		}
+	}
+	// Show deprecated name if available and different from current name
+	if light.Metadata != nil && light.Metadata.Name != nil {
+		deprecatedName := *light.Metadata.Name
+		currentName := ""
+		if device != nil && device.Metadata != nil && device.Metadata.Name != nil {
+			currentName = *device.Metadata.Name
+		}
+		if deprecatedName != currentName {
+			nameFields.AddMuted("Deprecated name", deprecatedName)
+		}
+	}
+	if !nameFields.IsEmpty() {
+		view.Add(nameFields)
+		view.Add(details.Blank())
+	}
+
 	// IDs
 	ids := details.NewFields()
 	if light.Id != nil {

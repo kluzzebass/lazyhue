@@ -847,7 +847,7 @@ func (m *Model) showRenamePopup() tea.Cmd {
 		}
 		itemID = *bridgeDevice.Id
 		itemType = panels.EntityDevice
-		currentName = hue.DeviceName(bridgeDevice, "")
+		currentName = bridgeDevice.DeviceName("")
 		entityType = "bridge"
 	case panels.EntityDevice:
 		entityType = "device"
@@ -873,7 +873,7 @@ func (m *Model) showRenamePopup() tea.Cmd {
 		}
 		itemID = *light.Owner.Rid
 		itemType = panels.EntityDevice
-		currentName = hue.DeviceName(device, "")
+		currentName = device.DeviceName("")
 		entityType = "device"
 	default:
 		m.setStatusTemporary("This item cannot be renamed", false, 3*time.Second)
@@ -1402,7 +1402,7 @@ func (m *Model) showEditRoomPopup() tea.Cmd {
 			continue
 		}
 		deviceID := *device.Id
-		deviceName := hue.DeviceName(device, deviceID[:8])
+		deviceName := device.DeviceName(deviceID[:8])
 
 		// Only show devices that are currently in this room
 		if currentDeviceIDs[deviceID] {

@@ -189,7 +189,7 @@ func BuildRoomItems(state *hue.BridgeState) []list.Item {
 	rooms := state.AllRooms()
 	items := make([]list.Item, 0, len(rooms))
 	for _, room := range rooms {
-		name := hue.RoomName(room, "")
+		name := room.RoomName("")
 		id := ""
 		if room.Id != nil {
 			id = *room.Id
@@ -259,12 +259,12 @@ func BuildSceneItems(state *hue.BridgeState) []list.Item {
 	roomNames := make(map[string]string)
 	for _, room := range state.AllRooms() {
 		if room.Id != nil {
-			roomNames[*room.Id] = hue.RoomName(room, "")
+			roomNames[*room.Id] = room.RoomName("")
 		}
 	}
 
 	for _, scene := range scenes {
-		name := hue.SceneName(scene, "")
+		name := scene.SceneName("")
 
 		// Add room/zone context
 		if scene.Group != nil && scene.Group.Rid != nil {
@@ -353,14 +353,14 @@ func BuildSceneTree(state *hue.BridgeState) []*TreeNode {
 
 	for _, room := range state.AllRooms() {
 		if room.Id != nil {
-			groupNames[*room.Id] = hue.RoomName(room, "")
+			groupNames[*room.Id] = room.RoomName("")
 			groupIsZone[*room.Id] = false
 		}
 	}
 
 	for _, zone := range state.AllZones() {
 		if zone.Id != nil {
-			groupNames[*zone.Id] = hue.RoomName(zone, "")
+			groupNames[*zone.Id] = zone.RoomName("")
 			groupIsZone[*zone.Id] = true
 		}
 	}
@@ -411,7 +411,7 @@ func BuildSceneTree(state *hue.BridgeState) []*TreeNode {
 		}
 
 		for _, scene := range groupScenes[entry.id] {
-			name := hue.SceneName(scene, "")
+			name := scene.SceneName("")
 			id := ""
 			if scene.Id != nil {
 				id = *scene.Id
@@ -434,7 +434,7 @@ func BuildSceneTree(state *hue.BridgeState) []*TreeNode {
 
 	// Add ungrouped scenes at root level
 	for _, scene := range ungroupedScenes {
-		name := hue.SceneName(scene, "")
+		name := scene.SceneName("")
 		id := ""
 		if scene.Id != nil {
 			id = *scene.Id
@@ -465,7 +465,7 @@ func BuildZoneItems(state *hue.BridgeState) []list.Item {
 			id = *zone.Id
 		}
 
-		name := hue.RoomName(zone, "")
+		name := zone.RoomName("")
 
 		isOn := state.IsZoneOn(zone)
 
@@ -518,7 +518,7 @@ func BuildDeviceItems(state *hue.BridgeState) []list.Item {
 			continue
 		}
 
-		name := hue.DeviceName(device, "")
+		name := device.DeviceName("")
 
 		// Check if device has motion sensor and its state
 		hasMotion, isDetecting := state.GetDeviceMotionState(device)
@@ -543,7 +543,7 @@ func BuildEntertainmentItems(state *hue.BridgeState) []list.Item {
 	for _, cfg := range configs {
 		items = append(items, EntityItem{
 			ID:     cfg.ID,
-			Name:   hue.EntertainmentName(cfg, cfg.ID),
+			Name:   cfg.EntertainmentName(cfg.ID),
 			Type:   EntityEntertainment,
 			IsOn:   cfg.Status == "streaming",
 			RawPtr: cfg,
@@ -665,7 +665,7 @@ func BuildHierarchyTree(state *hue.BridgeState) []*TreeNode {
 		if group.Id != nil {
 			groupID = *group.Id
 		}
-		groupName = hue.RoomName(group, "")
+		groupName = group.RoomName("")
 
 		label := groupName
 		entityType := EntityRoom
@@ -726,12 +726,12 @@ func BuildHierarchyTree(state *hue.BridgeState) []*TreeNode {
 			// Get name from owning device
 			if groupLights[i].Owner != nil && groupLights[i].Owner.Rid != nil {
 				if device, ok := deviceMap[*groupLights[i].Owner.Rid]; ok {
-					nameI = hue.DeviceName(device, "")
+					nameI = device.DeviceName("")
 				}
 			}
 			if groupLights[j].Owner != nil && groupLights[j].Owner.Rid != nil {
 				if device, ok := deviceMap[*groupLights[j].Owner.Rid]; ok {
-					nameJ = hue.DeviceName(device, "")
+					nameJ = device.DeviceName("")
 				}
 			}
 			return nameI < nameJ
@@ -739,7 +739,7 @@ func BuildHierarchyTree(state *hue.BridgeState) []*TreeNode {
 
 		// Sort devices by name
 		sort.Slice(groupDevices, func(i, j int) bool {
-			return hue.DeviceName(groupDevices[i], "") < hue.DeviceName(groupDevices[j], "")
+			return groupDevices[i].DeviceName("") < groupDevices[j].DeviceName("")
 		})
 
 		// Lights category
@@ -789,7 +789,7 @@ func BuildHierarchyTree(state *hue.BridgeState) []*TreeNode {
 		if len(scenes) > 0 {
 			// Sort scenes by name
 			sort.Slice(scenes, func(i, j int) bool {
-				return hue.SceneName(scenes[i], "") < hue.SceneName(scenes[j], "")
+				return scenes[i].SceneName("") < scenes[j].SceneName("")
 			})
 
 			scenesNode := &TreeNode{
@@ -827,7 +827,7 @@ func BuildHierarchyTree(state *hue.BridgeState) []*TreeNode {
 	// Add entertainment areas
 	entertainmentConfigs := state.AllEntertainmentConfigurations()
 	for _, cfg := range entertainmentConfigs {
-		name := hue.EntertainmentName(cfg, cfg.ID)
+			name := cfg.EntertainmentName(cfg.ID)
 
 		entNode := &TreeNode{
 			Label: name + " (entertainment)",
@@ -921,12 +921,12 @@ func BuildHierarchyTree(state *hue.BridgeState) []*TreeNode {
 				nameI, nameJ := "", ""
 				if ungroupedLights[i].Owner != nil && ungroupedLights[i].Owner.Rid != nil {
 					if device, ok := deviceMap[*ungroupedLights[i].Owner.Rid]; ok {
-						nameI = hue.DeviceName(device, "")
+						nameI = device.DeviceName("")
 					}
 				}
 				if ungroupedLights[j].Owner != nil && ungroupedLights[j].Owner.Rid != nil {
 					if device, ok := deviceMap[*ungroupedLights[j].Owner.Rid]; ok {
-						nameJ = hue.DeviceName(device, "")
+						nameJ = device.DeviceName("")
 					}
 				}
 				return nameI < nameJ
@@ -954,7 +954,7 @@ func BuildHierarchyTree(state *hue.BridgeState) []*TreeNode {
 		if len(ungroupedDevices) > 0 {
 			// Sort by name
 			sort.Slice(ungroupedDevices, func(i, j int) bool {
-				return hue.DeviceName(ungroupedDevices[i], "") < hue.DeviceName(ungroupedDevices[j], "")
+				return ungroupedDevices[i].DeviceName("") < ungroupedDevices[j].DeviceName("")
 			})
 
 			devicesNode := &TreeNode{
@@ -1419,7 +1419,7 @@ func buildLightNode(light hueclient.LightGet, state *hue.BridgeState) *TreeNode 
 
 // buildDeviceNode creates a tree node for a device.
 func buildDeviceNode(device hueclient.DeviceGet, state *hue.BridgeState) *TreeNode {
-	name := hue.DeviceName(device, "")
+	name := device.DeviceName("")
 
 	id := ""
 	if device.Id != nil {
@@ -1462,7 +1462,7 @@ func buildDeviceNode(device hueclient.DeviceGet, state *hue.BridgeState) *TreeNo
 
 // buildSceneNode creates a tree node for a scene.
 func buildSceneNode(scene hueclient.SceneGet, state *hue.BridgeState) *TreeNode {
-	name := hue.SceneName(scene, "")
+	name := scene.SceneName("")
 
 	id := ""
 	if scene.Id != nil {

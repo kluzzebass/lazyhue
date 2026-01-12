@@ -225,6 +225,33 @@ func (s *BridgeState) GetDeviceName(device hueclient.DeviceGet) string {
 	return "Unknown"
 }
 
+// GetDeviceDeprecatedName returns the deprecated name from the device's lights, or empty string if not available.
+// The deprecated name is stored in the light's Metadata.Name field (which is deprecated in favor of device.Metadata.Name).
+// If the device has multiple lights, returns the deprecated name from the first light that has one.
+func (s *BridgeState) GetDeviceDeprecatedName(device hueclient.DeviceGet) string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	deviceID := ""
+	if device.Id != nil {
+		deviceID = *device.Id
+	}
+	if deviceID == "" {
+		return ""
+	}
+
+	// Find lights owned by this device
+	for _, light := range s.Lights {
+		if light.Owner != nil && light.Owner.Rid != nil && *light.Owner.Rid == deviceID {
+			// Return the first deprecated name we find
+			if light.Metadata != nil && light.Metadata.Name != nil {
+				return *light.Metadata.Name
+			}
+		}
+	}
+	return ""
+}
+
 // GetRoomName returns the name of a room, or "Unknown" if not available.
 func (s *BridgeState) GetRoomName(room hueclient.RoomGet) string {
 	if room.Metadata != nil && room.Metadata.Name != nil {

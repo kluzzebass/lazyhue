@@ -56,9 +56,9 @@ func (p *DetailsPanel) buildSceneView(sceneAny interface{}) *details.View {
 
 		if p.state != nil {
 			if room, ok := p.state.GetRoom(*scene.Group.Rid); ok {
-				group.Add("Name", hue.RoomName(room, "Unknown"))
+				group.Add("Name", room.RoomName("Unknown"))
 			} else if zone, ok := p.state.GetZone(*scene.Group.Rid); ok {
-				group.Add("Name", fmt.Sprintf("%s (zone)", hue.RoomName(zone, "Unknown")))
+				group.Add("Name", fmt.Sprintf("%s (zone)", zone.RoomName("Unknown")))
 			}
 		}
 		view.Add(group)

@@ -18,6 +18,29 @@ func (p *DetailsPanel) buildDeviceView(deviceAny interface{}) *details.View {
 
 	view := details.NewView(p.styles)
 
+	// Name section
+	nameFields := details.NewFields()
+	if device.Metadata != nil && device.Metadata.Name != nil {
+		nameFields.Add("Name", *device.Metadata.Name)
+	}
+	// Show deprecated name if available and different from current name
+	if p.state != nil {
+		deprecatedName := p.state.GetDeviceDeprecatedName(device)
+		if deprecatedName != "" {
+			currentName := ""
+			if device.Metadata != nil && device.Metadata.Name != nil {
+				currentName = *device.Metadata.Name
+			}
+			if deprecatedName != currentName {
+				nameFields.AddMuted("Deprecated name", deprecatedName)
+			}
+		}
+	}
+	if !nameFields.IsEmpty() {
+		view.Add(nameFields)
+		view.Add(details.Blank())
+	}
+
 	// IDs section (headerless first section)
 	ids := details.NewFields()
 	if device.Id != nil {

@@ -179,14 +179,14 @@ func (m *Model) refreshSelectedItemFromState(state *hue.BridgeState) bool {
 		if room, ok := state.GetRoom(m.selectedItem.ID); ok {
 			m.selectedItem.RawPtr = room
 			m.selectedItem.IsOn = state.IsRoomOn(room)
-			m.selectedItem.Name = hue.RoomName(room, m.selectedItem.Name)
+			m.selectedItem.Name = room.RoomName(m.selectedItem.Name)
 			return true
 		}
 	case panels.EntityZone:
 		if zone, ok := state.GetZone(m.selectedItem.ID); ok {
 			m.selectedItem.RawPtr = zone
 			m.selectedItem.IsOn = state.IsRoomOn(zone)
-			m.selectedItem.Name = hue.RoomName(zone, m.selectedItem.Name)
+			m.selectedItem.Name = zone.RoomName(m.selectedItem.Name)
 			return true
 		}
 	case panels.EntityScene:
@@ -196,19 +196,19 @@ func (m *Model) refreshSelectedItemFromState(state *hue.BridgeState) bool {
 			if scene.Status != nil && scene.Status.Active != nil {
 				m.selectedItem.IsOn = string(*scene.Status.Active) == "static" || string(*scene.Status.Active) == "dynamic_palette"
 			}
-			m.selectedItem.Name = hue.SceneName(scene, m.selectedItem.Name)
+			m.selectedItem.Name = scene.SceneName(m.selectedItem.Name)
 			return true
 		}
 	case panels.EntityDevice:
 		if device, ok := state.GetDevice(m.selectedItem.ID); ok {
 			m.selectedItem.RawPtr = device
-			m.selectedItem.Name = hue.DeviceName(device, m.selectedItem.Name)
+			m.selectedItem.Name = device.DeviceName(m.selectedItem.Name)
 			return true
 		}
 	case panels.EntityEntertainment:
 		if ent, ok := state.GetEntertainmentConfiguration(m.selectedItem.ID); ok {
 			m.selectedItem.RawPtr = ent
-			m.selectedItem.Name = hue.EntertainmentName(ent, m.selectedItem.Name)
+			m.selectedItem.Name = ent.EntertainmentName(m.selectedItem.Name)
 			return true
 		}
 	case panels.EntityLightsCategory, panels.EntityDevicesCategory, panels.EntityScenesCategory:
@@ -483,7 +483,7 @@ func (m *Model) buildEventDetails(msg BridgeEventMsg) panels.EventDetails {
 
 	case "scene":
 		if scene, ok := state.GetScene(msg.ResourceID); ok {
-			details.ResourceName = hue.SceneName(scene, details.ResourceName)
+			details.ResourceName = scene.SceneName(details.ResourceName)
 			if scene.Status != nil && scene.Status.Active != nil {
 				if *scene.Status.Active == "active" {
 					details.Details = "activated"
@@ -498,7 +498,7 @@ func (m *Model) buildEventDetails(msg BridgeEventMsg) panels.EventDetails {
 			// Try to get device name
 			if motion.Owner != nil && motion.Owner.Rid != nil {
 				if device, ok := state.GetDevice(*motion.Owner.Rid); ok {
-					details.ResourceName = hue.DeviceName(device, details.ResourceName)
+					details.ResourceName = device.DeviceName(details.ResourceName)
 				}
 			}
 			if motion.Motion != nil && motion.Motion.Motion != nil {
@@ -515,7 +515,7 @@ func (m *Model) buildEventDetails(msg BridgeEventMsg) panels.EventDetails {
 			// Try to get device name
 			if temp.Owner != nil && temp.Owner.Rid != nil {
 				if device, ok := state.GetDevice(*temp.Owner.Rid); ok {
-					details.ResourceName = hue.DeviceName(device, details.ResourceName)
+					details.ResourceName = device.DeviceName(details.ResourceName)
 				}
 			}
 			if temp.Temperature != nil && temp.Temperature.Temperature != nil {
@@ -528,7 +528,7 @@ func (m *Model) buildEventDetails(msg BridgeEventMsg) panels.EventDetails {
 			// Try to get device name
 			if ll.Owner != nil && ll.Owner.Rid != nil {
 				if device, ok := state.GetDevice(*ll.Owner.Rid); ok {
-					details.ResourceName = hue.DeviceName(device, details.ResourceName)
+					details.ResourceName = device.DeviceName(details.ResourceName)
 				}
 			}
 			if ll.Light != nil && ll.Light.LightLevel != nil {

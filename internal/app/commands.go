@@ -302,7 +302,7 @@ func recallScene(bridge *hue.Bridge, sceneID string) tea.Cmd {
 	return func() tea.Msg {
 		sceneName := sceneID
 		if scene, ok := bridge.GetState().GetScene(sceneID); ok {
-			sceneName = hue.SceneName(scene, sceneID)
+			sceneName = scene.SceneName(sceneID)
 		}
 		if err := bridge.RecallScene(sceneID); err != nil {
 			return ActionErrorMsg{Action: "recall scene", Err: err}
