@@ -164,15 +164,18 @@ func (m *Model) buildBridgeChildren(bridgeNode *panels.TreeNode, state *hue.Brid
 					}
 					lightName := state.GetLightName(light)
 					isOn := light.On != nil && light.On.On != nil && *light.On.On
+					// Store a copy of the light in RawPtr for later access
+					lightCopy := light
 					lightsNode.Children = append(lightsNode.Children, &panels.TreeNode{
 						ID:    lightID,
 						Label: lightName,
 						Depth: 4,
 						Item: &panels.EntityItem{
-							ID:   lightID,
-							Name: lightName,
-							Type: panels.EntityLight,
-							IsOn: isOn,
+							ID:     lightID,
+							Name:   lightName,
+							Type:   panels.EntityLight,
+							IsOn:   isOn,
+							RawPtr: lightCopy,
 						},
 					})
 				}
@@ -302,15 +305,18 @@ func (m *Model) buildBridgeChildren(bridgeNode *panels.TreeNode, state *hue.Brid
 									light, lightFound := state.GetLight(*svc.Rid)
 									if lightFound {
 										isOn := light.On != nil && light.On.On != nil && *light.On.On
+										// Store a copy of the light in RawPtr for later access
+										lightCopy := light
 										zoneNode.Children = append(zoneNode.Children, &panels.TreeNode{
 											ID:    *svc.Rid,
 											Label: *device.Metadata.Name,
 											Depth: 3,
 											Item: &panels.EntityItem{
-												ID:   *svc.Rid,
-												Name: *device.Metadata.Name,
-												Type: panels.EntityLight,
-												IsOn: isOn,
+												ID:     *svc.Rid,
+												Name:   *device.Metadata.Name,
+												Type:   panels.EntityLight,
+												IsOn:   isOn,
+												RawPtr: lightCopy,
 											},
 										})
 									}
@@ -378,15 +384,18 @@ func (m *Model) buildBridgeChildren(bridgeNode *panels.TreeNode, state *hue.Brid
 							}
 						}
 
+						// Store a copy of the light in RawPtr for later access
+						lightCopy := light
 						entItemNode.Children = append(entItemNode.Children, &panels.TreeNode{
 							ID:    lightEntry.Service.RID,
 							Label: lightName,
 							Depth: 3,
 							Item: &panels.EntityItem{
-								ID:   lightEntry.Service.RID,
-								Name: lightName,
-								Type: panels.EntityLight,
-								IsOn: isOn,
+								ID:     lightEntry.Service.RID,
+								Name:   lightName,
+								Type:   panels.EntityLight,
+								IsOn:   isOn,
+								RawPtr: lightCopy,
 							},
 						})
 					}
@@ -415,15 +424,18 @@ func (m *Model) buildLightsTree(state *hue.BridgeState) {
 		}
 		isOn := light.On != nil && light.On.On != nil && *light.On.On
 
+		// Store a copy of the light in RawPtr for later access
+		lightCopy := light
 		nodes = append(nodes, &panels.TreeNode{
 			ID:    *light.Id,
 			Label: name,
 			Depth: 0,
 			Item: &panels.EntityItem{
-				ID:   *light.Id,
-				Name: name,
-				Type: panels.EntityLight,
-				IsOn: isOn,
+				ID:     *light.Id,
+				Name:   name,
+				Type:   panels.EntityLight,
+				IsOn:   isOn,
+				RawPtr: lightCopy,
 			},
 		})
 	}
