@@ -28,10 +28,11 @@ type Event interface {
 	Activity
 	// Parse parses the raw event data and returns an Event instance.
 	// bridgeID is the ID of the bridge that sent the event.
+	// bridgeName is the name of the bridge that sent the event.
 	// eventType is the type of event ("update", "add", "delete", etc.).
 	// data is the raw JSON data for this event.
 	// state is the bridge state for looking up resource names and details.
-	Parse(bridgeID, eventType string, data json.RawMessage, state *hue.BridgeState) (Event, error)
+	Parse(bridgeID, bridgeName, eventType string, data json.RawMessage, state *hue.BridgeState) (Event, error)
 	// ResourceType returns the type of resource this event is for (e.g., "light", "scene").
 	ResourceType() string
 	// ResourceID returns the ID of the resource this event is for.
@@ -41,6 +42,7 @@ type Event interface {
 // baseEvent contains common fields for all events.
 type baseEvent struct {
 	bridgeID     string
+	bridgeName   string
 	resourceType string
 	resourceID   string
 	eventType    string
@@ -69,7 +71,7 @@ type LightEvent struct {
 	Details        string
 }
 
-func (e *LightEvent) Parse(bridgeID, eventType string, data json.RawMessage, state *hue.BridgeState) (Event, error) {
+func (e *LightEvent) Parse(bridgeID, bridgeName, eventType string, data json.RawMessage, state *hue.BridgeState) (Event, error) {
 	var updates []hue.ResourceUpdate
 	if err := json.Unmarshal(data, &updates); err != nil {
 		return nil, fmt.Errorf("parse light event: %w", err)
@@ -82,6 +84,7 @@ func (e *LightEvent) Parse(bridgeID, eventType string, data json.RawMessage, sta
 	update := updates[0]
 	e.baseEvent = baseEvent{
 		bridgeID:     bridgeID,
+		bridgeName:   bridgeName,
 		resourceType: "light",
 		resourceID:   update.ID,
 		eventType:    eventType,
@@ -137,7 +140,7 @@ type GroupedLightEvent struct {
 	Details        string
 }
 
-func (e *GroupedLightEvent) Parse(bridgeID, eventType string, data json.RawMessage, state *hue.BridgeState) (Event, error) {
+func (e *GroupedLightEvent) Parse(bridgeID, bridgeName, eventType string, data json.RawMessage, state *hue.BridgeState) (Event, error) {
 	var updates []hue.ResourceUpdate
 	if err := json.Unmarshal(data, &updates); err != nil {
 		return nil, fmt.Errorf("parse grouped_light event: %w", err)
@@ -150,6 +153,7 @@ func (e *GroupedLightEvent) Parse(bridgeID, eventType string, data json.RawMessa
 	update := updates[0]
 	e.baseEvent = baseEvent{
 		bridgeID:     bridgeID,
+		bridgeName:   bridgeName,
 		resourceType: "grouped_light",
 		resourceID:   update.ID,
 		eventType:    eventType,
@@ -253,7 +257,7 @@ type SceneEvent struct {
 	Details string
 }
 
-func (e *SceneEvent) Parse(bridgeID, eventType string, data json.RawMessage, state *hue.BridgeState) (Event, error) {
+func (e *SceneEvent) Parse(bridgeID, bridgeName, eventType string, data json.RawMessage, state *hue.BridgeState) (Event, error) {
 	var updates []hue.ResourceUpdate
 	if err := json.Unmarshal(data, &updates); err != nil {
 		return nil, fmt.Errorf("parse scene event: %w", err)
@@ -266,6 +270,7 @@ func (e *SceneEvent) Parse(bridgeID, eventType string, data json.RawMessage, sta
 	update := updates[0]
 	e.baseEvent = baseEvent{
 		bridgeID:     bridgeID,
+		bridgeName:   bridgeName,
 		resourceType: "scene",
 		resourceID:   update.ID,
 		eventType:    eventType,
@@ -299,7 +304,7 @@ type MotionEvent struct {
 	Details string
 }
 
-func (e *MotionEvent) Parse(bridgeID, eventType string, data json.RawMessage, state *hue.BridgeState) (Event, error) {
+func (e *MotionEvent) Parse(bridgeID, bridgeName, eventType string, data json.RawMessage, state *hue.BridgeState) (Event, error) {
 	var updates []hue.ResourceUpdate
 	if err := json.Unmarshal(data, &updates); err != nil {
 		return nil, fmt.Errorf("parse motion event: %w", err)
@@ -312,6 +317,7 @@ func (e *MotionEvent) Parse(bridgeID, eventType string, data json.RawMessage, st
 	update := updates[0]
 	e.baseEvent = baseEvent{
 		bridgeID:     bridgeID,
+		bridgeName:   bridgeName,
 		resourceType: "motion",
 		resourceID:   update.ID,
 		eventType:    eventType,
@@ -349,7 +355,7 @@ type TemperatureEvent struct {
 	Details string
 }
 
-func (e *TemperatureEvent) Parse(bridgeID, eventType string, data json.RawMessage, state *hue.BridgeState) (Event, error) {
+func (e *TemperatureEvent) Parse(bridgeID, bridgeName, eventType string, data json.RawMessage, state *hue.BridgeState) (Event, error) {
 	var updates []hue.ResourceUpdate
 	if err := json.Unmarshal(data, &updates); err != nil {
 		return nil, fmt.Errorf("parse temperature event: %w", err)
@@ -362,6 +368,7 @@ func (e *TemperatureEvent) Parse(bridgeID, eventType string, data json.RawMessag
 	update := updates[0]
 	e.baseEvent = baseEvent{
 		bridgeID:     bridgeID,
+		bridgeName:   bridgeName,
 		resourceType: "temperature",
 		resourceID:   update.ID,
 		eventType:    eventType,
@@ -395,7 +402,7 @@ type LightLevelEvent struct {
 	Details string
 }
 
-func (e *LightLevelEvent) Parse(bridgeID, eventType string, data json.RawMessage, state *hue.BridgeState) (Event, error) {
+func (e *LightLevelEvent) Parse(bridgeID, bridgeName, eventType string, data json.RawMessage, state *hue.BridgeState) (Event, error) {
 	var updates []hue.ResourceUpdate
 	if err := json.Unmarshal(data, &updates); err != nil {
 		return nil, fmt.Errorf("parse light_level event: %w", err)
@@ -408,6 +415,7 @@ func (e *LightLevelEvent) Parse(bridgeID, eventType string, data json.RawMessage
 	update := updates[0]
 	e.baseEvent = baseEvent{
 		bridgeID:     bridgeID,
+		bridgeName:   bridgeName,
 		resourceType: "light_level",
 		resourceID:   update.ID,
 		eventType:    eventType,
@@ -444,7 +452,7 @@ type GroupedLightLevelEvent struct {
 	Details string
 }
 
-func (e *GroupedLightLevelEvent) Parse(bridgeID, eventType string, data json.RawMessage, state *hue.BridgeState) (Event, error) {
+func (e *GroupedLightLevelEvent) Parse(bridgeID, bridgeName, eventType string, data json.RawMessage, state *hue.BridgeState) (Event, error) {
 	var updates []hue.ResourceUpdate
 	if err := json.Unmarshal(data, &updates); err != nil {
 		return nil, fmt.Errorf("parse grouped_light_level event: %w", err)
@@ -457,6 +465,7 @@ func (e *GroupedLightLevelEvent) Parse(bridgeID, eventType string, data json.Raw
 	update := updates[0]
 	e.baseEvent = baseEvent{
 		bridgeID:     bridgeID,
+		bridgeName:   bridgeName,
 		resourceType: "grouped_light_level",
 		resourceID:   update.ID,
 		eventType:    eventType,
@@ -552,7 +561,7 @@ type UnhandledEvent struct {
 	RawData json.RawMessage
 }
 
-func (e *UnhandledEvent) Parse(bridgeID, eventType string, data json.RawMessage, state *hue.BridgeState) (Event, error) {
+func (e *UnhandledEvent) Parse(bridgeID, bridgeName, eventType string, data json.RawMessage, state *hue.BridgeState) (Event, error) {
 	var updates []hue.ResourceUpdate
 	if err := json.Unmarshal(data, &updates); err != nil {
 		return nil, fmt.Errorf("parse unhandled event: %w", err)
@@ -565,6 +574,7 @@ func (e *UnhandledEvent) Parse(bridgeID, eventType string, data json.RawMessage,
 	update := updates[0]
 	e.baseEvent = baseEvent{
 		bridgeID:     bridgeID,
+		bridgeName:   bridgeName,
 		resourceType: update.Type,
 		resourceID:   update.ID,
 		eventType:    eventType,
@@ -586,7 +596,7 @@ type DeviceEvent struct {
 	Details string
 }
 
-func (e *DeviceEvent) Parse(bridgeID, eventType string, data json.RawMessage, state *hue.BridgeState) (Event, error) {
+func (e *DeviceEvent) Parse(bridgeID, bridgeName, eventType string, data json.RawMessage, state *hue.BridgeState) (Event, error) {
 	var updates []hue.ResourceUpdate
 	if err := json.Unmarshal(data, &updates); err != nil {
 		return nil, fmt.Errorf("parse device event: %w", err)
@@ -600,6 +610,7 @@ func (e *DeviceEvent) Parse(bridgeID, eventType string, data json.RawMessage, st
 
 	e.baseEvent = baseEvent{
 		bridgeID:     bridgeID,
+		bridgeName:   bridgeName,
 		resourceType: update.Type,
 		resourceID:   update.ID,
 		eventType:    eventType,
@@ -703,38 +714,47 @@ func renderEvent(styles *ui2.Styles, width int, base baseEvent, name, details, i
 		indicator = styles.Dimmed.Render("○") + " "
 	}
 
+	bridgeStr := ""
+	if base.bridgeName != "" {
+		bridgeStr = styles.Dimmed.Render("["+base.bridgeName+"]") + " "
+	}
+
 	nameStyle := lipgloss.NewStyle().Foreground(styles.Theme.TextMuted)
 
 	var line string
 	if name != "" {
 		if details != "" {
-			line = fmt.Sprintf("%s %s %s%s %s → %s",
+			line = fmt.Sprintf("%s %s %s%s%s %s → %s",
 				styles.Dimmed.Render(timeStr),
 				typeIndicator,
+				bridgeStr,
 				indicator,
 				base.resourceType,
 				nameStyle.Render(name),
 				details)
 		} else {
-			line = fmt.Sprintf("%s %s %s%s %s",
+			line = fmt.Sprintf("%s %s %s%s%s %s",
 				styles.Dimmed.Render(timeStr),
 				typeIndicator,
+				bridgeStr,
 				indicator,
 				base.resourceType,
 				nameStyle.Render(name))
 		}
 	} else {
 		if details != "" {
-			line = fmt.Sprintf("%s %s %s%s → %s",
+			line = fmt.Sprintf("%s %s %s%s%s → %s",
 				styles.Dimmed.Render(timeStr),
 				typeIndicator,
+				bridgeStr,
 				indicator,
 				base.resourceType,
 				details)
 		} else {
-			line = fmt.Sprintf("%s %s %s%s update",
+			line = fmt.Sprintf("%s %s %s%s%s update",
 				styles.Dimmed.Render(timeStr),
 				typeIndicator,
+				bridgeStr,
 				indicator,
 				base.resourceType)
 		}

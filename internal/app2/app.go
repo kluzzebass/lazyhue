@@ -332,10 +332,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case bridgeEventMsg:
 		bridge := m.manager.GetBridge(msg.bridgeID)
 		var state *hue.BridgeState
+		bridgeName := ""
 		if bridge != nil {
 			state = bridge.GetState()
+			bridgeName = bridge.Info.Name
 		}
-		event := parseEventFromBridgeCallback(msg.bridgeID, msg.resourceType, msg.resourceID, msg.eventType, state)
+		event := parseEventFromBridgeCallback(msg.bridgeID, bridgeName, msg.resourceType, msg.resourceID, msg.eventType, state)
 		m.activities = append(m.activities, event)
 		m.updateLogContent()
 
