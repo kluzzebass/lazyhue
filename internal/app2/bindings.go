@@ -20,7 +20,7 @@ func (m *Model) initBindings() {
 			{Keys: []string{"enter"}, Display: "Enter", Desc: "Expand/collapse or select", Priority: 100},
 			{Keys: []string{" "}, Display: "Space", Desc: "Toggle on/off", Priority: 95},
 			{Keys: []string{"r"}, Display: "r", Desc: "Rename selected", Priority: 92},
-			{Keys: []string{"x"}, Display: "x", Desc: "Delete selected bridge", Priority: 90},
+			{Keys: []string{"x"}, Display: "x", Desc: "Delete selected", Priority: 90},
 			{Keys: []string{"left", "h"}, Display: "←/h", Desc: "Collapse / prev tab", Priority: 85},
 			{Keys: []string{"right", "l"}, Display: "→/l", Desc: "Expand / next tab", Priority: 85},
 			{Keys: []string{"o"}, Display: "o", Desc: "Turn on", Priority: 80},
@@ -72,12 +72,18 @@ func (m *Model) getContextBindings() (panelBindings []Binding, globalBindings []
 		switch entityType {
 		case panels.EntityBridge:
 			panelTitle = "Tree (Bridge selected)"
-			// Include all bindings including 'x' for bridge deletion
-			for _, b := range m.panelBindings[PanelTree] {
-				panelBindings = append(panelBindings, b)
-			}
+			// Include all bindings - 'x' deletes bridges
+			panelBindings = append(panelBindings, m.panelBindings[PanelTree]...)
+		case panels.EntityRoom:
+			panelTitle = "Tree (Room selected)"
+			// Include all bindings - 'x' deletes rooms
+			panelBindings = append(panelBindings, m.panelBindings[PanelTree]...)
+		case panels.EntityZone:
+			panelTitle = "Tree (Zone selected)"
+			// Include all bindings - 'x' deletes zones
+			panelBindings = append(panelBindings, m.panelBindings[PanelTree]...)
 		default:
-			// For non-bridge entities, exclude the 'x' deletion binding
+			// For other entities (lights, scenes, devices), exclude 'x' deletion binding
 			for _, b := range m.panelBindings[PanelTree] {
 				isDeleteBinding := false
 				for _, key := range b.Keys {
@@ -95,10 +101,6 @@ func (m *Model) getContextBindings() (panelBindings []Binding, globalBindings []
 			switch entityType {
 			case panels.EntityLight:
 				panelTitle = "Tree (Light selected)"
-			case panels.EntityRoom:
-				panelTitle = "Tree (Room selected)"
-			case panels.EntityZone:
-				panelTitle = "Tree (Zone selected)"
 			case panels.EntityScene:
 				panelTitle = "Tree (Scene selected)"
 			case panels.EntityDevice:
@@ -107,6 +109,12 @@ func (m *Model) getContextBindings() (panelBindings []Binding, globalBindings []
 		}
 	case PanelDetail:
 		if m.confirmingDelete {
+			panelTitle = "Delete Confirmation"
+			panelBindings = []Binding{
+				{Display: "Y", Desc: "Confirm deletion"},
+				{Display: "N/Esc", Desc: "Cancel"},
+			}
+		} else if m.confirmingDeleteEntity {
 			panelTitle = "Delete Confirmation"
 			panelBindings = []Binding{
 				{Display: "Y", Desc: "Confirm deletion"},

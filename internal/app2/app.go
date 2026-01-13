@@ -87,9 +87,14 @@ type Model struct {
 	renameOriginalName string               // Original name for cancel
 
 	// Delete confirmation state
-	confirmingDelete bool   // Whether we're showing delete confirmation
-	deleteBridgeID   string // ID of bridge to delete
-	deleteBridgeName string // Name of bridge to delete (for display)
+	confirmingDelete     bool              // Whether we're showing delete confirmation
+	deleteBridgeID       string            // ID of bridge to delete
+	deleteBridgeName     string            // Name of bridge to delete (for display)
+	confirmingDeleteEntity bool            // Whether we're showing entity delete confirmation
+	deleteEntityID       string            // ID of entity to delete
+	deleteEntityName     string            // Name of entity to delete (for display)
+	deleteEntityType     panels.EntityType // Type of entity to delete
+	deleteEntityBridgeID string            // Bridge ID the entity belongs to
 
 	// Help display
 	showHelp bool // Whether help is displayed in detail panel
@@ -156,6 +161,8 @@ func New(creds *config.CredentialStore) Model {
 	renameInput := textinput.New()
 	renameInput.Prompt = "Name: "
 	renameInput.CharLimit = 32
+	// Apply default styles which include proper cursor configuration
+	renameInput.Styles = textinput.DefaultStyles(true) // true = dark theme
 
 	m := Model{
 		manager:          hue.NewManager(creds),
@@ -510,13 +517,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.saveState() // Persist tab change
 			return m, nil
 
-		case key.Matches(msg, key.NewBinding(key.WithKeys("x"))):
-			// Delete bridge - show confirmation
-			if cmd := m.startBridgeDeleteConfirmation(); cmd != nil {
-				return m, cmd
-			}
-			return m, nil
-
 		case key.Matches(msg, m.keys.NextPanel):
 			switch m.focusedPane {
 			case PanelTree:
@@ -655,9 +655,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// Pass events to focused panel
 	switch m.focusedPane {
 	case PanelTree:
-		// Handle Enter key to navigate to details panel or expand/collapse
+		// Handle tree-specific keys
 		if keyMsg, ok := msg.(tea.KeyMsg); ok {
-			if keyMsg.String() == "enter" {
+			switch keyMsg.String() {
+			case "enter":
 				node := m.tree.SelectedNode()
 				if node != nil && node.Item != nil {
 					// Rooms should expand/collapse like other grouping items
@@ -673,6 +674,29 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					}
 				}
 				// If no item or room, let tree handle it (toggle expand)
+
+			case "x":
+				// Delete selected item (bridge, room, or zone) - show confirmation
+				item := m.tree.SelectedItem()
+				if item == nil {
+					m.status = "No item selected"
+					return m, nil
+				}
+
+				// Route to appropriate delete confirmation
+				switch item.Type {
+				case panels.EntityBridge:
+					if cmd := m.startBridgeDeleteConfirmation(); cmd != nil {
+						return m, cmd
+					}
+				case panels.EntityRoom, panels.EntityZone:
+					if cmd := m.startEntityDeleteConfirmation(); cmd != nil {
+						return m, cmd
+					}
+				default:
+					m.status = "Cannot delete this item"
+				}
+				return m, nil
 			}
 		}
 
@@ -743,7 +767,26 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 
-		// Handle rename mode - all keys go to rename input
+		// Handle entity delete confirmation mode
+		if m.confirmingDeleteEntity {
+			if keyMsg, ok := msg.(tea.KeyMsg); ok {
+				switch keyMsg.String() {
+				case "y", "Y":
+					// Confirm deletion
+					cmd := m.confirmEntityDelete()
+					m.updateDetailContent()
+					return m, cmd
+				case "n", "N", "esc":
+					// Cancel deletion
+					m.cancelEntityDelete()
+					m.updateDetailContent()
+					return m, nil
+				}
+			}
+			return m, nil
+		}
+
+		// Handle rename mode - all messages go to rename input (including ticks for cursor blinking)
 		if m.renaming {
 			if keyMsg, ok := msg.(tea.KeyMsg); ok {
 				switch keyMsg.String() {
@@ -757,15 +800,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.cancelRename()
 					m.updateDetailContent()
 					return m, nil
-				default:
-					// Pass key to text input
-					var cmd tea.Cmd
-					m.renameInput, cmd = m.renameInput.Update(msg)
-					m.updateDetailContent()
-					return m, cmd
 				}
 			}
-			return m, nil
+			// Pass all messages (keys, ticks, etc.) to text input for proper cursor blinking
+			var cmd tea.Cmd
+			m.renameInput, cmd = m.renameInput.Update(msg)
+			m.updateDetailContent()
+			return m, cmd
 		}
 
 		// Handle Escape key to return to previous panel
@@ -1058,6 +1099,9 @@ func (m *Model) rebuildTreeForActiveTab() {
 
 // startRenameMode initiates rename mode for the selected entity.
 func (m *Model) startRenameMode() tea.Cmd {
+	// Close help if showing
+	m.showHelp = false
+
 	// Get the selected entity from the tree
 	item := m.tree.SelectedItem()
 	if item == nil {
@@ -1144,7 +1188,7 @@ func (m *Model) startRenameMode() tea.Cmd {
 
 	// Initialize the text input with current name
 	m.renameInput.SetValue(renameName)
-	m.renameInput.Focus()
+	focusCmd := m.renameInput.Focus() // Capture focus command for cursor
 	m.renameInput.CursorEnd()
 
 	// Switch to detail panel
@@ -1156,7 +1200,7 @@ func (m *Model) startRenameMode() tea.Cmd {
 	// Update the UI immediately
 	m.updateDetailContent()
 
-	return textinput.Blink
+	return focusCmd // Return focus command to enable cursor
 }
 
 // findBridgeForEntity finds the bridge ID that owns the given entity.
@@ -1235,6 +1279,9 @@ func (m *Model) confirmRename() tea.Cmd {
 
 // startBridgeDeleteConfirmation initiates bridge deletion confirmation.
 func (m *Model) startBridgeDeleteConfirmation() tea.Cmd {
+	// Close help if showing
+	m.showHelp = false
+
 	// Get the selected item from tree - must be a bridge
 	item := m.tree.SelectedItem()
 	if item == nil || item.Type != panels.EntityBridge {
@@ -1311,6 +1358,116 @@ func (m *Model) confirmBridgeDelete() tea.Cmd {
 		message:   fmt.Sprintf("Bridge \"%s\" deleted", bridgeName),
 	})
 	m.updateLogContent()
+
+	return nil
+}
+
+// startEntityDeleteConfirmation initiates entity deletion confirmation.
+func (m *Model) startEntityDeleteConfirmation() tea.Cmd {
+	// Close help if showing
+	m.showHelp = false
+
+	// Get the selected item from tree
+	item := m.tree.SelectedItem()
+	if item == nil {
+		m.status = "No entity selected"
+		return nil
+	}
+
+	// Only rooms and zones can be deleted
+	if item.Type != panels.EntityRoom && item.Type != panels.EntityZone {
+		m.status = "Only rooms and zones can be deleted"
+		return nil
+	}
+
+	// Find which bridge this entity belongs to
+	bridgeID := m.findBridgeForEntity(item)
+	if bridgeID == "" {
+		m.status = "Could not find bridge for entity"
+		return nil
+	}
+
+	// Set confirmation state
+	m.confirmingDeleteEntity = true
+	m.deleteEntityID = item.ID
+	m.deleteEntityName = item.Name
+	m.deleteEntityType = item.Type
+	m.deleteEntityBridgeID = bridgeID
+
+	// Switch to detail panel to show confirmation
+	m.previousPane = m.focusedPane
+	m.focusedPane = PanelDetail
+
+	m.status = fmt.Sprintf("Confirm %s deletion...", item.Type.String())
+
+	// Update UI to show confirmation dialog
+	m.updateDetailContent()
+
+	return nil
+}
+
+// cancelEntityDelete cancels the entity deletion.
+func (m *Model) cancelEntityDelete() {
+	m.confirmingDeleteEntity = false
+	m.deleteEntityID = ""
+	m.deleteEntityName = ""
+	m.deleteEntityType = 0
+	m.deleteEntityBridgeID = ""
+	m.status = "Deletion cancelled"
+}
+
+// confirmEntityDelete performs the actual entity deletion.
+func (m *Model) confirmEntityDelete() tea.Cmd {
+	if m.deleteEntityID == "" {
+		m.status = "No entity to delete"
+		m.confirmingDeleteEntity = false
+		return nil
+	}
+
+	// Get the bridge
+	bridge := m.manager.GetBridge(m.deleteEntityBridgeID)
+	if bridge == nil {
+		m.status = "Bridge not found"
+		m.confirmingDeleteEntity = false
+		return nil
+	}
+
+	// Call the appropriate delete function
+	var err error
+	switch m.deleteEntityType {
+	case panels.EntityRoom:
+		err = bridge.DeleteRoom(m.deleteEntityID)
+	case panels.EntityZone:
+		err = bridge.DeleteZone(m.deleteEntityID)
+	default:
+		m.status = fmt.Sprintf("Cannot delete %s", m.deleteEntityType.String())
+		m.confirmingDeleteEntity = false
+		return nil
+	}
+
+	if err != nil {
+		m.status = fmt.Sprintf("Delete failed: %v", err)
+	} else {
+		m.status = fmt.Sprintf("%s \"%s\" deleted", m.deleteEntityType.String(), m.deleteEntityName)
+	}
+
+	// Clear confirmation state
+	entityName := m.deleteEntityName
+	entityType := m.deleteEntityType
+	m.confirmingDeleteEntity = false
+	m.deleteEntityID = ""
+	m.deleteEntityName = ""
+	m.deleteEntityType = 0
+	m.deleteEntityBridgeID = ""
+
+	// Rebuild tree to reflect deletion
+	m.rebuildTreeForActiveTab()
+
+	// Log the deletion
+	m.activities = append(m.activities, &RequestActivity{
+		timestamp: time.Now(),
+		message:   fmt.Sprintf("%s \"%s\" deleted", entityType.String(), entityName),
+	})
 
 	return nil
 }

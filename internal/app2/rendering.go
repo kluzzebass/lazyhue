@@ -86,11 +86,17 @@ func (m *Model) buildHelpContent() string {
 		case panels.EntityBridge:
 			treeTitle = "Tree (Bridge selected)"
 			// Include all bindings including 'x' for bridge deletion
-			for _, b := range m.panelBindings[PanelTree] {
-				treeBindings = append(treeBindings, b)
-			}
+			treeBindings = append(treeBindings, m.panelBindings[PanelTree]...)
+		case panels.EntityRoom:
+			treeTitle = "Tree (Room selected)"
+			// Include all bindings including 'x' for room deletion
+			treeBindings = append(treeBindings, m.panelBindings[PanelTree]...)
+		case panels.EntityZone:
+			treeTitle = "Tree (Zone selected)"
+			// Include all bindings including 'x' for zone deletion
+			treeBindings = append(treeBindings, m.panelBindings[PanelTree]...)
 		default:
-			// For non-bridge entities, exclude the 'x' deletion binding
+			// For other entities (lights, devices, scenes), exclude 'x' deletion binding
 			for _, b := range m.panelBindings[PanelTree] {
 				isDeleteBinding := false
 				for _, key := range b.Keys {
@@ -108,10 +114,6 @@ func (m *Model) buildHelpContent() string {
 			switch entityType {
 			case panels.EntityLight:
 				treeTitle = "Tree (Light selected)"
-			case panels.EntityRoom:
-				treeTitle = "Tree (Room selected)"
-			case panels.EntityZone:
-				treeTitle = "Tree (Zone selected)"
 			case panels.EntityScene:
 				treeTitle = "Tree (Scene selected)"
 			case panels.EntityDevice:
@@ -241,9 +243,33 @@ func (m *Model) buildRenameContent() string {
 	// Original name
 	content.WriteString(fmt.Sprintf("  Current: %s\n\n", m.renameOriginalName))
 
-	// Text input
+	// Text input - manually add cursor since virtual cursor isn't rendering
+	inputValue := m.renameInput.Value()
+	cursorPos := m.renameInput.Position()
+
+	// Build the input display with a visible cursor
+	// Convert to runes to handle multi-byte UTF-8 characters properly
+	runes := []rune(inputValue)
+	var displayValue string
+
+	if m.renameInput.Focused() {
+		// Insert a block cursor at the cursor position
+		if cursorPos >= len(runes) {
+			// Cursor at end - append block
+			displayValue = inputValue + "█"
+		} else {
+			// Cursor in middle - insert block between characters
+			beforeCursor := string(runes[:cursorPos])
+			afterCursor := string(runes[cursorPos:])
+			displayValue = beforeCursor + "█" + afterCursor
+		}
+	} else {
+		displayValue = inputValue
+	}
+
 	content.WriteString("  ")
-	content.WriteString(m.renameInput.View())
+	content.WriteString(m.renameInput.Prompt)
+	content.WriteString(displayValue)
 	content.WriteString("\n\n")
 
 	// Instructions
@@ -275,6 +301,41 @@ func (m *Model) buildDeleteConfirmationContent() string {
 	// Confirmation prompt
 	content.WriteString("  ")
 	content.WriteString(warningStyle.Render("Delete this bridge?"))
+	content.WriteString("\n\n")
+
+	// Instructions
+	yesStyle := lipgloss.NewStyle().Foreground(m.styles.Theme.Error).Bold(true)
+	noStyle := lipgloss.NewStyle().Foreground(m.styles.Theme.Success).Bold(true)
+	content.WriteString("  ")
+	content.WriteString(yesStyle.Render("Y"))
+	content.WriteString(" = Yes    ")
+	content.WriteString(noStyle.Render("N"))
+	content.WriteString(" = No (Esc)")
+	content.WriteString("\n")
+
+	return content.String()
+}
+
+// buildEntityDeleteConfirmationContent builds the entity deletion confirmation dialog.
+func (m *Model) buildEntityDeleteConfirmationContent() string {
+	var content strings.Builder
+
+	// Header with warning color
+	warningStyle := lipgloss.NewStyle().Foreground(m.styles.Theme.Error).Bold(true)
+	content.WriteString(warningStyle.Render(fmt.Sprintf("Delete %s", m.deleteEntityType.String())))
+	content.WriteString("\n\n")
+
+	// Entity name and ID
+	content.WriteString(fmt.Sprintf("  %s: %s\n", m.deleteEntityType.String(), m.styles.Highlight.Render(m.deleteEntityName)))
+	content.WriteString(fmt.Sprintf("     ID: %s\n\n", m.styles.Dimmed.Render(m.deleteEntityID)))
+
+	// Warning message
+	content.WriteString(m.styles.Dimmed.Render(fmt.Sprintf("  This will permanently delete this %s.", m.deleteEntityType.String())))
+	content.WriteString("\n\n")
+
+	// Confirmation prompt
+	content.WriteString("  ")
+	content.WriteString(warningStyle.Render(fmt.Sprintf("Delete this %s?", m.deleteEntityType.String())))
 	content.WriteString("\n\n")
 
 	// Instructions
@@ -322,6 +383,12 @@ func (m *Model) updateDetailContent() {
 	// If showing delete confirmation, display confirmation dialog
 	if m.confirmingDelete {
 		m.detailViewport.SetContent(m.buildDeleteConfirmationContent())
+		return
+	}
+
+	// If showing entity delete confirmation, display confirmation dialog
+	if m.confirmingDeleteEntity {
+		m.detailViewport.SetContent(m.buildEntityDeleteConfirmationContent())
 		return
 	}
 
