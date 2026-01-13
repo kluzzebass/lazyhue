@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"sort"
 	"strings"
 	"time"
 
@@ -12,7 +13,6 @@ import (
 	"github.com/charmbracelet/lipgloss/v2"
 	"github.com/kluzzebass/lazyhue/internal/hue"
 	"github.com/kluzzebass/lazyhue/internal/hueclient"
-	"github.com/kluzzebass/lazyhue/internal/ui2"
 	"github.com/kluzzebass/lazyhue/internal/ui2/components"
 	"github.com/kluzzebass/lazyhue/internal/ui2/panels"
 )
@@ -36,6 +36,28 @@ func debugLog(location, message string, data map[string]interface{}) {
 }
 
 // #endregion
+
+// getSortedProductArchetypes returns a sorted list of product archetype keys from the display names map.
+// This ensures the dropdown and value handling use the same order.
+func getSortedProductArchetypes() []string {
+	archetypes := make([]string, 0, len(hue.ProductArchetypeDisplayNames))
+	for key := range hue.ProductArchetypeDisplayNames {
+		archetypes = append(archetypes, key)
+	}
+	sort.Strings(archetypes)
+	return archetypes
+}
+
+// getSortedPowerupPresets returns a sorted list of power-on preset keys from the display names map.
+// This ensures the dropdown and value handling use the same order.
+func getSortedPowerupPresets() []string {
+	presets := make([]string, 0, len(hue.PowerupPresetDisplayNames))
+	for key := range hue.PowerupPresetDisplayNames {
+		presets = append(presets, key)
+	}
+	sort.Strings(presets)
+	return presets
+}
 
 // buildHelpContent builds the help content for the detail panel.
 func (m *Model) buildHelpContent() string {
@@ -704,74 +726,24 @@ func (m *Model) buildLightDetailFormFields(light hueclient.LightGet, state *hue.
 			Label: "Classification",
 		})
 		if device != nil && device.ProductData != nil && device.ProductData.ProductArchetype != nil {
-			// Build archetype options (common light archetypes)
-			archetypeOptions := []components.FormSelectOption{
-				{Label: "Bollard", Value: 0},
-				{Label: "Candle Bulb", Value: 1},
-				{Label: "Ceiling Horizontal", Value: 2},
-				{Label: "Ceiling Round", Value: 3},
-				{Label: "Ceiling Square", Value: 4},
-				{Label: "Ceiling Tube", Value: 5},
-				{Label: "Classic Bulb", Value: 6},
-				{Label: "Double Spot", Value: 7},
-				{Label: "Edison Bulb", Value: 8},
-				{Label: "Ellipse Bulb", Value: 9},
-				{Label: "Flexible Lamp", Value: 10},
-				{Label: "Flood Bulb", Value: 11},
-				{Label: "Floor Lantern", Value: 12},
-				{Label: "Floor Shade", Value: 13},
-				{Label: "Ground Spot", Value: 14},
-				{Label: "Hue Bloom", Value: 15},
-				{Label: "Hue Go", Value: 16},
-				{Label: "Hue Iris", Value: 17},
-				{Label: "Hue Lightstrip", Value: 18},
-				{Label: "Hue Play", Value: 19},
-				{Label: "Hue Signe", Value: 20},
-				{Label: "Hue Tube", Value: 21},
-				{Label: "Large Globe Bulb", Value: 22},
-				{Label: "Luster Bulb", Value: 23},
-				{Label: "Pendant Long", Value: 24},
-				{Label: "Pendant Round", Value: 25},
-				{Label: "Pendant Spot", Value: 26},
-				{Label: "Plug", Value: 27},
-				{Label: "Recessed Ceiling", Value: 28},
-				{Label: "Recessed Floor", Value: 29},
-				{Label: "Single Spot", Value: 30},
-				{Label: "Small Globe Bulb", Value: 31},
-				{Label: "Spot Bulb", Value: 32},
-				{Label: "String Light", Value: 33},
-				{Label: "Sultan Bulb", Value: 34},
-				{Label: "Table Shade", Value: 35},
-				{Label: "Table Wash", Value: 36},
-				{Label: "Triangle Bulb", Value: 37},
-				{Label: "Unknown Archetype", Value: 38},
-				{Label: "Vintage Bulb", Value: 39},
-				{Label: "Vintage Candle Bulb", Value: 40},
-				{Label: "Wall Lantern", Value: 41},
-				{Label: "Wall Shade", Value: 42},
-				{Label: "Wall Spot", Value: 43},
-				{Label: "Wall Washer", Value: 44},
+			// Build archetype options from complete list
+			archetypeKeys := getSortedProductArchetypes()
+			archetypeOptions := make([]components.FormSelectOption, len(archetypeKeys))
+			for i, key := range archetypeKeys {
+				archetypeOptions[i] = components.FormSelectOption{
+					Label: hue.ProductArchetypeDisplayName(key),
+					Value: i,
+				}
 			}
 
 			// Find current archetype index
 			currentArchetype := string(*device.ProductData.ProductArchetype)
-			currentIndex := 38 // default to "unknown_archetype"
-			archetypeMap := map[string]int{
-				"bollard": 0, "candle_bulb": 1, "ceiling_horizontal": 2, "ceiling_round": 3,
-				"ceiling_square": 4, "ceiling_tube": 5, "classic_bulb": 6, "double_spot": 7,
-				"edison_bulb": 8, "ellipse_bulb": 9, "flexible_lamp": 10, "flood_bulb": 11,
-				"floor_lantern": 12, "floor_shade": 13, "ground_spot": 14, "hue_bloom": 15,
-				"hue_go": 16, "hue_iris": 17, "hue_lightstrip": 18, "hue_play": 19,
-				"hue_signe": 20, "hue_tube": 21, "large_globe_bulb": 22, "luster_bulb": 23,
-				"pendant_long": 24, "pendant_round": 25, "pendant_spot": 26, "plug": 27,
-				"recessed_ceiling": 28, "recessed_floor": 29, "single_spot": 30, "small_globe_bulb": 31,
-				"spot_bulb": 32, "string_light": 33, "sultan_bulb": 34, "table_shade": 35,
-				"table_wash": 36, "triangle_bulb": 37, "unknown_archetype": 38, "vintage_bulb": 39,
-				"vintage_candle_bulb": 40, "wall_lantern": 41, "wall_shade": 42, "wall_spot": 43,
-				"wall_washer": 44,
-			}
-			if idx, ok := archetypeMap[currentArchetype]; ok {
-				currentIndex = idx
+			currentIndex := 0 // default to first option
+			for i, key := range archetypeKeys {
+				if key == currentArchetype {
+					currentIndex = i
+					break
+				}
 			}
 
 			// Store device ID for updates
@@ -909,109 +881,71 @@ func (m *Model) buildLightDetailFormFields(light hueclient.LightGet, state *hue.
 	}
 	fields = append(fields, idFields...)
 
-	// State section
-	var stateFields []components.FormField
-	stateFields = append(stateFields, components.FormField{
-		Type:  components.FormFieldHeader,
-		Label: "State",
-	})
+	// Technical info section (capabilities and limits, not current state)
+	var techFields []components.FormField
+	hasTechInfo := false
 
-	// Status indicator (custom rendering - not a standard field)
-	isOn := panels.IsLightOn(light)
-	status := "off"
-	if isOn {
-		status = "on"
-	}
-	brightness := 0.0
-	hexColor := ui2.GetLightColor(light)
-	if isOn {
-		if light.Dimming != nil && light.Dimming.Brightness != nil {
-			brightness = float64(*light.Dimming.Brightness)
-		} else {
-			brightness = 100.0
+	// Min dim level (capability limit)
+	if light.Dimming != nil && light.Dimming.MinDimLevel != nil {
+		if !hasTechInfo {
+			techFields = append(techFields, components.FormField{
+				Type:  components.FormFieldHeader,
+				Label: "Technical",
+			})
+			hasTechInfo = true
 		}
+		techFields = append(techFields, components.FormField{
+			ID:        "min-dim-level",
+			Label:     "Min dim level",
+			Type:      components.FormFieldText,
+			TextValue: fmt.Sprintf("%.0f%%", float64(*light.Dimming.MinDimLevel)),
+			ReadOnly:  true,
+		})
 	}
-	indicator := ui2.RenderBrightnessIndicatorFromHex(brightness, hexColor)
-	stateFields = append(stateFields, components.FormField{
-		ID:        "status",
-		Label:     "",
-		Type:      components.FormFieldText,
-		TextValue: fmt.Sprintf("%s %s", indicator, status),
-		ReadOnly:  true,
-	})
 
-	if light.Dimming != nil {
-		if light.Dimming.Brightness != nil {
-			stateFields = append(stateFields, components.FormField{
-				ID:        "state-brightness",
-				Label:     "Brightness",
-				Type:      components.FormFieldText,
-				TextValue: fmt.Sprintf("%.0f%%", float64(*light.Dimming.Brightness)),
-				ReadOnly:  true,
+	// Gamut type (color capability info)
+	if light.Color != nil && light.Color.GamutType != nil {
+		if !hasTechInfo {
+			techFields = append(techFields, components.FormField{
+				Type:  components.FormFieldHeader,
+				Label: "Technical",
 			})
+			hasTechInfo = true
 		}
-		if light.Dimming.MinDimLevel != nil {
-			stateFields = append(stateFields, components.FormField{
-				ID:        "min-dim-level",
-				Label:     "Min dim level",
-				Type:      components.FormFieldText,
-				TextValue: fmt.Sprintf("%.0f%%", float64(*light.Dimming.MinDimLevel)),
-				ReadOnly:  true,
-			})
-		}
+		techFields = append(techFields, components.FormField{
+			ID:        "gamut",
+			Label:     "Gamut",
+			Type:      components.FormFieldText,
+			TextValue: string(*light.Color.GamutType),
+			ReadOnly:  true,
+		})
 	}
-	if light.Color != nil && light.Color.Xy != nil {
-		xy := light.Color.Xy
-		if xy.X != nil && xy.Y != nil {
-			x, y := *xy.X, *xy.Y
-			stateFields = append(stateFields, components.FormField{
-				ID:        "color-xy",
-				Label:     "Color XY",
-				Type:      components.FormFieldText,
-				TextValue: fmt.Sprintf("(%.4f, %.4f)", x, y),
-				ReadOnly:  true,
-			})
-		}
-		if light.Color.GamutType != nil {
-			stateFields = append(stateFields, components.FormField{
-				ID:        "gamut",
-				Label:     "Gamut",
-				Type:      components.FormFieldText,
-				TextValue: string(*light.Color.GamutType),
-				ReadOnly:  true,
-			})
-		}
-	}
-	if light.ColorTemperature != nil {
-		if light.ColorTemperature.Mirek != nil {
-			mirek := *light.ColorTemperature.Mirek
-			kelvin := 1000000 / int(mirek)
-			stateFields = append(stateFields, components.FormField{
-				ID:        "state-colortemp",
-				Label:     "Color temp",
-				Type:      components.FormFieldText,
-				TextValue: fmt.Sprintf("%d mirek (~%dK)", mirek, kelvin),
-				ReadOnly:  true,
-			})
-		}
-		if light.ColorTemperature.MirekSchema != nil {
-			schema := light.ColorTemperature.MirekSchema
-			if schema.MirekMinimum != nil && schema.MirekMaximum != nil {
-				minK := 1000000 / int(*schema.MirekMaximum)
-				maxK := 1000000 / int(*schema.MirekMinimum)
-				stateFields = append(stateFields, components.FormField{
-					ID:        "ct-range",
-					Label:     "CT range",
-					Type:      components.FormFieldText,
-					TextValue: fmt.Sprintf("%dK - %dK", minK, maxK),
-					ReadOnly:  true,
+
+	// Color temperature range (capability limits)
+	if light.ColorTemperature != nil && light.ColorTemperature.MirekSchema != nil {
+		schema := light.ColorTemperature.MirekSchema
+		if schema.MirekMinimum != nil && schema.MirekMaximum != nil {
+			if !hasTechInfo {
+				techFields = append(techFields, components.FormField{
+					Type:  components.FormFieldHeader,
+					Label: "Technical",
 				})
+				hasTechInfo = true
 			}
+			minK := 1000000 / int(*schema.MirekMaximum)
+			maxK := 1000000 / int(*schema.MirekMinimum)
+			techFields = append(techFields, components.FormField{
+				ID:        "ct-range",
+				Label:     "CT range",
+				Type:      components.FormFieldText,
+				TextValue: fmt.Sprintf("%dK - %dK", minK, maxK),
+				ReadOnly:  true,
+			})
 		}
 	}
-	fields = append(fields, stateFields...)
+	fields = append(fields, techFields...)
 
-	// Dynamics section
+	// Dynamics section (active when dynamic scenes are running)
 	var dynamicsFields []components.FormField
 	if light.Dynamics != nil && (light.Dynamics.Status != nil || light.Dynamics.Speed != nil) {
 		dynamicsFields = append(dynamicsFields, components.FormField{
@@ -1160,7 +1094,7 @@ func (m *Model) buildLightDetailFormFields(light hueclient.LightGet, state *hue.
 				ID:        "signaling-modes",
 				Label:     "",
 				Type:      components.FormFieldText,
-				TextValue: fmt.Sprintf("• %s", string(sig)),
+				TextValue: fmt.Sprintf("• %s", hue.SignalingModeDisplayName(string(sig))),
 				ReadOnly:  true,
 			})
 		}
@@ -1173,25 +1107,24 @@ func (m *Model) buildLightDetailFormFields(light hueclient.LightGet, state *hue.
 			Label: "Power-on Behavior",
 		})
 
-		// Build preset options
-		presetOptions := []components.FormSelectOption{
-			{Label: "Safety", Value: 0},
-			{Label: "Power Fail", Value: 1},
-			{Label: "Last On State", Value: 2},
-			{Label: "Custom", Value: 3},
+		// Build preset options from complete list
+		presetKeys := getSortedPowerupPresets()
+		presetOptions := make([]components.FormSelectOption, len(presetKeys))
+		for i, key := range presetKeys {
+			presetOptions[i] = components.FormSelectOption{
+				Label: hue.PowerupPresetDisplayName(key),
+				Value: i,
+			}
 		}
 
 		// Find current preset index
 		currentPreset := string(*light.Powerup.Preset)
 		currentIndex := 0
-		presetMap := map[string]int{
-			"safety":         0,
-			"powerfail":      1,
-			"last_on_state":  2,
-			"custom":         3,
-		}
-		if idx, ok := presetMap[currentPreset]; ok {
-			currentIndex = idx
+		for i, key := range presetKeys {
+			if key == currentPreset {
+				currentIndex = i
+				break
+			}
 		}
 
 		// Get light ID for updates
@@ -1219,7 +1152,7 @@ func (m *Model) buildLightDetailFormFields(light hueclient.LightGet, state *hue.
 		for _, svc := range *device.Services {
 			rtype := "unknown"
 			if svc.Rtype != nil {
-				rtype = string(*svc.Rtype)
+				rtype = hue.DeviceServiceDisplayName(string(*svc.Rtype))
 			}
 			var svcText string
 			if svc.Rid != nil && light.Id != nil && *svc.Rid == *light.Id {
@@ -1270,31 +1203,18 @@ func (m *Model) handleLightFieldChange(field components.FormField, lightID strin
 		err = bridge.SetDeviceName(deviceID, field.TextValue)
 	} else if strings.HasPrefix(field.ID, "archetype:") {
 		deviceID := strings.TrimPrefix(field.ID, "archetype:")
-		// Map index back to archetype string
-		archetypeStrings := []string{
-			"bollard", "candle_bulb", "ceiling_horizontal", "ceiling_round",
-			"ceiling_square", "ceiling_tube", "classic_bulb", "double_spot",
-			"edison_bulb", "ellipse_bulb", "flexible_lamp", "flood_bulb",
-			"floor_lantern", "floor_shade", "ground_spot", "hue_bloom",
-			"hue_go", "hue_iris", "hue_lightstrip", "hue_play",
-			"hue_signe", "hue_tube", "large_globe_bulb", "luster_bulb",
-			"pendant_long", "pendant_round", "pendant_spot", "plug",
-			"recessed_ceiling", "recessed_floor", "single_spot", "small_globe_bulb",
-			"spot_bulb", "string_light", "sultan_bulb", "table_shade",
-			"table_wash", "triangle_bulb", "unknown_archetype", "vintage_bulb",
-			"vintage_candle_bulb", "wall_lantern", "wall_shade", "wall_spot",
-			"wall_washer",
-		}
-		if field.Value >= 0 && field.Value < len(archetypeStrings) {
-			archetype := hueclient.ProductArchetype(archetypeStrings[field.Value])
+		// Map index back to archetype string using the same sorted list
+		archetypeKeys := getSortedProductArchetypes()
+		if field.Value >= 0 && field.Value < len(archetypeKeys) {
+			archetype := hueclient.ProductArchetype(archetypeKeys[field.Value])
 			err = bridge.SetDeviceArchetype(deviceID, archetype)
 		}
 	} else if strings.HasPrefix(field.ID, "powerup-preset:") {
 		lightIDFromField := strings.TrimPrefix(field.ID, "powerup-preset:")
-		// Map index back to preset string
-		presetStrings := []string{"safety", "powerfail", "last_on_state", "custom"}
-		if field.Value >= 0 && field.Value < len(presetStrings) {
-			preset := hueclient.PowerupPreset(presetStrings[field.Value])
+		// Map index back to preset string using the same sorted list
+		presetKeys := getSortedPowerupPresets()
+		if field.Value >= 0 && field.Value < len(presetKeys) {
+			preset := hueclient.PowerupPreset(presetKeys[field.Value])
 			err = bridge.SetLightPowerupPreset(lightIDFromField, preset)
 		}
 	} else {
