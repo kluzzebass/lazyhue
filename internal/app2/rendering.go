@@ -206,7 +206,8 @@ func (m *Model) updateDetailContent() {
 			}
 
 			// Only rebuild form fields if light ID changed or form is empty
-			if m.selectedLightID != actualLightID || len(m.lightForm.Fields) == 0 {
+			// But never rebuild while dropdown is open (user is actively interacting)
+			if !m.lightForm.DropdownOpen && (m.selectedLightID != actualLightID || len(m.lightForm.Fields) == 0) {
 				fields := m.buildLightFormFields(light)
 				m.lightForm.SetFields(fields)
 				m.selectedLightID = actualLightID
@@ -227,9 +228,10 @@ func (m *Model) updateDetailContent() {
 				m.lightForm.OnChange = func(field components.FormField) {
 					m.handleLightFieldChange(field, actualLightID, callbackBridgeID)
 				}
-			} else if !m.lightForm.Editing && m.lightForm.MouseCaptureIdx < 0 {
-				// Light ID unchanged, not editing, and not dragging - sync form fields from state
+			} else if !m.lightForm.Editing && m.lightForm.MouseCaptureIdx < 0 && !m.lightForm.DropdownOpen {
+				// Light ID unchanged, not editing, not dragging, and dropdown not open - sync form fields from state
 				// This prevents overwriting user input during color wheel adjustments and slider dragging
+				// Also prevents closing dropdown while user is selecting an option
 				fields := m.buildLightFormFields(light)
 				// Preserve cursor position
 				oldCursor := m.lightForm.Cursor
@@ -870,11 +872,7 @@ func (m *Model) buildLightDetailsWithWidth(item *panels.EntityItem, state *hue.B
 	if hasNameSection {
 		renderHeader("Name")
 		for _, f := range nameFields {
-			if f.label == "Alternate name" {
-				renderMutedField(f.label, f.value)
-			} else {
-				renderField(f.label, f.value)
-			}
+			renderField(f.label, f.value)
 		}
 		content.WriteString("\n")
 	}

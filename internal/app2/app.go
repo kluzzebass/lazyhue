@@ -455,6 +455,61 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// If in tree panel, let it handle escape (might collapse or something)
 		}
 
+	case tea.MouseWheelMsg:
+		// If dropdown is open, skip this handler and let focused panel handle it
+		if m.lightForm != nil && m.lightForm.DropdownOpen {
+			// Don't consume - will be handled in focused panel section below
+		} else {
+			// Handle scroll wheel - route to panel under mouse cursor, not focused panel
+			// Account for help bar at bottom
+			helpHeight := 1
+			mouseY := msg.Y
+			mouseX := msg.X
+
+			// Check which panel the mouse is over
+			if mouseY < m.height-helpHeight {
+				if leaf := m.layout.At(mouseX, mouseY); leaf != nil {
+					// Route scroll event to the panel under the mouse
+					switch leaf.ID {
+					case PanelTree:
+						var cmd tea.Cmd
+						m.tree, cmd = m.tree.Update(msg)
+						if cmd != nil {
+							cmds = append(cmds, cmd)
+						}
+						// Update detail content if selection changed
+						if node := m.tree.SelectedNode(); node != nil {
+							m.updateDetailContent()
+							// Auto-focus detail panel when selecting a light (for easier mouse interaction)
+							if node.Item != nil && node.Item.Type == panels.EntityLight {
+								m.previousPane = m.focusedPane
+								m.focusedPane = PanelDetail
+							}
+						}
+						return m, tea.Batch(cmds...)
+
+					case PanelDetail:
+						// Pass to detail viewport
+						var cmd tea.Cmd
+						m.detailViewport, cmd = m.detailViewport.Update(msg)
+						if cmd != nil {
+							cmds = append(cmds, cmd)
+						}
+						return m, tea.Batch(cmds...)
+
+					case PanelLog:
+						// Pass to log viewport
+						var cmd tea.Cmd
+						m.logViewport, cmd = m.logViewport.Update(msg)
+						if cmd != nil {
+							cmds = append(cmds, cmd)
+						}
+						return m, tea.Batch(cmds...)
+					}
+				}
+			}
+		}
+
 	case tea.MouseClickMsg:
 		// Handle panel focus switching on click
 		// Don't consume the message - let panel-specific handlers process it too
@@ -539,9 +594,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 		// Update detail content if selection changed
-
 		if node := m.tree.SelectedNode(); node != nil {
 			m.updateDetailContent()
+			// Auto-focus detail panel when selecting a light (for easier mouse interaction)
+			if node.Item != nil && node.Item.Type == panels.EntityLight {
+				m.previousPane = m.focusedPane
+				m.focusedPane = PanelDetail
+			}
 		}
 
 	case PanelDetail:
@@ -599,6 +658,19 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		formHandledMouse := false
 		if m.lightForm != nil && len(m.lightForm.Fields) > 0 && m.focusedPane == PanelDetail {
 			detailBounds := m.layout.Bounds(PanelDetail)
+
+			// Handle mouse wheel for dropdown scrolling
+			if mouseWheel, ok := msg.(tea.MouseWheelMsg); ok {
+				if m.lightForm.DropdownOpen {
+					var cmd tea.Cmd
+					m.lightForm, cmd = m.lightForm.Update(mouseWheel)
+					if cmd != nil {
+						cmds = append(cmds, cmd)
+					}
+					m.updateDetailContent()
+					return m, tea.Batch(cmds...)
+				}
+			}
 
 			// Handle mouse motion for dragging
 			if mouseMotion, ok := msg.(tea.MouseMotionMsg); ok {
@@ -668,6 +740,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					if m.lightForm.Cursor != oldCursor || m.lightForm.MouseCaptureIdx != oldCapture || fieldChanged || dropdownChanged {
 						formHandledMouse = true
 						m.updateDetailContent()
+						// If dropdown just opened, add a null command to force another render cycle
+						// This ensures dropdown option zones are scanned before next mouse click
+						if dropdownChanged && m.lightForm.DropdownOpen {
+							cmds = append(cmds, func() tea.Msg { return struct{}{} })
+						}
 						return m, tea.Batch(cmds...)
 					}
 					// If there's an active capture, always update (user is dragging)

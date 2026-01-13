@@ -187,6 +187,29 @@ func (f *Form) Update(msg tea.Msg) (*Form, tea.Cmd) {
 		}
 		return f, nil
 
+	case tea.MouseWheelMsg:
+		// Handle scroll wheel for dropdown
+		if f.DropdownOpen && f.Cursor < len(f.Fields) {
+			field := &f.Fields[f.Cursor]
+			if field.Type == FormFieldSelect {
+				if msg.Button == tea.MouseWheelDown {
+					// Scroll down
+					if f.DropdownCursor < len(field.Options)-1 {
+						f.DropdownCursor++
+						f.ensureDropdownCursorVisible()
+					}
+				} else if msg.Button == tea.MouseWheelUp {
+					// Scroll up
+					if f.DropdownCursor > 0 {
+						f.DropdownCursor--
+						f.ensureDropdownCursorVisible()
+					}
+				}
+				return f, nil
+			}
+		}
+		return f, nil
+
 	case tea.MouseMotionMsg:
 		// Handle dragging when we have an active capture
 		if f.MouseCaptureIdx >= 0 && f.MouseCaptureIdx < len(f.Fields) {
@@ -373,25 +396,33 @@ func (f *Form) handleMouseClick(msg tea.MouseClickMsg) bool {
 	if f.DropdownOpen && f.Cursor < len(f.Fields) {
 		field := &f.Fields[f.Cursor]
 		if field.Type == FormFieldSelect {
+			anyZonesExist := false
 			for optIdx := range field.Options {
 				optZoneID := ui2.DropdownOptionZone(field.ID, optIdx)
 				zoneInfo := f.Zones.Get(optZoneID)
-				if zoneInfo != nil && !zoneInfo.IsZero() && zoneInfo.InBounds(msg) {
-					// Option clicked - select it and close dropdown
-					field.Value = field.Options[optIdx].Value
-					f.DropdownOpen = false
-					f.DropdownCursor = 0
-					f.DropdownScroll = 0
-					f.notifyChange(*field)
-					return true
+				if zoneInfo != nil && !zoneInfo.IsZero() {
+					anyZonesExist = true
+					if zoneInfo.InBounds(msg) {
+						// Option clicked - select it and close dropdown
+						field.Value = field.Options[optIdx].Value
+						f.DropdownOpen = false
+						f.DropdownCursor = 0
+						f.DropdownScroll = 0
+						f.notifyChange(*field)
+						return true
+					}
 				}
 			}
-			// Click was inside dropdown area but not on an option - close dropdown
-			// This prevents the dropdown from staying open when clicking borders/padding
-			f.DropdownOpen = false
-			f.DropdownCursor = 0
-			f.DropdownScroll = 0
-			return true
+			// Only close dropdown if zones exist (have been scanned)
+			// If no zones exist yet, don't consume the click - let it fall through
+			if anyZonesExist {
+				// Click was inside dropdown area but not on an option - close dropdown
+				// This prevents the dropdown from staying open when clicking borders/padding
+				f.DropdownOpen = false
+				f.DropdownCursor = 0
+				f.DropdownScroll = 0
+				return true
+			}
 		}
 	}
 
@@ -1182,8 +1213,20 @@ func (f *Form) renderSelectDropdown(field *FormField, scroll int, cursor int) st
 		}
 	}
 
+	// Check if there are more items above/below visible area
+	hasMore := end < len(field.Options)
+	hasAbove := start > 0
+
 	var out strings.Builder
-	out.WriteString("┌" + strings.Repeat("─", maxLen+2) + "┐\n")
+
+	// Top border with indicator if there are items above
+	if hasAbove {
+		indicator := f.Styles.Dimmed.Render("▲")
+		out.WriteString("┌" + strings.Repeat("─", maxLen+1) + indicator + "┐\n")
+	} else {
+		out.WriteString("┌" + strings.Repeat("─", maxLen+2) + "┐\n")
+	}
+
 	for i := start; i < end; i++ {
 		opt := field.Options[i]
 		prefix := "  "
@@ -1199,7 +1242,15 @@ func (f *Form) renderSelectDropdown(field *FormField, scroll int, cursor int) st
 		}
 		out.WriteString(optionContent + "\n")
 	}
-	out.WriteString("└" + strings.Repeat("─", maxLen+2) + "┘")
+
+	// Bottom border with indicator if there are more items below
+	if hasMore {
+		indicator := f.Styles.Dimmed.Render("▼")
+		out.WriteString("└" + strings.Repeat("─", maxLen+1) + indicator + "┘")
+	} else {
+		out.WriteString("└" + strings.Repeat("─", maxLen+2) + "┘")
+	}
+
 	return out.String()
 }
 
