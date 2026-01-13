@@ -125,6 +125,37 @@ func (f *Form) SetFields(fields []FormField) {
 	// Preserve cursor if field count unchanged
 	if len(fields) != prevLen || f.Cursor >= len(fields) {
 		f.Cursor = 0
+		// Move to first interactive field (skip headers and read-only non-link fields)
+		for f.Cursor < len(f.Fields) && (f.Fields[f.Cursor].Type == FormFieldHeader || (f.Fields[f.Cursor].ReadOnly && !f.Fields[f.Cursor].IsLink)) {
+			f.Cursor++
+		}
+		// If no interactive fields found, reset to 0
+		if f.Cursor >= len(f.Fields) {
+			f.Cursor = 0
+		}
+	} else {
+		// Field count unchanged - ensure current cursor is on interactive field
+		if f.Cursor < len(f.Fields) && (f.Fields[f.Cursor].Type == FormFieldHeader || (f.Fields[f.Cursor].ReadOnly && !f.Fields[f.Cursor].IsLink)) {
+			// Current field became non-interactive, move to next interactive
+			newCursor := f.Cursor
+			for newCursor < len(f.Fields) && (f.Fields[newCursor].Type == FormFieldHeader || (f.Fields[newCursor].ReadOnly && !f.Fields[newCursor].IsLink)) {
+				newCursor++
+			}
+			if newCursor < len(f.Fields) {
+				f.Cursor = newCursor
+			} else {
+				// No interactive fields after current, try going backwards
+				newCursor = f.Cursor - 1
+				for newCursor >= 0 && (f.Fields[newCursor].Type == FormFieldHeader || (f.Fields[newCursor].ReadOnly && !f.Fields[newCursor].IsLink)) {
+					newCursor--
+				}
+				if newCursor >= 0 {
+					f.Cursor = newCursor
+				} else {
+					f.Cursor = 0
+				}
+			}
+		}
 	}
 }
 
@@ -359,9 +390,9 @@ func (f *Form) handleKey(msg tea.KeyMsg) bool {
 	// Normal navigation
 	switch keyStr {
 	case "up", "k":
-		// Move to previous non-header field
+		// Move to previous interactive field (skip headers and read-only non-link fields)
 		newCursor := f.Cursor - 1
-		for newCursor >= 0 && f.Fields[newCursor].Type == FormFieldHeader {
+		for newCursor >= 0 && (f.Fields[newCursor].Type == FormFieldHeader || (f.Fields[newCursor].ReadOnly && !f.Fields[newCursor].IsLink)) {
 			newCursor--
 		}
 		if newCursor >= 0 {
@@ -369,9 +400,9 @@ func (f *Form) handleKey(msg tea.KeyMsg) bool {
 			return true
 		}
 	case "down", "j":
-		// Move to next non-header field
+		// Move to next interactive field (skip headers and read-only non-link fields)
 		newCursor := f.Cursor + 1
-		for newCursor < len(f.Fields) && f.Fields[newCursor].Type == FormFieldHeader {
+		for newCursor < len(f.Fields) && (f.Fields[newCursor].Type == FormFieldHeader || (f.Fields[newCursor].ReadOnly && !f.Fields[newCursor].IsLink)) {
 			newCursor++
 		}
 		if newCursor < len(f.Fields) {
@@ -499,6 +530,11 @@ func (f *Form) handleMouseClick(msg tea.MouseClickMsg) bool {
 
 // handleFieldClick handles a mouse click on a field.
 func (f *Form) handleFieldClick(fieldIdx int, field *FormField, msg tea.MouseClickMsg) bool {
+	// Don't select headers or read-only fields (except links)
+	if field.Type == FormFieldHeader || (field.ReadOnly && !field.IsLink) {
+		return false
+	}
+
 	f.Cursor = fieldIdx
 
 	if msg.Button == tea.MouseLeft {

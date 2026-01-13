@@ -619,11 +619,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Update detail content if selection changed
 		if node := m.tree.SelectedNode(); node != nil {
 			m.updateDetailContent()
-			// Auto-focus detail panel when selecting a light (for easier mouse interaction)
-			if node.Item != nil && node.Item.Type == panels.EntityLight {
-				m.previousPane = m.focusedPane
-				m.focusedPane = PanelDetail
-			}
+			// Don't auto-focus detail panel - let user explicitly navigate with Enter
 		}
 
 	case PanelDetail:
