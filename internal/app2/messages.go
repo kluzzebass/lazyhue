@@ -53,4 +53,22 @@ type (
 
 	// stateSaveTickMsg triggers periodic UI state save.
 	stateSaveTickMsg struct{}
+
+	// discoveryTickMsg triggers periodic bridge discovery.
+	discoveryTickMsg struct{}
+
+	// pairingTickMsg is sent every second during pairing for countdown updates.
+	pairingTickMsg struct{}
+
+	// pairingSuccessMsg is sent when bridge pairing succeeds.
+	pairingSuccessMsg struct {
+		BridgeID string
+		ApiKey   string
+	}
+
+	// pairingFailedMsg is sent when bridge pairing fails.
+	pairingFailedMsg struct {
+		BridgeID string
+		Err      error
+	}
 )

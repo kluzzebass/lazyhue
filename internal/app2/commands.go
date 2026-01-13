@@ -5,144 +5,42 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea/v2"
-
 	"github.com/kluzzebass/lazyhue/internal/hue"
 )
 
-// connectBridge connects a single bridge and sends a message.
-func (m *Model) connectBridge(bridge *hue.Bridge, apiKey string) tea.Cmd {
+// discoverBridges discovers all Hue bridges on the network.
+func discoverBridges() tea.Cmd {
 	return func() tea.Msg {
-		if err := bridge.Connect(apiKey); err != nil {
-			return errMsg{err: err}
-		}
-		return bridgeConnectedMsg{bridgeID: bridge.Info.ID}
-	}
-}
-
-// loadBridgesFromCredentials loads saved credentials and connects to all bridges.
-func (m *Model) loadBridgesFromCredentials() tea.Cmd {
-	// Load bridges from stored credentials
-	var cmds []tea.Cmd
-	for _, cred := range m.credentials.Bridges {
-		name := cred.Name
-		if name == "" {
-			name = cred.BridgeID
-		}
-		info := hue.BridgeInfo{
-			ID:        cred.BridgeID,
-			Name:      name,
-			IPAddress: cred.IPAddress,
-		}
-		m.manager.AddBridge(info)
-		if bridge := m.manager.GetBridge(cred.BridgeID); bridge != nil && cred.ApiKey != "" {
-			cmds = append(cmds, m.connectBridge(bridge, cred.ApiKey))
-		}
-	}
-
-	// Also discover bridges on the network (asynchronously)
-	cmds = append(cmds, m.discoverBridges())
-
-	return tea.Batch(cmds...)
-}
-
-// discoverBridges discovers bridges on the network asynchronously.
-func (m *Model) discoverBridges() tea.Cmd {
-	return func() tea.Msg {
-		discovery := hue.NewDiscoveryService(5 * time.Second)
+		discovery := hue.NewDiscoveryService(2 * time.Second)
 		bridges := discovery.DiscoverAll()
 		return bridgesDiscoveredMsg{bridges: bridges}
 	}
 }
 
-// syncBridgeState syncs state for a bridge.
-func (m *Model) syncBridgeState(bridgeID string) tea.Cmd {
+// startPairing initiates the pairing process with a bridge.
+func startPairing(ctx context.Context, info hue.BridgeInfo) tea.Cmd {
 	return func() tea.Msg {
-		bridge := m.manager.GetBridge(bridgeID)
-		if bridge == nil {
-			return nil
+		auth, err := hue.NewAuthenticator(info.IPAddress)
+		if err != nil {
+			return pairingFailedMsg{BridgeID: info.ID, Err: err}
 		}
 
-		ctx := context.Background()
-		if err := bridge.SyncAll(ctx); err != nil {
-			return errMsg{err}
+		apiKey, err := auth.AuthenticateWithContext(ctx, 500*time.Millisecond)
+		if err != nil {
+			// Don't report cancellation as an error
+			if err == hue.ErrPairingCancelled {
+				return nil // Silently ignore - user already knows they cancelled
+			}
+			return pairingFailedMsg{BridgeID: info.ID, Err: err}
 		}
 
-		return stateSyncedMsg{bridgeID: bridgeID}
+		return pairingSuccessMsg{BridgeID: info.ID, ApiKey: apiKey}
 	}
 }
 
-// startSSEListener starts listening to SSE events from a bridge.
-// This runs in a goroutine and sends events to m.eventChan.
-func (m *Model) startSSEListener(ctx context.Context, bridge *hue.Bridge) {
-	bridge.OnEvent(func(bridgeID, resourceType, resourceID, eventType string) {
-		select {
-		case <-ctx.Done():
-			return
-		case m.eventChan <- bridgeEventMsg{
-			bridgeID:     bridgeID,
-			resourceType: resourceType,
-			resourceID:   resourceID,
-			eventType:    eventType,
-		}:
-		}
-	})
-}
-
-// listenForEvents returns a command that listens for events from the channel.
-func (m *Model) listenForEvents() tea.Cmd {
-	return func() tea.Msg {
-		return <-m.eventChan
-	}
-}
-
-// startRequestListener starts listening to request messages from a bridge.
-// This runs in a goroutine and sends requests to m.requestChan.
-func (m *Model) startRequestListener(ctx context.Context, bridge *hue.Bridge) {
-	bridge.OnRequest(func(bridgeID, message string) {
-		select {
-		case <-ctx.Done():
-			return
-		case m.requestChan <- requestMsg{
-			bridgeID: bridgeID,
-			message:  message,
-		}:
-		}
-	})
-}
-
-// listenForRequests returns a command that listens for requests from the channel.
-func (m *Model) listenForRequests() tea.Cmd {
-	return func() tea.Msg {
-		return <-m.requestChan
-	}
-}
-
-// startErrorListener starts listening to error messages from a bridge.
-// This runs in a goroutine and sends errors to m.errorChan.
-func (m *Model) startErrorListener(ctx context.Context, bridge *hue.Bridge) {
-	bridge.OnError(func(bridgeID, message string) {
-		select {
-		case <-ctx.Done():
-			return
-		case m.errorChan <- errorMsg{
-			bridgeID: bridgeID,
-			message:  message,
-		}:
-		}
-	})
-}
-
-// listenForErrors returns a command that listens for errors from the channel.
-func (m *Model) listenForErrors() tea.Cmd {
-	return func() tea.Msg {
-		return <-m.errorChan
-	}
-}
-
-// startStateSaveTicker starts a ticker that triggers periodic state saves.
-func (m *Model) startStateSaveTicker() tea.Cmd {
-	// Save UI state every 5 seconds to handle abrupt termination
-	return tea.Tick(5*time.Second, func(t time.Time) tea.Msg {
-		return stateSaveTickMsg{}
+// pairingTick returns a command that ticks every second for the pairing countdown.
+func pairingTick() tea.Cmd {
+	return tea.Tick(time.Second, func(t time.Time) tea.Msg {
+		return pairingTickMsg{}
 	})
 }

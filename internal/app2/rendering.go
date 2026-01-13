@@ -351,6 +351,58 @@ func (m *Model) buildEntityDeleteConfirmationContent() string {
 	return content.String()
 }
 
+// buildPairingContent builds the bridge pairing dialog.
+func (m *Model) buildPairingContent() string {
+	var content strings.Builder
+
+	// Header
+	titleStyle := lipgloss.NewStyle().Foreground(m.styles.Theme.Primary).Bold(true)
+	content.WriteString(titleStyle.Render("Pair with Bridge"))
+	content.WriteString("\n\n")
+
+	if m.pairingFor != nil {
+		// Bridge info
+		content.WriteString(fmt.Sprintf("  Bridge: %s\n", m.styles.Highlight.Render(m.pairingFor.Name)))
+		content.WriteString(fmt.Sprintf("      IP: %s\n\n", m.styles.Dimmed.Render(m.pairingFor.IPAddress)))
+
+		// Instructions
+		content.WriteString(m.styles.Subtitle.Render("  Press the button on your bridge"))
+		content.WriteString("\n\n")
+
+		// Progress indicator with countdown
+		remaining := m.pairingRemaining
+		if remaining < 0 {
+			remaining = 0
+		}
+
+		// Progress bar
+		totalWidth := 40
+		filled := int(float64(totalWidth) * float64(remaining) / 60.0)
+		if filled < 0 {
+			filled = 0
+		}
+		if filled > totalWidth {
+			filled = totalWidth
+		}
+
+		bar := strings.Repeat("█", filled) + strings.Repeat("░", totalWidth-filled)
+		content.WriteString("  ")
+		content.WriteString(bar)
+		content.WriteString("\n\n")
+
+		// Countdown
+		content.WriteString(fmt.Sprintf("  Time remaining: %d seconds\n\n", remaining))
+
+		// Cancel instruction
+		content.WriteString(m.styles.Dimmed.Render("  Press Esc to cancel"))
+		content.WriteString("\n")
+	} else {
+		content.WriteString("  No bridge selected for pairing\n")
+	}
+
+	return content.String()
+}
+
 // updateLogContent updates the log viewport content from activities.
 func (m *Model) updateLogContent() {
 	var content strings.Builder
@@ -395,6 +447,12 @@ func (m *Model) updateDetailContent() {
 	// If in rename mode, show rename input
 	if m.renaming {
 		m.detailViewport.SetContent(m.buildRenameContent())
+		return
+	}
+
+	// If in pairing mode, show pairing dialog
+	if m.pairing {
+		m.detailViewport.SetContent(m.buildPairingContent())
 		return
 	}
 

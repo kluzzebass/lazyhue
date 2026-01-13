@@ -47,6 +47,7 @@ func (m *Model) initBindings() {
 		{Keys: []string{"0", "1", "2"}, Display: "0/1/2", Desc: "Jump to panel", Priority: 48},
 		{Keys: []string{"]"}, Display: "]", Desc: "Next tab", Priority: 40},
 		{Keys: []string{"["}, Display: "[", Desc: "Prev tab", Priority: 39},
+		{Keys: []string{"p"}, Display: "p", Desc: "Pair new bridge", Priority: 30},
 		{Keys: []string{"?"}, Display: "?", Desc: "Toggle help", Priority: 20},
 		{Keys: []string{"t"}, Display: "t", Desc: "Test form (debug)", Priority: 10},
 		{Keys: []string{"q", "ctrl+c"}, Display: "q", Desc: "Quit", Priority: 5},

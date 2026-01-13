@@ -96,6 +96,15 @@ type Model struct {
 	deleteEntityType     panels.EntityType // Type of entity to delete
 	deleteEntityBridgeID string            // Bridge ID the entity belongs to
 
+	// Pairing state
+	pairing           bool                    // Whether we're in pairing mode
+	pairingFor        *hue.BridgeInfo         // Bridge being paired
+	pairingCancel     context.CancelFunc      // Function to cancel pairing
+	pairingStartTime  time.Time               // When pairing started
+	discoveredBridges []hue.BridgeInfo        // Discovered bridges available for pairing
+	pairingRemaining  int                     // Seconds remaining in pairing countdown
+	pairingRequested  bool                    // Whether user explicitly requested pairing via 'p' key
+
 	// Help display
 	showHelp bool // Whether help is displayed in detail panel
 
@@ -202,7 +211,9 @@ func New(creds *config.CredentialStore) Model {
 func (m Model) Init() tea.Cmd {
 	return tea.Batch(
 		m.loadBridgesFromCredentials(),
-		m.startStateSaveTicker(),
+		discoverBridges(),        // Initial discovery
+		m.startStateSaveTicker(), // Periodic state saves
+		startDiscoveryTicker(),   // Periodic bridge discovery
 	)
 }
 
@@ -280,12 +291,174 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case bridgesDiscoveredMsg:
-		// Add discovered bridges to the manager
-		for _, info := range msg.bridges {
-			// Add if not already in manager
-			if m.manager.GetBridge(info.ID) == nil {
-				m.manager.AddBridge(info)
+		// Store discovered bridges
+		m.discoveredBridges = msg.bridges
+
+		// Update status
+		if len(msg.bridges) == 0 {
+			if m.manager.BridgeCount() == 0 {
+				m.status = "No bridges found. Press 'p' to pair."
 			}
+		} else {
+			m.status = fmt.Sprintf("Found %d bridge(s)", len(msg.bridges))
+		}
+
+		// Add discovered bridges to manager (but don't connect - that happens separately)
+		for _, info := range msg.bridges {
+			// Check if we already have this bridge by ID
+			existing := m.manager.GetBridge(info.ID)
+			if existing != nil {
+				// Update IP if changed
+				if existing.Info.IPAddress != info.IPAddress {
+					existing.Info.IPAddress = info.IPAddress
+					// Update credentials
+					if cred, ok := m.credentials.Get(info.ID); ok {
+						cred.IPAddress = info.IPAddress
+						m.credentials.Set(cred)
+						_ = m.credentials.Save()
+					}
+				}
+				continue
+			}
+
+			// Check by IP to avoid duplicates
+			existsByIP := false
+			for _, bridge := range m.manager.AllBridges() {
+				if bridge.Info.IPAddress == info.IPAddress {
+					existsByIP = true
+					break
+				}
+			}
+			if existsByIP {
+				continue
+			}
+
+			// Add new bridge to manager (but don't connect)
+			m.manager.AddBridge(info)
+		}
+
+		// Rebuild tree to show newly discovered bridges
+		m.rebuildTreeForActiveTab()
+
+		// If user explicitly requested pairing (via 'p' key), start pairing with first unpaired bridge
+		if m.pairingRequested {
+			m.pairingRequested = false // Clear flag
+
+			// Find first unpaired bridge
+			var unpairedBridge *hue.BridgeInfo
+			for i := range msg.bridges {
+				if _, ok := m.credentials.Get(msg.bridges[i].ID); !ok {
+					unpairedBridge = &msg.bridges[i]
+					break
+				}
+			}
+
+			if unpairedBridge != nil {
+				// Start pairing mode
+				m.pairing = true
+				m.pairingFor = unpairedBridge
+				m.pairingStartTime = time.Now()
+				m.pairingRemaining = 60
+
+				// Create context for pairing with 60s timeout
+				ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+				m.pairingCancel = cancel
+
+				// Switch to detail panel
+				m.previousPane = m.focusedPane
+				m.focusedPane = PanelDetail
+
+				m.status = fmt.Sprintf("Pairing with %s...", unpairedBridge.Name)
+				m.updateDetailContent()
+
+				// Start pairing command and tick
+				cmds = append(cmds, startPairing(ctx, *unpairedBridge))
+				cmds = append(cmds, pairingTick())
+			} else {
+				// No unpaired bridges found
+				m.status = "No unpaired bridges found"
+			}
+		}
+
+		return m, tea.Batch(cmds...)
+
+	case pairingTickMsg:
+		if m.pairing {
+			// Update countdown
+			elapsed := time.Since(m.pairingStartTime)
+			m.pairingRemaining = 60 - int(elapsed.Seconds())
+			if m.pairingRemaining < 0 {
+				m.pairingRemaining = 0
+			}
+
+			// Update UI
+			m.updateDetailContent()
+
+			// Continue ticking if still pairing
+			if m.pairingRemaining > 0 {
+				return m, pairingTick()
+			} else {
+				// Timeout - cancel pairing
+				if m.pairingCancel != nil {
+					m.pairingCancel()
+				}
+				m.pairing = false
+				m.pairingFor = nil
+				m.pairingCancel = nil
+				m.status = "Pairing timed out"
+				m.updateDetailContent()
+			}
+		}
+		return m, nil
+
+	case pairingSuccessMsg:
+		if m.pairing {
+			// Stop pairing mode
+			m.pairing = false
+			if m.pairingCancel != nil {
+				m.pairingCancel()
+			}
+			pairingFor := m.pairingFor
+			m.pairingFor = nil
+			m.pairingCancel = nil
+
+			// Save credentials
+			m.credentials.Set(config.BridgeCredential{
+				BridgeID:  msg.BridgeID,
+				Name:      pairingFor.Name,
+				IPAddress: pairingFor.IPAddress,
+				ApiKey:    msg.ApiKey,
+			})
+			if err := m.credentials.Save(); err != nil {
+				m.status = fmt.Sprintf("Pairing succeeded but failed to save credentials: %v", err)
+			} else {
+				m.status = fmt.Sprintf("Successfully paired with %s", pairingFor.Name)
+			}
+
+			// Add bridge to manager and connect
+			m.manager.AddBridge(*pairingFor)
+			if bridge := m.manager.GetBridge(msg.BridgeID); bridge != nil {
+				cmds = append(cmds, connectBridge(bridge, msg.ApiKey))
+			}
+
+			// Update UI
+			m.updateDetailContent()
+		}
+		return m, tea.Batch(cmds...)
+
+	case pairingFailedMsg:
+		if m.pairing {
+			// Stop pairing mode
+			m.pairing = false
+			if m.pairingCancel != nil {
+				m.pairingCancel()
+			}
+			pairingFor := m.pairingFor
+			m.pairingFor = nil
+			m.pairingCancel = nil
+
+			m.status = fmt.Sprintf("Pairing failed with %s: %v", pairingFor.Name, msg.Err)
+			m.updateDetailContent()
 		}
 		return m, nil
 
@@ -443,6 +616,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Restart the ticker
 		return m, m.startStateSaveTicker()
 
+	case discoveryTickMsg:
+		// Periodic bridge discovery
+		cmds = append(cmds, discoverBridges())
+		// Restart the ticker
+		cmds = append(cmds, startDiscoveryTicker())
+		return m, tea.Batch(cmds...)
+
 	case bridgeBlinkTickMsg:
 		// Clear blink state for this bridge
 		if _, ok := m.bridgeBlinkUntil[msg.bridgeID]; ok {
@@ -501,6 +681,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case key.Matches(msg, m.keys.Rename):
 			// Start rename mode for the selected entity
 			if cmd := m.startRenameMode(); cmd != nil {
+				return m, cmd
+			}
+			return m, nil
+
+		case keyStr == "p":
+			// Start bridge pairing
+			if cmd := m.startBridgePairing(); cmd != nil {
 				return m, cmd
 			}
 			return m, nil
@@ -748,7 +935,21 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 	case PanelDetail:
-		// Handle delete confirmation mode first
+		// Handle pairing mode first
+		if m.pairing {
+			if keyMsg, ok := msg.(tea.KeyMsg); ok {
+				switch keyMsg.String() {
+				case "esc":
+					// Cancel pairing
+					m.cancelPairing()
+					m.updateDetailContent()
+					return m, nil
+				}
+			}
+			return m, nil
+		}
+
+		// Handle delete confirmation mode
 		if m.confirmingDelete {
 			if keyMsg, ok := msg.(tea.KeyMsg); ok {
 				switch keyMsg.String() {
@@ -1470,6 +1671,31 @@ func (m *Model) confirmEntityDelete() tea.Cmd {
 	})
 
 	return nil
+}
+
+// startBridgePairing starts the bridge pairing process.
+func (m *Model) startBridgePairing() tea.Cmd {
+	// Close help if showing
+	m.showHelp = false
+
+	// Set flag that user requested pairing
+	m.pairingRequested = true
+
+	// Start discovery - when it completes, it will check pairingRequested flag
+	m.status = "Discovering bridges..."
+
+	return discoverBridges()
+}
+
+// cancelPairing cancels the current pairing operation.
+func (m *Model) cancelPairing() {
+	if m.pairingCancel != nil {
+		m.pairingCancel()
+	}
+	m.pairing = false
+	m.pairingFor = nil
+	m.pairingCancel = nil
+	m.status = "Pairing cancelled"
 }
 
 // navigateToEntity navigates to a specific entity by type and ID.
