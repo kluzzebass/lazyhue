@@ -442,11 +442,9 @@ func (m *Model) renderLogPanel(width, height int, focused bool, key string) stri
 
 	// Render exactly the lines the viewport provides (should be innerHeight)
 	// Limit to innerHeight to prevent overflow
+	// Activity.Render() already handles truncation, so just pad to width
 	for i := 0; i < len(contentLines) && i < innerHeight; i++ {
 		line := contentLines[i]
-		if lipgloss.Width(line) > innerWidth {
-			line = lipgloss.Place(innerWidth, 1, lipgloss.Left, lipgloss.Top, line)
-		}
 		paddedLine := lipgloss.Place(innerWidth, 1, lipgloss.Left, lipgloss.Top, line)
 		lines = append(lines, leftBorder+paddedLine+rightBorder)
 	}

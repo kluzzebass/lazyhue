@@ -1184,6 +1184,21 @@ func (s *BridgeState) SetLightEffect(id string, effect hueclient.SupportedEffect
 	}
 }
 
+// SetLightPowerupPreset optimistically updates a light's power-on preset in the cache.
+func (s *BridgeState) SetLightPowerupPreset(id string, preset hueclient.PowerupPreset) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if light, ok := s.Lights[id]; ok {
+		if light.Powerup != nil {
+			// Convert PowerupPreset (used in updates) to LightGetPowerupPreset (used in LightGet)
+			getPreset := hueclient.LightGetPowerupPreset(preset)
+			light.Powerup.Preset = &getPreset
+			s.Lights[id] = light
+		}
+	}
+}
+
 // SetGroupedLightBrightness optimistically updates a grouped light's brightness in the cache.
 func (s *BridgeState) SetGroupedLightBrightness(id string, brightness float64) {
 	s.mu.Lock()

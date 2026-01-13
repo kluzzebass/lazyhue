@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/charmbracelet/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/kluzzebass/lazyhue/internal/hue"
 	"github.com/kluzzebass/lazyhue/internal/hueclient"
@@ -599,12 +600,10 @@ func (a *RequestActivity) Render(styles *ui2.Styles, width int) string {
 		bridgeStr = styles.Dimmed.Render("["+a.bridgeName+"]") + " "
 	}
 	line := fmt.Sprintf("%s %s %s%s", styles.Dimmed.Render(timeStr), typeIndicator, bridgeStr, a.message)
-	if lipgloss.Width(line) > width {
-		maxLen := len(line)
-		if width-1 < maxLen {
-			maxLen = width - 1
-		}
-		line = line[:maxLen] + "…"
+
+	// Truncate if width is provided and line exceeds it
+	if width > 0 && lipgloss.Width(line) > width {
+		line = ansi.Truncate(line, width, "…")
 	}
 	return line
 }
@@ -630,12 +629,10 @@ func (a *ErrorActivity) Render(styles *ui2.Styles, width int) string {
 		bridgeStr = styles.Dimmed.Render("["+a.bridgeName+"]") + " "
 	}
 	line := fmt.Sprintf("%s %s %s%s", styles.Dimmed.Render(timeStr), typeIndicator, bridgeStr, a.message)
-	if lipgloss.Width(line) > width {
-		maxLen := len(line)
-		if width-1 < maxLen {
-			maxLen = width - 1
-		}
-		line = line[:maxLen] + "…"
+
+	// Truncate if width is provided and line exceeds it
+	if width > 0 && lipgloss.Width(line) > width {
+		line = ansi.Truncate(line, width, "…")
 	}
 	return line
 }
@@ -696,12 +693,9 @@ func renderEvent(styles *ui2.Styles, width int, base baseEvent, name, details, i
 		}
 	}
 
-	if lipgloss.Width(line) > width {
-		maxLen := len(line)
-		if width-1 < maxLen {
-			maxLen = width - 1
-		}
-		line = line[:maxLen] + "…"
+	// Truncate if width is provided and line exceeds it
+	if width > 0 && lipgloss.Width(line) > width {
+		line = ansi.Truncate(line, width, "…")
 	}
 
 	return line

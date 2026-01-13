@@ -13,6 +13,7 @@ import (
 	"github.com/charmbracelet/bubbles/v2/viewport"
 	tea "github.com/charmbracelet/bubbletea/v2"
 	"github.com/charmbracelet/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
 	zone "github.com/lrstanley/bubblezone/v2"
 
 	"github.com/kluzzebass/lazyhue/internal/config"
@@ -44,6 +45,7 @@ type Model struct {
 	// Service layer
 	manager     *hue.Manager
 	credentials *config.CredentialStore
+	uiState     *config.UIStateStore
 
 	// UI components
 	tree           *panels.TreePanel
@@ -99,6 +101,13 @@ func New(creds *config.CredentialStore) Model {
 	keys := ui2.DefaultKeyMap()
 	zones := zone.New()
 
+	// Load UI state (or create empty if doesn't exist)
+	uiState, err := config.LoadUIState()
+	if err != nil {
+		// If we can't load state, just start with empty state
+		uiState = config.NewUIStateStore()
+	}
+
 	// Define panel order for automatic key assignment
 	// Detail (0), Tree (1), Log (2)
 	panelOrder := []string{
@@ -143,6 +152,7 @@ func New(creds *config.CredentialStore) Model {
 	return Model{
 		manager:          hue.NewManager(creds),
 		credentials:      creds,
+		uiState:          uiState,
 		tree:             tree,
 		panelOrder:       panelOrder,
 		detailViewport:   viewport.New(),
@@ -170,7 +180,10 @@ func New(creds *config.CredentialStore) Model {
 
 // Init implements tea.Model.
 func (m Model) Init() tea.Cmd {
-	return m.loadBridgesFromCredentials()
+	return tea.Batch(
+		m.loadBridgesFromCredentials(),
+		m.startStateSaveTicker(),
+	)
 }
 
 // Update implements tea.Model.
@@ -196,6 +209,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.width = msg.Width
 		m.height = msg.Height
 
+		// Check for minimum usable width
+		const minWidth = 80
+		if m.width < minWidth {
+			m.status = fmt.Sprintf("Terminal too narrow (min %d cols, got %d)", minWidth, m.width)
+		}
+
 		// Reserve space for help
 		helpHeight := 1 // status line only
 		contentHeight := m.height - helpHeight
@@ -219,6 +238,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.detailViewport.SetWidth(detailWidth)
 		m.detailViewport.SetHeight(detailHeight)
 
+		// Re-render detail content with new width
+		m.updateDetailContent()
+
 		logBounds := m.layout.Bounds(PanelLog)
 		logWidth := logBounds.Width - 2
 		if logWidth < 1 {
@@ -230,6 +252,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.logViewport.SetWidth(logWidth)
 		m.logViewport.SetHeight(logHeight)
+
+		// Re-render log content with new width to handle truncation
+		m.updateLogContent()
 
 		m.help.Width = m.width
 		return m, nil
@@ -256,10 +281,21 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 		// If this is the first connected bridge, make it active
+		// Prefer the last selected bridge from saved state
 		if m.activeBridgeID == "" {
-			m.activeBridgeID = msg.bridgeID
-			m.manager.SetActiveBridge(msg.bridgeID)
-			m.status = "Syncing state..."
+			// Check if we have a saved LastSelectedBridgeID and this bridge matches
+			if m.uiState.LastSelectedBridgeID != "" && msg.bridgeID == m.uiState.LastSelectedBridgeID {
+				m.activeBridgeID = msg.bridgeID
+				m.manager.SetActiveBridge(msg.bridgeID)
+				m.status = "Syncing state..."
+			} else if m.uiState.LastSelectedBridgeID == "" {
+				// No saved bridge, use first one that connects
+				m.activeBridgeID = msg.bridgeID
+				m.manager.SetActiveBridge(msg.bridgeID)
+				m.status = "Syncing state..."
+			}
+			// If LastSelectedBridgeID is set but doesn't match this bridge,
+			// wait for that bridge to connect
 		}
 
 		// Sync state for this bridge and rebuild tree
@@ -282,10 +318,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			go m.startSSEListener(ctx, bridge)
 			cmds = append(cmds, m.listenForEvents())
 
-			// If this is the active bridge, rebuild tree
+			// If this is the active bridge, rebuild tree and restore state
 			if msg.bridgeID == m.activeBridgeID {
 				m.status = "Ready"
 				m.rebuildTreeForActiveTab()
+				// Restore UI state after bridge state has loaded
+				m.restoreState(msg.bridgeID)
 			}
 		}
 
@@ -394,6 +432,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		cmds = append(cmds, m.listenForErrors())
 		return m, tea.Batch(cmds...)
 
+	case stateSaveTickMsg:
+		// Periodic state save to handle abrupt termination
+		m.saveState()
+		// Restart the ticker
+		return m, m.startStateSaveTicker()
+
 	case bridgeBlinkTickMsg:
 		// Clear blink state for this bridge
 		if _, ok := m.bridgeBlinkUntil[msg.bridgeID]; ok {
@@ -428,6 +472,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		switch {
 		case key.Matches(msg, m.keys.Quit):
+			m.saveState() // Save state before quitting
 			m.quitting = true
 			for _, cancel := range m.eventCancelFuncs {
 				cancel()
@@ -458,11 +503,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case key.Matches(msg, m.keys.NextBridge):
 			m.tree.NextTab()
 			m.rebuildTreeForActiveTab()
+			m.saveState() // Persist tab change
 			return m, nil
 
 		case key.Matches(msg, m.keys.PrevBridge):
 			m.tree.PrevTab()
 			m.rebuildTreeForActiveTab()
+			m.saveState() // Persist tab change
 			return m, nil
 
 		case key.Matches(msg, m.keys.NextPanel):
@@ -924,7 +971,17 @@ func (m Model) View() string {
 	logContent := m.renderLogPanel(logBounds.Width, logBounds.Height, m.focusedPane == PanelLog, logKey)
 	rightColumn := lipgloss.JoinVertical(lipgloss.Left, detailContent, logContent)
 
-	// Compose layout
+	// Compose layout - constrain each column to prevent terminal overflow
+	treeBounds := m.layout.Bounds(PanelTree)
+	if lipgloss.Width(leftColumn) > treeBounds.Width {
+		leftColumn = ansi.Truncate(leftColumn, treeBounds.Width, "")
+	}
+
+	rightMaxWidth := m.width - treeBounds.Width
+	if lipgloss.Width(rightColumn) > rightMaxWidth {
+		rightColumn = ansi.Truncate(rightColumn, rightMaxWidth, "")
+	}
+
 	mainContent := lipgloss.JoinHorizontal(lipgloss.Top, leftColumn, rightColumn)
 
 	// Render status line with minimal help hint
@@ -1202,6 +1259,7 @@ func (m *Model) navigateToEntity(entityType, entityID, bridgeID string) {
 
 	// Select the node in the tree
 	m.tree.SelectNode(node)
+	m.saveState() // Persist selection
 
 	// Update detail panel
 	m.updateDetailContent()
@@ -1237,6 +1295,7 @@ func (m *Model) navigateBack() {
 	}
 
 	m.tree.SelectNode(node)
+	m.saveState() // Persist selection
 	m.updateDetailContent()
 	m.previousPane = m.focusedPane
 	m.focusedPane = PanelDetail
@@ -1268,6 +1327,7 @@ func (m *Model) navigateForward() {
 	}
 
 	m.tree.SelectNode(node)
+	m.saveState() // Persist selection
 	m.updateDetailContent()
 	m.previousPane = m.focusedPane
 	m.focusedPane = PanelDetail

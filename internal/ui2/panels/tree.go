@@ -729,3 +729,26 @@ func expandAncestorsInNode(target *TreeNode, node *TreeNode) bool {
 
 	return false
 }
+
+// GetExpandedStates returns the current expanded state map for persistence.
+func (p *TreePanel) GetExpandedStates() map[string]bool {
+	return p.getExpandedState()
+}
+
+// SetExpandedStates restores the expanded state from a map.
+func (p *TreePanel) SetExpandedStates(state map[string]bool) {
+	p.restoreExpandedState(state)
+	p.rebuildFlatList()
+}
+
+// SelectByID selects a node by entity ID. Returns true if found and selected.
+func (p *TreePanel) SelectByID(entityID string) bool {
+	// Search through flat list
+	for i, flatNode := range p.flatList {
+		if flatNode.Node.Item != nil && flatNode.Node.Item.ID == entityID {
+			p.Select(i)
+			return true
+		}
+	}
+	return false
+}

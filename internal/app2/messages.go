@@ -50,4 +50,7 @@ type (
 		bridgeID string
 		message  string
 	}
+
+	// stateSaveTickMsg triggers periodic UI state save.
+	stateSaveTickMsg struct{}
 )

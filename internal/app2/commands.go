@@ -138,3 +138,11 @@ func (m *Model) listenForErrors() tea.Cmd {
 		return <-m.errorChan
 	}
 }
+
+// startStateSaveTicker starts a ticker that triggers periodic state saves.
+func (m *Model) startStateSaveTicker() tea.Cmd {
+	// Save UI state every 5 seconds to handle abrupt termination
+	return tea.Tick(5*time.Second, func(t time.Time) tea.Msg {
+		return stateSaveTickMsg{}
+	})
+}

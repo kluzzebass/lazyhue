@@ -968,10 +968,23 @@ func (b *Bridge) SetLightPowerupPreset(lightID string, preset hueclient.PowerupP
 		return ErrAuthFailed
 	}
 
+	// Get light name BEFORE optimistic update to ensure we can retrieve it
 	lightName := "Unknown"
-	if light, ok := b.state.GetLight(lightID); ok && light.Metadata != nil && light.Metadata.Name != nil {
-		lightName = *light.Metadata.Name
+	if light, ok := b.state.GetLight(lightID); ok {
+		if light.Metadata != nil && light.Metadata.Name != nil {
+			lightName = *light.Metadata.Name
+		}
+		// If no metadata name, try to get device name
+		if lightName == "Unknown" && light.Owner != nil && light.Owner.Rid != nil {
+			if device, ok := b.state.GetDevice(*light.Owner.Rid); ok {
+				lightName = b.state.GetDeviceName(device)
+			}
+		}
 	}
+
+	// Optimistic update: apply to cache immediately
+	b.state.SetLightPowerupPreset(lightID, preset)
+
 	b.logRequest(fmt.Sprintf("%s: power-on preset changed to \"%s\"", lightName, string(preset)))
 	_, err := client.UpdateLight(context.Background(), lightID, hueclient.UpdateLightJSONRequestBody{
 		Powerup: &hueclient.Powerup{
