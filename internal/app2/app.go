@@ -97,6 +97,10 @@ type Model struct {
 	// Navigation history
 	navigationHistory []NavigationEntry
 	historyIndex      int // Current position in history (-1 if no history or at latest)
+
+	// Keybindings for help system
+	panelBindings  map[string][]Binding
+	globalBindings []Binding
 }
 
 // New creates a new application model.
@@ -153,7 +157,7 @@ func New(creds *config.CredentialStore) Model {
 	renameInput.Prompt = "Name: "
 	renameInput.CharLimit = 32
 
-	return Model{
+	m := Model{
 		manager:          hue.NewManager(creds),
 		credentials:      creds,
 		uiState:          uiState,
@@ -180,6 +184,11 @@ func New(creds *config.CredentialStore) Model {
 		renameInput:      renameInput,
 		historyIndex:     -1, // No history initially
 	}
+
+	// Initialize keybindings
+	m.initBindings()
+
+	return m
 }
 
 // Init implements tea.Model.

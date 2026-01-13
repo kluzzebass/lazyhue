@@ -59,7 +59,7 @@ func getSortedPowerupPresets() []string {
 	return presets
 }
 
-// buildHelpContent builds the help content for the detail panel.
+// buildHelpContent builds the help content dynamically from bindings.
 func (m *Model) buildHelpContent() string {
 	var content strings.Builder
 
@@ -67,55 +67,167 @@ func (m *Model) buildHelpContent() string {
 	content.WriteString(m.styles.Title.Render("Keyboard Shortcuts"))
 	content.WriteString("\n\n")
 
+	// Always show Tree panel bindings if there's a selection
+	// This is more useful than showing focused panel bindings
+	node := m.tree.SelectedNode()
+	var entityType panels.EntityType
+	if node != nil && node.Item != nil {
+		entityType = node.Item.Type
+	}
+
+	// Get tree bindings based on selected entity
+	var treeBindings []Binding
+	var treeTitle string
+
+	if node != nil && node.Item != nil {
+		treeBindings = make([]Binding, 0, len(m.panelBindings[PanelTree]))
+
+		switch entityType {
+		case panels.EntityBridge:
+			treeTitle = "Tree (Bridge selected)"
+			// Include all bindings including 'x' for bridge deletion
+			for _, b := range m.panelBindings[PanelTree] {
+				treeBindings = append(treeBindings, b)
+			}
+		default:
+			// For non-bridge entities, exclude the 'x' deletion binding
+			for _, b := range m.panelBindings[PanelTree] {
+				isDeleteBinding := false
+				for _, key := range b.Keys {
+					if key == "x" {
+						isDeleteBinding = true
+						break
+					}
+				}
+				if !isDeleteBinding {
+					treeBindings = append(treeBindings, b)
+				}
+			}
+
+			// Set appropriate title
+			switch entityType {
+			case panels.EntityLight:
+				treeTitle = "Tree (Light selected)"
+			case panels.EntityRoom:
+				treeTitle = "Tree (Room selected)"
+			case panels.EntityZone:
+				treeTitle = "Tree (Zone selected)"
+			case panels.EntityScene:
+				treeTitle = "Tree (Scene selected)"
+			case panels.EntityDevice:
+				treeTitle = "Tree (Device selected)"
+			default:
+				treeTitle = "Tree"
+			}
+		}
+	}
+
+	// Show tree bindings
+	if len(treeBindings) > 0 && treeTitle != "" {
+		content.WriteString(m.styles.Subtitle.Render(treeTitle + ":"))
+		content.WriteString("\n")
+		for _, b := range treeBindings {
+			content.WriteString(fmt.Sprintf("  %-12s %s\n", b.Display, b.Desc))
+		}
+		content.WriteString("\n")
+	}
+
+	// Get bindings for currently focused panel (if not tree)
+	var focusedPanelBindings []Binding
+	var focusedPanelTitle string
+
+	if m.focusedPane != PanelTree {
+		focusedPanelBindings, _, focusedPanelTitle = m.getContextBindings()
+
+		// Show focused panel bindings
+		if len(focusedPanelBindings) > 0 && focusedPanelTitle != "" {
+			content.WriteString(m.styles.Subtitle.Render(focusedPanelTitle + ":"))
+			content.WriteString("\n")
+			for _, b := range focusedPanelBindings {
+				content.WriteString(fmt.Sprintf("  %-12s %s\n", b.Display, b.Desc))
+			}
+			content.WriteString("\n")
+		}
+	}
+
+	// Get global bindings
+	globalBindings := m.globalBindings
+
+	// Global bindings - group by category
+	navBindings := []Binding{}
+	panelNavBindings := []Binding{}
+	tabBindings := []Binding{}
+	uiBindings := []Binding{}
+
+	for _, b := range globalBindings {
+		if contains(b.Keys, "up") || contains(b.Keys, "down") || contains(b.Keys, "g") ||
+		   contains(b.Keys, "G") || contains(b.Keys, "pgup") || contains(b.Keys, "pgdown") {
+			navBindings = append(navBindings, b)
+		} else if contains(b.Keys, "tab") || contains(b.Keys, "shift+tab") ||
+		          contains(b.Keys, "0") || contains(b.Keys, "1") || contains(b.Keys, "2") {
+			panelNavBindings = append(panelNavBindings, b)
+		} else if contains(b.Keys, "[") || contains(b.Keys, "]") {
+			tabBindings = append(tabBindings, b)
+		} else {
+			uiBindings = append(uiBindings, b)
+		}
+	}
+
 	// Navigation
-	content.WriteString(m.styles.Subtitle.Render("Navigation:"))
-	content.WriteString("\n")
-	content.WriteString("  ↑/k, ↓/j     Move up/down\n")
-	content.WriteString("  ←/h, →/l     Collapse/expand (tree) or prev/next tab\n")
-	content.WriteString("  PgUp/PgDn    Page up/down\n")
-	content.WriteString("  g/Home       Go to top\n")
-	content.WriteString("  G/End        Go to bottom\n")
-	content.WriteString("\n")
+	if len(navBindings) > 0 {
+		content.WriteString(m.styles.Subtitle.Render("Navigation:"))
+		content.WriteString("\n")
+		for _, b := range navBindings {
+			content.WriteString(fmt.Sprintf("  %-12s %s\n", b.Display, b.Desc))
+		}
+		content.WriteString("\n")
+	}
 
 	// Panel navigation
-	content.WriteString(m.styles.Subtitle.Render("Panels:"))
-	content.WriteString("\n")
-	content.WriteString("  Tab          Next panel\n")
-	content.WriteString("  Shift+Tab    Previous panel\n")
-	content.WriteString("  0, 1, 2      Jump to panel by number\n")
-	content.WriteString("  Esc          Back / close\n")
-	content.WriteString("\n")
+	if len(panelNavBindings) > 0 {
+		content.WriteString(m.styles.Subtitle.Render("Panels:"))
+		content.WriteString("\n")
+		for _, b := range panelNavBindings {
+			content.WriteString(fmt.Sprintf("  %-12s %s\n", b.Display, b.Desc))
+		}
+		content.WriteString("\n")
+	}
 
-	// Bridge navigation
-	content.WriteString(m.styles.Subtitle.Render("Bridges:"))
-	content.WriteString("\n")
-	content.WriteString("  [            Previous bridge tab\n")
-	content.WriteString("  ]            Next bridge tab\n")
-	content.WriteString("\n")
+	// Tab navigation
+	if len(tabBindings) > 0 {
+		content.WriteString(m.styles.Subtitle.Render("Tabs:"))
+		content.WriteString("\n")
+		for _, b := range tabBindings {
+			content.WriteString(fmt.Sprintf("  %-12s %s\n", b.Display, b.Desc))
+		}
+		content.WriteString("\n")
+	}
 
-	// Actions
-	content.WriteString(m.styles.Subtitle.Render("Actions:"))
-	content.WriteString("\n")
-	content.WriteString("  Enter        Select / expand\n")
-	content.WriteString("  Space        Toggle on/off\n")
-	content.WriteString("  r            Rename selected item\n")
-	content.WriteString("  +/-          Brightness up/down\n")
-	content.WriteString("  o/O          Turn on/off\n")
-	content.WriteString("\n")
-
-	// UI
-	content.WriteString(m.styles.Subtitle.Render("UI:"))
-	content.WriteString("\n")
-	content.WriteString("  ?            Toggle this help\n")
-	content.WriteString("  a            Toggle activity log\n")
-	content.WriteString("  q            Quit\n")
-	content.WriteString("\n")
+	// UI controls
+	if len(uiBindings) > 0 {
+		content.WriteString(m.styles.Subtitle.Render("UI:"))
+		content.WriteString("\n")
+		for _, b := range uiBindings {
+			content.WriteString(fmt.Sprintf("  %-12s %s\n", b.Display, b.Desc))
+		}
+		content.WriteString("\n")
+	}
 
 	// Footer
 	content.WriteString(m.styles.Dimmed.Render("Press Esc or ? to close"))
 	content.WriteString("\n")
 
 	return content.String()
+}
+
+// contains checks if a slice contains a string.
+func contains(slice []string, str string) bool {
+	for _, s := range slice {
+		if s == str {
+			return true
+		}
+	}
+	return false
 }
 
 // buildRenameContent builds the content for the rename input view.
