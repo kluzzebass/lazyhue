@@ -141,6 +141,43 @@ func (m *Model) buildRenameContent() string {
 	return content.String()
 }
 
+// buildDeleteConfirmationContent builds the bridge deletion confirmation dialog.
+func (m *Model) buildDeleteConfirmationContent() string {
+	var content strings.Builder
+
+	// Header with warning color
+	warningStyle := lipgloss.NewStyle().Foreground(m.styles.Theme.Error).Bold(true)
+	content.WriteString(warningStyle.Render("Delete Bridge"))
+	content.WriteString("\n\n")
+
+	// Bridge name and ID
+	content.WriteString(fmt.Sprintf("  Bridge: %s\n", m.styles.Highlight.Render(m.deleteBridgeName)))
+	content.WriteString(fmt.Sprintf("      ID: %s\n\n", m.styles.Dimmed.Render(m.deleteBridgeID)))
+
+	// Warning message
+	content.WriteString(m.styles.Dimmed.Render("  This will remove the bridge and its credentials."))
+	content.WriteString("\n")
+	content.WriteString(m.styles.Dimmed.Render("  You will need to re-pair to use this bridge again."))
+	content.WriteString("\n\n")
+
+	// Confirmation prompt
+	content.WriteString("  ")
+	content.WriteString(warningStyle.Render("Delete this bridge?"))
+	content.WriteString("\n\n")
+
+	// Instructions
+	yesStyle := lipgloss.NewStyle().Foreground(m.styles.Theme.Error).Bold(true)
+	noStyle := lipgloss.NewStyle().Foreground(m.styles.Theme.Success).Bold(true)
+	content.WriteString("  ")
+	content.WriteString(yesStyle.Render("Y"))
+	content.WriteString(" = Yes    ")
+	content.WriteString(noStyle.Render("N"))
+	content.WriteString(" = No (Esc)")
+	content.WriteString("\n")
+
+	return content.String()
+}
+
 // updateLogContent updates the log viewport content from activities.
 func (m *Model) updateLogContent() {
 	var content strings.Builder
@@ -167,6 +204,12 @@ func (m *Model) updateDetailContent() {
 	// If showing help, display help content
 	if m.showHelp {
 		m.detailViewport.SetContent(m.buildHelpContent())
+		return
+	}
+
+	// If showing delete confirmation, display confirmation dialog
+	if m.confirmingDelete {
+		m.detailViewport.SetContent(m.buildDeleteConfirmationContent())
 		return
 	}
 

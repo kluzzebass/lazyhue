@@ -61,12 +61,11 @@ type Model struct {
 	panelOrder []string // Panel IDs in focus-cycle order
 
 	// State
-	width            int
-	height           int
-	focusedPane      string
-	previousPane     string // Track previous panel for Escape key
-	activeBridgeID   string
-	status           string
+	width        int
+	height       int
+	focusedPane  string
+	previousPane string // Track previous panel for Escape key
+	status       string
 	activities       []Activity
 	quitting         bool
 	eventChan        chan bridgeEventMsg
@@ -86,6 +85,11 @@ type Model struct {
 	renameEntityID     string               // ID of entity being renamed
 	renameBridgeID     string               // Bridge ID the entity belongs to
 	renameOriginalName string               // Original name for cancel
+
+	// Delete confirmation state
+	confirmingDelete bool   // Whether we're showing delete confirmation
+	deleteBridgeID   string // ID of bridge to delete
+	deleteBridgeName string // Name of bridge to delete (for display)
 
 	// Help display
 	showHelp bool // Whether help is displayed in detail panel
@@ -280,25 +284,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			cmds = append(cmds, m.listenForErrors())
 		}
 
-		// If this is the first connected bridge, make it active
-		// Prefer the last selected bridge from saved state
-		if m.activeBridgeID == "" {
-			// Check if we have a saved LastSelectedBridgeID and this bridge matches
-			if m.uiState.LastSelectedBridgeID != "" && msg.bridgeID == m.uiState.LastSelectedBridgeID {
-				m.activeBridgeID = msg.bridgeID
-				m.manager.SetActiveBridge(msg.bridgeID)
-				m.status = "Syncing state..."
-			} else if m.uiState.LastSelectedBridgeID == "" {
-				// No saved bridge, use first one that connects
-				m.activeBridgeID = msg.bridgeID
-				m.manager.SetActiveBridge(msg.bridgeID)
-				m.status = "Syncing state..."
-			}
-			// If LastSelectedBridgeID is set but doesn't match this bridge,
-			// wait for that bridge to connect
-		}
-
 		// Sync state for this bridge and rebuild tree
+		m.status = "Syncing state..."
 		cmds = append(cmds, m.syncBridgeState(msg.bridgeID))
 		m.rebuildTreeForActiveTab()
 		return m, tea.Batch(cmds...)
@@ -318,12 +305,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			go m.startSSEListener(ctx, bridge)
 			cmds = append(cmds, m.listenForEvents())
 
-			// If this is the active bridge, rebuild tree and restore state
-			if msg.bridgeID == m.activeBridgeID {
-				m.status = "Ready"
-				m.rebuildTreeForActiveTab()
-				// Restore UI state after bridge state has loaded
-				m.restoreState(msg.bridgeID)
+			// Rebuild tree and restore state after bridge state has loaded
+			m.status = "Ready"
+			m.rebuildTreeForActiveTab()
+			// Restore UI state (only once, when first bridge connects)
+			if len(m.manager.ConnectedBridges()) == 1 {
+				m.restoreState()
 			}
 		}
 
@@ -512,6 +499,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.tree.PrevTab()
 			m.rebuildTreeForActiveTab()
 			m.saveState() // Persist tab change
+			return m, nil
+
+		case key.Matches(msg, key.NewBinding(key.WithKeys("x"))):
+			// Delete bridge - show confirmation
+			if cmd := m.startBridgeDeleteConfirmation(); cmd != nil {
+				return m, cmd
+			}
 			return m, nil
 
 		case key.Matches(msg, m.keys.NextPanel):
@@ -721,7 +715,26 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 	case PanelDetail:
-		// Handle rename mode first - all keys go to rename input
+		// Handle delete confirmation mode first
+		if m.confirmingDelete {
+			if keyMsg, ok := msg.(tea.KeyMsg); ok {
+				switch keyMsg.String() {
+				case "y", "Y":
+					// Confirm deletion
+					cmd := m.confirmBridgeDelete()
+					m.updateDetailContent()
+					return m, cmd
+				case "n", "N", "esc":
+					// Cancel deletion
+					m.cancelBridgeDelete()
+					m.updateDetailContent()
+					return m, nil
+				}
+			}
+			return m, nil
+		}
+
+		// Handle rename mode - all keys go to rename input
 		if m.renaming {
 			if keyMsg, ok := msg.(tea.KeyMsg); ok {
 				switch keyMsg.String() {
@@ -1017,28 +1030,20 @@ func (m *Model) getPanelKey(panelID string) string {
 
 // rebuildTreeForActiveTab rebuilds the tree for the active tab, showing all bridges.
 func (m *Model) rebuildTreeForActiveTab() {
-	// This is now handled by buildHomeTree which shows all bridges
-	if m.tree.ActiveTabID() == "home" {
-		m.buildHomeTree(nil) // Pass nil to build for all bridges
-	} else {
-		// For lights/scenes tabs, still use active bridge for now
-		bridge := m.manager.GetBridge(m.activeBridgeID)
-		if bridge == nil {
-			return
-		}
-		state := bridge.GetState()
-		tabID := m.tree.ActiveTabID()
+	// All tree builders now show entities from all bridges
+	tabID := m.tree.ActiveTabID()
 
-		switch tabID {
-		case "lights":
-			m.buildLightsTree(state)
-		case "devices":
-			m.buildDevicesTree(state)
-		case "scenes":
-			m.buildScenesTree(state)
-		default:
-			m.buildHomeTree(nil)
-		}
+	switch tabID {
+	case "home":
+		m.buildHomeTree(nil)
+	case "lights":
+		m.buildLightsTree(nil)
+	case "devices":
+		m.buildDevicesTree(nil)
+	case "scenes":
+		m.buildScenesTree(nil)
+	default:
+		m.buildHomeTree(nil)
 	}
 }
 
@@ -1147,12 +1152,8 @@ func (m *Model) startRenameMode() tea.Cmd {
 
 // findBridgeForEntity finds the bridge ID that owns the given entity.
 func (m *Model) findBridgeForEntity(item *panels.EntityItem) string {
-	// Use the bridge ID stored in the entity item
-	if item.BridgeID != "" {
-		return item.BridgeID
-	}
-	// Fallback to active bridge if no bridge ID is stored (shouldn't happen)
-	return m.activeBridgeID
+	// Return the bridge ID stored in the entity item
+	return item.BridgeID
 }
 
 // cancelRename cancels rename mode and restores state.
@@ -1219,6 +1220,88 @@ func (m *Model) confirmRename() tea.Cmd {
 	m.renameBridgeID = ""
 	m.renameOriginalName = ""
 	m.renameInput.Blur()
+
+	return nil
+}
+
+// startBridgeDeleteConfirmation initiates bridge deletion confirmation.
+func (m *Model) startBridgeDeleteConfirmation() tea.Cmd {
+	// Get the selected item from tree - must be a bridge
+	item := m.tree.SelectedItem()
+	if item == nil || item.Type != panels.EntityBridge {
+		m.status = "No bridge selected"
+		return nil
+	}
+
+	bridgeID := item.ID
+	bridge := m.manager.GetBridge(bridgeID)
+	if bridge == nil {
+		m.status = "Bridge not found"
+		return nil
+	}
+
+	// Set confirmation state
+	m.confirmingDelete = true
+	m.deleteBridgeID = bridgeID
+	m.deleteBridgeName = bridge.Info.Name
+
+	// Switch to detail panel to show confirmation
+	m.previousPane = m.focusedPane
+	m.focusedPane = PanelDetail
+
+	m.status = "Confirm bridge deletion..."
+
+	// Update UI to show confirmation dialog
+	m.updateDetailContent()
+
+	return nil
+}
+
+// cancelBridgeDelete cancels the bridge deletion.
+func (m *Model) cancelBridgeDelete() {
+	m.confirmingDelete = false
+	m.deleteBridgeID = ""
+	m.deleteBridgeName = ""
+	m.status = "Bridge deletion cancelled"
+}
+
+// confirmBridgeDelete performs the actual bridge deletion.
+func (m *Model) confirmBridgeDelete() tea.Cmd {
+	if m.deleteBridgeID == "" {
+		m.status = "No bridge to delete"
+		m.confirmingDelete = false
+		return nil
+	}
+
+	// Remove the bridge from the manager (also removes credentials)
+	if !m.manager.RemoveBridge(m.deleteBridgeID) {
+		m.status = "Failed to remove bridge"
+		m.confirmingDelete = false
+		return nil
+	}
+
+	// Save credentials after deletion
+	if err := m.credentials.Save(); err != nil {
+		m.status = fmt.Sprintf("Bridge removed but failed to save credentials: %v", err)
+	} else {
+		m.status = fmt.Sprintf("Bridge \"%s\" deleted", m.deleteBridgeName)
+	}
+
+	// Clear confirmation state
+	bridgeName := m.deleteBridgeName
+	m.confirmingDelete = false
+	m.deleteBridgeID = ""
+	m.deleteBridgeName = ""
+
+	// Rebuild tree to reflect deletion
+	m.rebuildTreeForActiveTab()
+
+	// Log the deletion
+	m.activities = append(m.activities, &RequestActivity{
+		timestamp: time.Now(),
+		message:   fmt.Sprintf("Bridge \"%s\" deleted", bridgeName),
+	})
+	m.updateLogContent()
 
 	return nil
 }

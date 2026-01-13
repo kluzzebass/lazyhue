@@ -9,10 +9,9 @@ import (
 
 // Manager coordinates multiple bridge connections.
 type Manager struct {
-	bridges      map[string]*Bridge
-	activeBridge string
-	credentials  *config.CredentialStore
-	mu           sync.RWMutex
+	bridges     map[string]*Bridge
+	credentials *config.CredentialStore
+	mu          sync.RWMutex
 }
 
 // NewManager creates a bridge manager with the given credentials.
@@ -31,10 +30,6 @@ func (m *Manager) AddBridge(info BridgeInfo) *Bridge {
 	bridge := NewBridge(info)
 	m.bridges[info.ID] = bridge
 
-	if m.activeBridge == "" {
-		m.activeBridge = info.ID
-	}
-
 	return bridge
 }
 
@@ -43,32 +38,6 @@ func (m *Manager) GetBridge(id string) *Bridge {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	return m.bridges[id]
-}
-
-// GetActiveBridge returns the currently active bridge.
-func (m *Manager) GetActiveBridge() *Bridge {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-	return m.bridges[m.activeBridge]
-}
-
-// SetActiveBridge changes the active bridge.
-func (m *Manager) SetActiveBridge(id string) bool {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	if _, ok := m.bridges[id]; ok {
-		m.activeBridge = id
-		return true
-	}
-	return false
-}
-
-// GetActiveBridgeID returns the ID of the active bridge.
-func (m *Manager) GetActiveBridgeID() string {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-	return m.activeBridge
 }
 
 // AllBridges returns all managed bridges.
@@ -155,47 +124,29 @@ func (m *Manager) BridgeCount() int {
 	return len(m.bridges)
 }
 
-// NextBridge cycles to the next bridge.
-func (m *Manager) NextBridge() {
+// RemoveBridge removes a bridge from the manager and its credentials.
+// Returns true if the bridge was found and removed.
+func (m *Manager) RemoveBridge(id string) bool {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	ids := make([]string, 0, len(m.bridges))
-	for id := range m.bridges {
-		ids = append(ids, id)
+	// Check if bridge exists
+	bridge, exists := m.bridges[id]
+	if !exists {
+		return false
 	}
 
-	if len(ids) <= 1 {
-		return
+	// Disconnect the bridge if it's connected
+	if bridge.IsConnected() {
+		bridge.Disconnect()
 	}
 
-	for i, id := range ids {
-		if id == m.activeBridge {
-			m.activeBridge = ids[(i+1)%len(ids)]
-			return
-		}
-	}
-}
+	// Remove from bridges map
+	delete(m.bridges, id)
 
-// PrevBridge cycles to the previous bridge.
-func (m *Manager) PrevBridge() {
-	m.mu.Lock()
-	defer m.mu.Unlock()
+	// Remove credentials
+	m.credentials.Delete(id)
 
-	ids := make([]string, 0, len(m.bridges))
-	for id := range m.bridges {
-		ids = append(ids, id)
-	}
-
-	if len(ids) <= 1 {
-		return
-	}
-
-	for i, id := range ids {
-		if id == m.activeBridge {
-			m.activeBridge = ids[(i-1+len(ids))%len(ids)]
-			return
-		}
-	}
+	return true
 }
 
