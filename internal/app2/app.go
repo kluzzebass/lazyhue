@@ -564,18 +564,24 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// Pass events to focused panel
 	switch m.focusedPane {
 	case PanelTree:
-		// Handle Enter key to navigate to details panel
+		// Handle Enter key to navigate to details panel or expand/collapse
 		if keyMsg, ok := msg.(tea.KeyMsg); ok {
 			if keyMsg.String() == "enter" {
 				node := m.tree.SelectedNode()
 				if node != nil && node.Item != nil {
-					// Navigate to details panel
-					m.previousPane = PanelTree
-					m.focusedPane = PanelDetail
-					m.updateDetailContent()
-					return m, nil
+					// Rooms should expand/collapse like other grouping items
+					// User can use Tab to navigate to detail panel if needed
+					if node.Item.Type == panels.EntityRoom {
+						// Let tree handle it (toggle expand)
+					} else {
+						// Navigate to details panel for other entity types
+						m.previousPane = PanelTree
+						m.focusedPane = PanelDetail
+						m.updateDetailContent()
+						return m, nil
+					}
 				}
-				// If no item, let tree handle it (toggle expand)
+				// If no item or room, let tree handle it (toggle expand)
 			}
 		}
 
@@ -587,10 +593,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if node != nil && node.Item != nil && node.ID == m.lastTreeClickID {
 					elapsed := time.Since(m.lastTreeClick)
 					if elapsed < 500*time.Millisecond {
-						// Double-click detected - navigate to details
-						m.previousPane = PanelTree
-						m.focusedPane = PanelDetail
-						m.updateDetailContent()
+						// Double-click detected
+						// Rooms should expand/collapse, not navigate to details
+						if node.Item.Type != panels.EntityRoom {
+							// Navigate to details for non-room entities
+							m.previousPane = PanelTree
+							m.focusedPane = PanelDetail
+							m.updateDetailContent()
+						}
 						m.lastTreeClickID = "" // Reset to prevent triple-click navigation
 						return m, nil
 					}
