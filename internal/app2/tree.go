@@ -7,6 +7,7 @@ import (
 
 	"github.com/kluzzebass/lazyhue/internal/hue"
 	"github.com/kluzzebass/lazyhue/internal/hueclient"
+	"github.com/kluzzebass/lazyhue/internal/ui2"
 	"github.com/kluzzebass/lazyhue/internal/ui2/panels"
 )
 
@@ -42,11 +43,12 @@ func (m *Model) buildHomeTree(_ *hue.BridgeState) {
 			Depth:    0,
 			Expanded: true, // Start expanded
 			Item: &panels.EntityItem{
-				ID:     bridge.Info.ID,
-				Name:   bridgeName,
-				Type:   panels.EntityBridge,
-				IsOn:   bridge.IsConnected(), // Use connection status for IsOn
-				RawPtr: bridge,
+				ID:       bridge.Info.ID,
+				Name:     bridgeName,
+				Type:     panels.EntityBridge,
+				IsOn:     bridge.IsConnected(), // Use connection status for IsOn
+				RawPtr:   bridge,
+				BridgeID: bridge.Info.ID,
 				Brightness: func() float64 {
 					if isBlinking {
 						return 100.0 // Full brightness when blinking
@@ -62,7 +64,7 @@ func (m *Model) buildHomeTree(_ *hue.BridgeState) {
 			state := bridge.GetState()
 			if state != nil {
 				// Build rooms, zones, and entertainment areas as children
-				m.buildBridgeChildren(bridgeNode, state)
+				m.buildBridgeChildren(bridgeNode, state, bridge.Info.ID)
 			}
 		}
 
@@ -73,7 +75,7 @@ func (m *Model) buildHomeTree(_ *hue.BridgeState) {
 }
 
 // buildBridgeChildren adds Rooms, Zones, and Entertainment Areas as children to a bridge node.
-func (m *Model) buildBridgeChildren(bridgeNode *panels.TreeNode, state *hue.BridgeState) {
+func (m *Model) buildBridgeChildren(bridgeNode *panels.TreeNode, state *hue.BridgeState, bridgeID string) {
 	// Rooms category
 	rooms := state.AllRooms()
 	if len(rooms) > 0 {
@@ -115,6 +117,7 @@ func (m *Model) buildBridgeChildren(bridgeNode *panels.TreeNode, state *hue.Brid
 					Brightness:     brightness,
 					IndicatorColor: indicatorColor,
 					RawPtr:         room,
+					BridgeID:       bridgeID,
 				},
 				Children: make([]*panels.TreeNode, 0),
 			}
@@ -164,6 +167,7 @@ func (m *Model) buildBridgeChildren(bridgeNode *panels.TreeNode, state *hue.Brid
 					}
 					lightName := state.GetLightName(light)
 					isOn := light.On != nil && light.On.On != nil && *light.On.On
+					brightness, indicatorColor := getLightBrightnessAndColor(light)
 					// Store a copy of the light in RawPtr for later access
 					lightCopy := light
 					lightsNode.Children = append(lightsNode.Children, &panels.TreeNode{
@@ -171,11 +175,14 @@ func (m *Model) buildBridgeChildren(bridgeNode *panels.TreeNode, state *hue.Brid
 						Label: lightName,
 						Depth: 4,
 						Item: &panels.EntityItem{
-							ID:     lightID,
-							Name:   lightName,
-							Type:   panels.EntityLight,
-							IsOn:   isOn,
-							RawPtr: lightCopy,
+							ID:             lightID,
+							Name:           lightName,
+							Type:           panels.EntityLight,
+							IsOn:           isOn,
+							Brightness:     brightness,
+							IndicatorColor: indicatorColor,
+							RawPtr:         lightCopy,
+							BridgeID:       bridgeID,
 						},
 					})
 				}
@@ -205,10 +212,11 @@ func (m *Model) buildBridgeChildren(bridgeNode *panels.TreeNode, state *hue.Brid
 						Label: deviceName,
 						Depth: 4,
 						Item: &panels.EntityItem{
-							ID:   deviceID,
-							Name: deviceName,
-							Type: panels.EntityDevice,
-							IsOn: isOn,
+							ID:       deviceID,
+							Name:     deviceName,
+							Type:     panels.EntityDevice,
+							IsOn:     isOn,
+							BridgeID: bridgeID,
 						},
 					})
 				}
@@ -235,9 +243,10 @@ func (m *Model) buildBridgeChildren(bridgeNode *panels.TreeNode, state *hue.Brid
 						Label: sceneName,
 						Depth: 4,
 						Item: &panels.EntityItem{
-							ID:   sceneID,
-							Name: sceneName,
-							Type: panels.EntityScene,
+							ID:       sceneID,
+							Name:     sceneName,
+							Type:     panels.EntityScene,
+							BridgeID: bridgeID,
 						},
 					})
 				}
@@ -290,6 +299,7 @@ func (m *Model) buildBridgeChildren(bridgeNode *panels.TreeNode, state *hue.Brid
 					Brightness:     brightness,
 					IndicatorColor: indicatorColor,
 					RawPtr:         zone,
+					BridgeID:       bridgeID,
 				},
 				Children: make([]*panels.TreeNode, 0),
 			}
@@ -305,6 +315,7 @@ func (m *Model) buildBridgeChildren(bridgeNode *panels.TreeNode, state *hue.Brid
 									light, lightFound := state.GetLight(*svc.Rid)
 									if lightFound {
 										isOn := light.On != nil && light.On.On != nil && *light.On.On
+										brightness, indicatorColor := getLightBrightnessAndColor(light)
 										// Store a copy of the light in RawPtr for later access
 										lightCopy := light
 										zoneNode.Children = append(zoneNode.Children, &panels.TreeNode{
@@ -312,11 +323,14 @@ func (m *Model) buildBridgeChildren(bridgeNode *panels.TreeNode, state *hue.Brid
 											Label: *device.Metadata.Name,
 											Depth: 3,
 											Item: &panels.EntityItem{
-												ID:     *svc.Rid,
-												Name:   *device.Metadata.Name,
-												Type:   panels.EntityLight,
-												IsOn:   isOn,
-												RawPtr: lightCopy,
+												ID:             *svc.Rid,
+												Name:           *device.Metadata.Name,
+												Type:           panels.EntityLight,
+												IsOn:           isOn,
+												Brightness:     brightness,
+												IndicatorColor: indicatorColor,
+												RawPtr:         lightCopy,
+												BridgeID:       bridgeID,
 											},
 										})
 									}
@@ -352,9 +366,10 @@ func (m *Model) buildBridgeChildren(bridgeNode *panels.TreeNode, state *hue.Brid
 				Depth:    2,
 				Expanded: false,
 				Item: &panels.EntityItem{
-					ID:   ent.ID,
-					Name: name,
-					Type: panels.EntityEntertainment,
+					ID:       ent.ID,
+					Name:     name,
+					Type:     panels.EntityEntertainment,
+					BridgeID: bridgeID,
 				},
 				Children: make([]*panels.TreeNode, 0),
 			}
@@ -384,6 +399,7 @@ func (m *Model) buildBridgeChildren(bridgeNode *panels.TreeNode, state *hue.Brid
 							}
 						}
 
+						brightness, indicatorColor := getLightBrightnessAndColor(light)
 						// Store a copy of the light in RawPtr for later access
 						lightCopy := light
 						entItemNode.Children = append(entItemNode.Children, &panels.TreeNode{
@@ -391,11 +407,14 @@ func (m *Model) buildBridgeChildren(bridgeNode *panels.TreeNode, state *hue.Brid
 							Label: lightName,
 							Depth: 3,
 							Item: &panels.EntityItem{
-								ID:     lightEntry.Service.RID,
-								Name:   lightName,
-								Type:   panels.EntityLight,
-								IsOn:   isOn,
-								RawPtr: lightCopy,
+								ID:             lightEntry.Service.RID,
+								Name:           lightName,
+								Type:           panels.EntityLight,
+								IsOn:           isOn,
+								Brightness:     brightness,
+								IndicatorColor: indicatorColor,
+								RawPtr:         lightCopy,
+								BridgeID:       bridgeID,
 							},
 						})
 					}
@@ -408,133 +427,178 @@ func (m *Model) buildBridgeChildren(bridgeNode *panels.TreeNode, state *hue.Brid
 	}
 }
 
-// buildLightsTree builds the tree panel showing all Lights.
-func (m *Model) buildLightsTree(state *hue.BridgeState) {
-	if state == nil {
-		return
-	}
-
+// buildLightsTree builds the tree panel showing all Lights from all bridges.
+func (m *Model) buildLightsTree(_ *hue.BridgeState) {
+	allBridges := m.manager.AllBridges()
 	var nodes []*panels.TreeNode
 
-	lights := state.AllLights()
-	for _, light := range lights {
-		name := "Unknown"
-		if light.Metadata != nil && light.Metadata.Name != nil {
-			name = *light.Metadata.Name
+	for _, bridge := range allBridges {
+		if !bridge.IsConnected() {
+			continue
 		}
-		isOn := light.On != nil && light.On.On != nil && *light.On.On
+		state := bridge.GetState()
+		if state == nil {
+			continue
+		}
 
-		// Store a copy of the light in RawPtr for later access
-		lightCopy := light
-		nodes = append(nodes, &panels.TreeNode{
-			ID:    *light.Id,
-			Label: name,
-			Depth: 0,
-			Item: &panels.EntityItem{
-				ID:     *light.Id,
-				Name:   name,
-				Type:   panels.EntityLight,
-				IsOn:   isOn,
-				RawPtr: lightCopy,
-			},
-		})
+		lights := state.AllLights()
+		for _, light := range lights {
+			name := "Unknown"
+			if light.Metadata != nil && light.Metadata.Name != nil {
+				name = *light.Metadata.Name
+			}
+			isOn := light.On != nil && light.On.On != nil && *light.On.On
+			brightness, indicatorColor := getLightBrightnessAndColor(light)
+
+			// Store a copy of the light in RawPtr for later access
+			lightCopy := light
+			nodes = append(nodes, &panels.TreeNode{
+				ID:    *light.Id,
+				Label: name,
+				Depth: 0,
+				Item: &panels.EntityItem{
+					ID:             *light.Id,
+					Name:           name,
+					Type:           panels.EntityLight,
+					IsOn:           isOn,
+					Brightness:     brightness,
+					IndicatorColor: indicatorColor,
+					RawPtr:         lightCopy,
+					BridgeID:       bridge.Info.ID,
+				},
+			})
+		}
 	}
 
 	m.tree.SetRoots(nodes)
 }
 
-// buildDevicesTree builds the tree panel showing all Devices.
-func (m *Model) buildDevicesTree(state *hue.BridgeState) {
-	if state == nil {
-		return
-	}
-
+// buildDevicesTree builds the tree panel showing all Devices from all bridges.
+func (m *Model) buildDevicesTree(_ *hue.BridgeState) {
+	allBridges := m.manager.AllBridges()
 	var nodes []*panels.TreeNode
 
-	devices := state.AllDevices()
-
-	// Build a set of device IDs that own lights (to exclude them)
-	lightOwnerIDs := make(map[string]bool)
-	for _, light := range state.AllLights() {
-		if light.Owner != nil && light.Owner.Rid != nil {
-			lightOwnerIDs[*light.Owner.Rid] = true
+	for _, bridge := range allBridges {
+		if !bridge.IsConnected() {
+			continue
 		}
-	}
-
-	for _, device := range devices {
-		id := ""
-		if device.Id != nil {
-			id = *device.Id
-		}
-
-		// Skip devices that own lights (these are light fixtures)
-		if lightOwnerIDs[id] {
+		state := bridge.GetState()
+		if state == nil {
 			continue
 		}
 
-		// Skip bridge devices (check if device provides a "bridge" service)
-		isBridge := false
-		if device.Services != nil {
-			for _, svc := range *device.Services {
-				if svc.Rtype != nil && *svc.Rtype == "bridge" {
-					isBridge = true
-					break
-				}
+		devices := state.AllDevices()
+
+		// Build a set of device IDs that own lights (to exclude them)
+		lightOwnerIDs := make(map[string]bool)
+		for _, light := range state.AllLights() {
+			if light.Owner != nil && light.Owner.Rid != nil {
+				lightOwnerIDs[*light.Owner.Rid] = true
 			}
 		}
-		if isBridge {
-			continue
+
+		for _, device := range devices {
+			id := ""
+			if device.Id != nil {
+				id = *device.Id
+			}
+
+			// Skip devices that own lights (these are light fixtures)
+			if lightOwnerIDs[id] {
+				continue
+			}
+
+			// Skip bridge devices (check if device provides a "bridge" service)
+			isBridgeDevice := false
+			if device.Services != nil {
+				for _, svc := range *device.Services {
+					if svc.Rtype != nil && *svc.Rtype == "bridge" {
+						isBridgeDevice = true
+						break
+					}
+				}
+			}
+			if isBridgeDevice {
+				continue
+			}
+
+			name := device.DeviceName("")
+
+			// Check if device has motion sensor and its state
+			hasMotion, isDetecting := state.GetDeviceMotionState(device)
+			isOn := hasMotion && isDetecting
+
+			nodes = append(nodes, &panels.TreeNode{
+				ID:    id,
+				Label: name,
+				Depth: 0,
+				Item: &panels.EntityItem{
+					ID:       id,
+					Name:     name,
+					Type:     panels.EntityDevice,
+					IsOn:     isOn,
+					BridgeID: bridge.Info.ID,
+				},
+			})
 		}
-
-		name := device.DeviceName("")
-
-		// Check if device has motion sensor and its state
-		hasMotion, isDetecting := state.GetDeviceMotionState(device)
-		isOn := hasMotion && isDetecting
-
-		nodes = append(nodes, &panels.TreeNode{
-			ID:    id,
-			Label: name,
-			Depth: 0,
-			Item: &panels.EntityItem{
-				ID:   id,
-				Name: name,
-				Type: panels.EntityDevice,
-				IsOn: isOn,
-			},
-		})
 	}
 
 	m.tree.SetRoots(nodes)
 }
 
-// buildScenesTree builds the tree panel showing all Scenes.
-func (m *Model) buildScenesTree(state *hue.BridgeState) {
-	if state == nil {
-		return
-	}
-
+// buildScenesTree builds the tree panel showing all Scenes from all bridges.
+func (m *Model) buildScenesTree(_ *hue.BridgeState) {
+	allBridges := m.manager.AllBridges()
 	var nodes []*panels.TreeNode
 
-	scenes := state.AllScenes()
-	for _, scene := range scenes {
-		name := scene.SceneName("")
-		id := ""
-		if scene.Id != nil {
-			id = *scene.Id
+	for _, bridge := range allBridges {
+		if !bridge.IsConnected() {
+			continue
+		}
+		state := bridge.GetState()
+		if state == nil {
+			continue
 		}
 
-		nodes = append(nodes, &panels.TreeNode{
-			ID:    id,
-			Label: name,
-			Depth: 0,
-			Item: &panels.EntityItem{
-				ID:   id,
-				Name: name,
-				Type: panels.EntityScene,
-			},
-		})
+		scenes := state.AllScenes()
+		for _, scene := range scenes {
+			name := scene.SceneName("")
+			id := ""
+			if scene.Id != nil {
+				id = *scene.Id
+			}
+
+			nodes = append(nodes, &panels.TreeNode{
+				ID:    id,
+				Label: name,
+				Depth: 0,
+				Item: &panels.EntityItem{
+					ID:       id,
+					Name:     name,
+					Type:     panels.EntityScene,
+					BridgeID: bridge.Info.ID,
+				},
+			})
+		}
 	}
 
 	m.tree.SetRoots(nodes)
+}
+
+// getLightBrightnessAndColor extracts brightness and color from a light.
+func getLightBrightnessAndColor(light hueclient.LightGet) (float64, string) {
+	brightness := 0.0
+	indicatorColor := ""
+
+	isOn := light.On != nil && light.On.On != nil && *light.On.On
+	if isOn {
+		if light.Dimming != nil && light.Dimming.Brightness != nil {
+			brightness = float64(*light.Dimming.Brightness)
+		} else {
+			brightness = 100.0 // Default to full brightness if on but no dimming
+		}
+		indicatorColor = ui2.GetLightColor(light)
+	}
+
+	return brightness, indicatorColor
 }

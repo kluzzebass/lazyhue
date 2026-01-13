@@ -1,8 +1,11 @@
 package app2
 
 import (
+	"encoding/json"
 	"fmt"
+	"os"
 	"strings"
+	"time"
 
 	"image/color"
 
@@ -13,6 +16,108 @@ import (
 	"github.com/kluzzebass/lazyhue/internal/ui2/components"
 	"github.com/kluzzebass/lazyhue/internal/ui2/panels"
 )
+
+// #region agent log
+func debugLog(location, message string, data map[string]interface{}) {
+	logData := map[string]interface{}{
+		"sessionId": "debug-session",
+		"runId":     "run1",
+		"location":  location,
+		"message":   message,
+		"data":      data,
+		"timestamp": time.Now().UnixMilli(),
+	}
+	if jsonData, err := json.Marshal(logData); err == nil {
+		if f, err := os.OpenFile("/Users/kluzz/Code/lazyhue/.cursor/debug.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644); err == nil {
+			f.WriteString(string(jsonData) + "\n")
+			f.Close()
+		}
+	}
+}
+
+// #endregion
+
+// buildHelpContent builds the help content for the detail panel.
+func (m *Model) buildHelpContent() string {
+	var content strings.Builder
+
+	// Header
+	content.WriteString(m.styles.Title.Render("Keyboard Shortcuts"))
+	content.WriteString("\n\n")
+
+	// Navigation
+	content.WriteString(m.styles.Subtitle.Render("Navigation:"))
+	content.WriteString("\n")
+	content.WriteString("  ↑/k, ↓/j     Move up/down\n")
+	content.WriteString("  ←/h, →/l     Collapse/expand (tree) or prev/next tab\n")
+	content.WriteString("  PgUp/PgDn    Page up/down\n")
+	content.WriteString("  g/Home       Go to top\n")
+	content.WriteString("  G/End        Go to bottom\n")
+	content.WriteString("\n")
+
+	// Panel navigation
+	content.WriteString(m.styles.Subtitle.Render("Panels:"))
+	content.WriteString("\n")
+	content.WriteString("  Tab          Next panel\n")
+	content.WriteString("  Shift+Tab    Previous panel\n")
+	content.WriteString("  0, 1, 2      Jump to panel by number\n")
+	content.WriteString("  Esc          Back / close\n")
+	content.WriteString("\n")
+
+	// Bridge navigation
+	content.WriteString(m.styles.Subtitle.Render("Bridges:"))
+	content.WriteString("\n")
+	content.WriteString("  [            Previous bridge tab\n")
+	content.WriteString("  ]            Next bridge tab\n")
+	content.WriteString("\n")
+
+	// Actions
+	content.WriteString(m.styles.Subtitle.Render("Actions:"))
+	content.WriteString("\n")
+	content.WriteString("  Enter        Select / expand\n")
+	content.WriteString("  Space        Toggle on/off\n")
+	content.WriteString("  r            Rename selected item\n")
+	content.WriteString("  +/-          Brightness up/down\n")
+	content.WriteString("  o/O          Turn on/off\n")
+	content.WriteString("\n")
+
+	// UI
+	content.WriteString(m.styles.Subtitle.Render("UI:"))
+	content.WriteString("\n")
+	content.WriteString("  ?            Toggle this help\n")
+	content.WriteString("  a            Toggle activity log\n")
+	content.WriteString("  q            Quit\n")
+	content.WriteString("\n")
+
+	// Footer
+	content.WriteString(m.styles.Dimmed.Render("Press Esc or ? to close"))
+	content.WriteString("\n")
+
+	return content.String()
+}
+
+// buildRenameContent builds the content for the rename input view.
+func (m *Model) buildRenameContent() string {
+	var content strings.Builder
+
+	// Header
+	content.WriteString(m.styles.Subtitle.Render(fmt.Sprintf("Rename %s", m.renameEntityType.String())))
+	content.WriteString("\n\n")
+
+	// Original name
+	content.WriteString(fmt.Sprintf("  Current: %s\n\n", m.renameOriginalName))
+
+	// Text input
+	content.WriteString("  ")
+	content.WriteString(m.renameInput.View())
+	content.WriteString("\n\n")
+
+	// Instructions
+	content.WriteString(m.styles.Dimmed.Render("  Enter to save, Esc to cancel"))
+	content.WriteString("\n")
+
+	return content.String()
+}
 
 // updateLogContent updates the log viewport content from activities.
 func (m *Model) updateLogContent() {
@@ -37,16 +142,29 @@ func (m *Model) updateLogContent() {
 
 // updateDetailContent updates the detail viewport content based on the selected node.
 func (m *Model) updateDetailContent() {
+	// If showing help, display help content
+	if m.showHelp {
+		m.detailViewport.SetContent(m.buildHelpContent())
+		return
+	}
+
+	// If in rename mode, show rename input
+	if m.renaming {
+		m.detailViewport.SetContent(m.buildRenameContent())
+		return
+	}
+
 	node := m.tree.SelectedNode()
 	if node == nil || node.Item == nil {
 		m.detailViewport.SetContent("No selection")
 		return
 	}
 
-	// Get bridge state if we have an active bridge
+	// Get bridge state from the entity's bridge (not active bridge)
 	var state *hue.BridgeState
-	if m.activeBridgeID != "" {
-		bridge := m.manager.GetBridge(m.activeBridgeID)
+	bridgeID := node.Item.BridgeID
+	if bridgeID != "" {
+		bridge := m.manager.GetBridge(bridgeID)
 		if bridge != nil {
 			state = bridge.GetState()
 		}
@@ -69,18 +187,40 @@ func (m *Model) updateDetailContent() {
 			light, ok = state.GetLight(node.Item.ID)
 		}
 		if ok {
+			// Get the actual light ID from the light object (use *light.Id, not node.Item.ID)
+			actualLightID := ""
+			if light.Id != nil {
+				actualLightID = *light.Id
+			} else {
+				// Fallback to node.Item.ID if light.Id is nil (shouldn't happen)
+				actualLightID = node.Item.ID
+			}
+
 			// Only rebuild form fields if light ID changed or form is empty
-			if m.selectedLightID != node.Item.ID || len(m.lightForm.Fields) == 0 {
+			if m.selectedLightID != actualLightID || len(m.lightForm.Fields) == 0 {
 				fields := m.buildLightFormFields(light)
 				m.lightForm.SetFields(fields)
-				m.selectedLightID = node.Item.ID
+				m.selectedLightID = actualLightID
+				// Capture bridgeID for callback closure
+				callbackBridgeID := bridgeID
 				// Set onChange callback
+				// #region agent log
+				debugLog("rendering.go:78", "setting OnChange callback", map[string]interface{}{
+					"nodeItemID": node.Item.ID, "actualLightID": actualLightID, "bridgeID": bridgeID, "lightId": func() string {
+						if light.Id != nil {
+							return *light.Id
+						}
+						return "nil"
+					}(),
+					"hypothesisId": "F",
+				})
+				// #endregion
 				m.lightForm.OnChange = func(field components.FormField) {
-					m.handleLightFieldChange(field, node.Item.ID)
+					m.handleLightFieldChange(field, actualLightID, callbackBridgeID)
 				}
-			} else if !m.lightForm.Editing {
-				// Light ID unchanged and not editing - sync form fields from state
-				// This prevents overwriting user input during color wheel adjustments
+			} else if !m.lightForm.Editing && m.lightForm.MouseCaptureIdx < 0 {
+				// Light ID unchanged, not editing, and not dragging - sync form fields from state
+				// This prevents overwriting user input during color wheel adjustments and slider dragging
 				fields := m.buildLightFormFields(light)
 				// Preserve cursor position
 				oldCursor := m.lightForm.Cursor
@@ -88,14 +228,25 @@ func (m *Model) updateDetailContent() {
 				if oldCursor < len(fields) {
 					m.lightForm.Cursor = oldCursor
 				}
+				// Get the actual light ID from the light object (use *light.Id, not node.Item.ID)
+				actualLightID := ""
+				if light.Id != nil {
+					actualLightID = *light.Id
+				} else {
+					// Fallback to node.Item.ID if light.Id is nil (shouldn't happen)
+					actualLightID = node.Item.ID
+				}
+				// Capture bridgeID for callback closure
+				callbackBridgeID := bridgeID
 				// Ensure callback is set
 				m.lightForm.OnChange = func(field components.FormField) {
-					m.handleLightFieldChange(field, node.Item.ID)
+					m.handleLightFieldChange(field, actualLightID, callbackBridgeID)
 				}
 			}
 			// Add form FIRST (controls at the top for efficiency)
 			if len(m.lightForm.Fields) > 0 {
 				formContent := m.lightForm.View()
+				// Zones are marked in form content - they'll be scanned from final output
 				content.WriteString(formContent)
 				content.WriteString("\n")
 			}
@@ -120,11 +271,17 @@ func (m *Model) renderDetailPanel(width, height int, focused bool, key string) s
 		borderColor = m.styles.Theme.Accent
 	}
 
-	// Get the selected item's name for the panel title
+	// Get the panel title based on current mode
 	title := "Details"
-	node := m.tree.SelectedNode()
-	if node != nil && node.Item != nil && node.Item.Name != "" {
-		title = node.Item.Name
+	if m.showHelp {
+		title = "Help"
+	} else if m.renaming {
+		title = "Rename"
+	} else {
+		node := m.tree.SelectedNode()
+		if node != nil && node.Item != nil && node.Item.Name != "" {
+			title = node.Item.Name
+		}
 	}
 
 	topBorder := m.renderPanelHeader(width, key, title, focused, borderColor)
@@ -789,9 +946,24 @@ func (m *Model) buildLightDetails(item *panels.EntityItem, state *hue.BridgeStat
 }
 
 // handleLightFieldChange handles changes to light form fields and updates the light via bridge actions.
-func (m *Model) handleLightFieldChange(field components.FormField, lightID string) {
-	bridge := m.manager.GetBridge(m.activeBridgeID)
+func (m *Model) handleLightFieldChange(field components.FormField, lightID string, bridgeID string) {
+	// #region agent log
+	debugLog("rendering.go:793", "handleLightFieldChange entry", map[string]interface{}{
+		"fieldID": field.ID, "fieldValue": field.Value, "lightID": lightID,
+		"bridgeID":     bridgeID,
+		"hypothesisId": "F",
+	})
+	// #endregion
+
+	bridge := m.manager.GetBridge(bridgeID)
 	if bridge == nil {
+		// #region agent log
+		debugLog("rendering.go:800", "bridge is nil", map[string]interface{}{
+			"bridgeID":     bridgeID,
+			"hypothesisId": "F",
+		})
+		// #endregion
+		m.status = fmt.Sprintf("Bridge not found: %s", bridgeID)
 		return
 	}
 

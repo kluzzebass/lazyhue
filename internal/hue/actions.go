@@ -2,11 +2,32 @@ package hue
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"os"
 	"time"
 
 	"github.com/kluzzebass/lazyhue/internal/hueclient"
 )
+
+// #region agent log
+func debugLog(location, message string, data map[string]interface{}) {
+	logData := map[string]interface{}{
+		"sessionId": "debug-session",
+		"runId":     "run1",
+		"location":  location,
+		"message":   message,
+		"data":      data,
+		"timestamp": time.Now().UnixMilli(),
+	}
+	if jsonData, err := json.Marshal(logData); err == nil {
+		if f, err := os.OpenFile("/Users/kluzz/Code/lazyhue/.cursor/debug.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644); err == nil {
+			f.WriteString(string(jsonData) + "\n")
+			f.Close()
+		}
+	}
+}
+// #endregion
 
 // isLightOn checks if a light is on.
 func isLightOn(light hueclient.LightGet) bool {
@@ -75,9 +96,30 @@ func (b *Bridge) SetLightOn(lightID string, on bool) error {
 	// Optimistic update: apply to cache immediately
 	b.state.SetLightOn(lightID, on)
 
+	// Get light name for logging - try multiple approaches
 	lightName := "Unknown"
 	if light, ok := b.state.GetLight(lightID); ok {
 		lightName = b.state.GetLightName(light)
+		if lightName == "Unknown" {
+			// If GetLightName returned "Unknown", try to provide a more descriptive fallback
+			lightName = fmt.Sprintf("Light %s", lightID)
+		}
+	} else {
+		// Fallback: try to find light by searching all lights
+		allLights := b.state.AllLights()
+		for _, l := range allLights {
+			if l.Id != nil && *l.Id == lightID {
+				lightName = b.state.GetLightName(l)
+				if lightName == "Unknown" {
+					lightName = fmt.Sprintf("Light %s", lightID)
+				}
+				break
+			}
+		}
+		// If still unknown, use a descriptive format instead of raw UUID
+		if lightName == "Unknown" {
+			lightName = fmt.Sprintf("Light %s", lightID)
+		}
 	}
 	action := "on"
 	if !on {
@@ -120,8 +162,26 @@ func (b *Bridge) SetLightBrightness(lightID string, brightness float64) error {
 	}
 	
 	lightName := "Unknown"
+	lightFound := false
 	if light, ok := b.state.GetLight(lightID); ok {
 		lightName = b.state.GetLightName(light)
+		lightFound = true
+	} else {
+		// Log that light was not found in state - check what IDs are actually in state
+		allLights := b.state.AllLights()
+		lightIDs := make([]string, 0, len(allLights))
+		for _, l := range allLights {
+			if l.Id != nil {
+				lightIDs = append(lightIDs, *l.Id)
+			}
+		}
+		// #region agent log
+		debugLog("actions.go:143", "light not found in state", map[string]interface{}{
+			"lightID": lightID, "stateLightCount": len(allLights), "stateLightIDs": lightIDs,
+			"hypothesisId": "G",
+		})
+		// #endregion
+		b.logError(fmt.Sprintf("Light ID %s not found in state when setting brightness", lightID))
 	}
 	
 	br := float32(brightness)
@@ -132,6 +192,12 @@ func (b *Bridge) SetLightBrightness(lightID string, brightness float64) error {
 		
 		if client != nil {
 			b.logRequest(fmt.Sprintf("%s: brightness %.0f%%", lightName, brightness))
+			// #region agent log
+			debugLog("actions.go:156", "calling UpdateLightWithResponse", map[string]interface{}{
+				"lightID": lightID, "brightness": brightness, "lightFound": lightFound,
+				"hypothesisId": "G",
+			})
+			// #endregion
 			httpResp, err := client.UpdateLightWithResponse(context.Background(), lightID, hueclient.UpdateLightJSONRequestBody{
 				Dimming: &hueclient.Dimming{Brightness: &br},
 			})

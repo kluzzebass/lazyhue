@@ -86,6 +86,7 @@ type EntityItem struct {
 	RawPtr         any     // The underlying hueclient type for access to full data
 	IndicatorColor string  // Hex color for the indicator (e.g., "#ff0000"), empty for default
 	Brightness     float64 // Brightness level 0-100 for brightness indicator (lights, scenes)
+	BridgeID       string  // ID of the bridge this entity belongs to
 }
 
 // FilterValue returns the value used for filtering (implements list.Item).

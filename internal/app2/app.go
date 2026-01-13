@@ -9,6 +9,7 @@ import (
 
 	"github.com/charmbracelet/bubbles/v2/help"
 	"github.com/charmbracelet/bubbles/v2/key"
+	"github.com/charmbracelet/bubbles/v2/textinput"
 	"github.com/charmbracelet/bubbles/v2/viewport"
 	tea "github.com/charmbracelet/bubbletea/v2"
 	"github.com/charmbracelet/lipgloss/v2"
@@ -16,6 +17,7 @@ import (
 
 	"github.com/kluzzebass/lazyhue/internal/config"
 	"github.com/kluzzebass/lazyhue/internal/hue"
+	"github.com/kluzzebass/lazyhue/internal/hueclient"
 	"github.com/kluzzebass/lazyhue/internal/ui2"
 	"github.com/kluzzebass/lazyhue/internal/ui2/components"
 	"github.com/kluzzebass/lazyhue/internal/ui2/layout"
@@ -66,6 +68,17 @@ type Model struct {
 	selectedLightID   string               // ID of currently selected light (for form updates)
 	lastTreeClick     time.Time            // Track last tree item click for double-click detection
 	lastTreeClickID   string               // Track which tree item was last clicked
+
+	// Rename mode state
+	renaming           bool                 // Whether we're in rename mode
+	renameInput        textinput.Model      // Text input for renaming
+	renameEntityType   panels.EntityType    // Type of entity being renamed
+	renameEntityID     string               // ID of entity being renamed
+	renameBridgeID     string               // Bridge ID the entity belongs to
+	renameOriginalName string               // Original name for cancel
+
+	// Help display
+	showHelp bool // Whether help is displayed in detail panel
 }
 
 // New creates a new application model.
@@ -110,6 +123,11 @@ func New(creds *config.CredentialStore) Model {
 	)
 	layoutTree := layout.NewTree(layoutRoot)
 
+	// Initialize rename text input
+	renameInput := textinput.New()
+	renameInput.Prompt = "Name: "
+	renameInput.CharLimit = 32
+
 	return Model{
 		manager:          hue.NewManager(creds),
 		credentials:      creds,
@@ -133,6 +151,7 @@ func New(creds *config.CredentialStore) Model {
 		bridgeBlinkUntil: make(map[string]time.Time),
 		lightForm:        components.NewForm(&styles, zones),
 		selectedLightID:  "",
+		renameInput:      renameInput,
 	}
 }
 
@@ -165,7 +184,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.height = msg.Height
 
 		// Reserve space for help
-		helpHeight := 3
+		helpHeight := 1 // status line only
 		contentHeight := m.height - helpHeight
 
 		// Update layout
@@ -291,9 +310,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.Batch(cmds...)
 
 	case requestMsg:
+		bridgeName := ""
+		if msg.bridgeID != "" {
+			if bridge := m.manager.GetBridge(msg.bridgeID); bridge != nil {
+				bridgeName = bridge.Info.Name
+			}
+		}
 		m.activities = append(m.activities, &RequestActivity{
-			timestamp: time.Now(),
-			message:   msg.message,
+			timestamp:  time.Now(),
+			bridgeID:   msg.bridgeID,
+			bridgeName: bridgeName,
+			message:    msg.message,
 		})
 		m.updateLogContent()
 		// Keep listening for more requests
@@ -301,9 +328,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.Batch(cmds...)
 
 	case errorMsg:
+		bridgeName := ""
+		if msg.bridgeID != "" {
+			if bridge := m.manager.GetBridge(msg.bridgeID); bridge != nil {
+				bridgeName = bridge.Info.Name
+			}
+		}
 		m.activities = append(m.activities, &ErrorActivity{
-			timestamp: time.Now(),
-			message:   msg.message,
+			timestamp:  time.Now(),
+			bridgeID:   msg.bridgeID,
+			bridgeName: bridgeName,
+			message:    msg.message,
 		})
 		m.updateLogContent()
 		m.status = fmt.Sprintf("Error: %s", msg.message)
@@ -352,11 +387,24 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Quit
 
 		case key.Matches(msg, m.keys.Help):
-			m.help.ShowAll = !m.help.ShowAll
+			// Toggle help display in detail panel
+			m.showHelp = !m.showHelp
+			if m.showHelp {
+				m.previousPane = m.focusedPane
+				m.focusedPane = PanelDetail
+			}
+			m.updateDetailContent()
 			return m, nil
 
 		case key.Matches(msg, m.keys.TestForm):
 			m.showTestForm()
+			return m, nil
+
+		case key.Matches(msg, m.keys.Rename):
+			// Start rename mode for the selected entity
+			if cmd := m.startRenameMode(); cmd != nil {
+				return m, cmd
+			}
 			return m, nil
 
 		case key.Matches(msg, m.keys.NextBridge):
@@ -384,6 +432,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 
 		case key.Matches(msg, key.NewBinding(key.WithKeys("esc"))):
+			// Don't handle escape globally if in rename mode - let panel handle it
+			if m.renaming {
+				break
+			}
+			// Close help if showing
+			if m.showHelp {
+				m.showHelp = false
+				m.updateDetailContent()
+				return m, nil
+			}
 			// Escape returns to previous panel (or tree if already there)
 			if m.focusedPane == PanelDetail || m.focusedPane == PanelLog {
 				m.focusedPane = m.previousPane
@@ -399,13 +457,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case tea.MouseClickMsg:
 		// Handle panel focus switching on click
-		// BUT: Don't consume the message - let panel-specific handlers process it too
+		// Don't consume the message - let panel-specific handlers process it too
 		if msg.Button == tea.MouseLeft {
-			// Account for help bar at bottom (3 lines)
-			helpHeight := 3
+			// Account for help bar at bottom
+			helpHeight := 1 // status line only
 			clickY := msg.Y
 			clickX := msg.X
-			
+
 			// Check if click is in a panel (excluding help area)
 			if clickY < m.height-helpHeight {
 				// Layout uses contentHeight (height - helpHeight), so coordinates are already correct
@@ -417,13 +475,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						if m.focusedPane == PanelDetail {
 							m.updateDetailContent()
 						}
-						// Return early only if we changed focus - otherwise let form handle it
-						return m, nil
+						// Don't return - fall through so the click also performs the action
 					}
 				}
 			}
 		}
-		// If we didn't change focus, fall through to panel-specific handlers
+		// Fall through to panel-specific handlers
 	}
 
 	// Pass events to focused panel
@@ -488,6 +545,31 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 	case PanelDetail:
+		// Handle rename mode first - all keys go to rename input
+		if m.renaming {
+			if keyMsg, ok := msg.(tea.KeyMsg); ok {
+				switch keyMsg.String() {
+				case "enter":
+					// Save and exit rename mode
+					cmd := m.confirmRename()
+					m.updateDetailContent()
+					return m, cmd
+				case "esc":
+					// Cancel rename mode
+					m.cancelRename()
+					m.updateDetailContent()
+					return m, nil
+				default:
+					// Pass key to text input
+					var cmd tea.Cmd
+					m.renameInput, cmd = m.renameInput.Update(msg)
+					m.updateDetailContent()
+					return m, cmd
+				}
+			}
+			return m, nil
+		}
+
 		// Handle Escape key to return to previous panel
 		if keyMsg, ok := msg.(tea.KeyMsg); ok {
 			if keyMsg.String() == "esc" {
@@ -560,6 +642,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					}
 					oldCursor := m.lightForm.Cursor
 					oldCapture := m.lightForm.MouseCaptureIdx
+					oldDropdownOpen := m.lightForm.DropdownOpen
 
 					// Update form with mouse click - it will check zones internally
 					// If there's an active capture, this will handle dragging
@@ -572,7 +655,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					// 1. Cursor changed
 					// 2. Mouse capture started/changed
 					// 3. Field values changed (for toggles, etc.)
-					// 4. Active capture exists (user is dragging - always update during drag)
+					// 4. Dropdown state changed
+					// 5. Active capture exists (user is dragging - always update during drag)
 					fieldChanged := false
 					for i, field := range m.lightForm.Fields {
 						if oldVal, ok := oldFieldValues[i]; ok && field.Value != oldVal {
@@ -580,7 +664,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 							break
 						}
 					}
-					if m.lightForm.Cursor != oldCursor || m.lightForm.MouseCaptureIdx != oldCapture || fieldChanged {
+					dropdownChanged := m.lightForm.DropdownOpen != oldDropdownOpen
+					if m.lightForm.Cursor != oldCursor || m.lightForm.MouseCaptureIdx != oldCapture || fieldChanged || dropdownChanged {
 						formHandledMouse = true
 						m.updateDetailContent()
 						return m, tea.Batch(cmds...)
@@ -686,8 +771,17 @@ func (m Model) View() string {
 	// Compose layout
 	mainContent := lipgloss.JoinHorizontal(lipgloss.Top, leftColumn, rightColumn)
 
-	// Combine with help
-	full := lipgloss.JoinVertical(lipgloss.Left, mainContent, m.help.View(m.keys))
+	// Render status line with minimal help hint
+	statusStyle := lipgloss.NewStyle().
+		Foreground(m.styles.Theme.TextMuted).
+		PaddingLeft(1)
+	helpHint := lipgloss.NewStyle().
+		Foreground(m.styles.Theme.TextMuted).
+		Render("  ?:help  q:quit")
+	statusLine := statusStyle.Render(m.status) + helpHint
+
+	// Combine with status (no full help bar at bottom anymore)
+	full := lipgloss.JoinVertical(lipgloss.Left, mainContent, statusLine)
 
 	// Constrain to terminal size
 	result := lipgloss.Place(m.width, m.height, lipgloss.Left, lipgloss.Top, full)
@@ -731,4 +825,185 @@ func (m *Model) rebuildTreeForActiveTab() {
 			m.buildHomeTree(nil)
 		}
 	}
+}
+
+// startRenameMode initiates rename mode for the selected entity.
+func (m *Model) startRenameMode() tea.Cmd {
+	// Get the selected entity from the tree
+	item := m.tree.SelectedItem()
+	if item == nil {
+		m.status = "No entity selected"
+		return nil
+	}
+
+	// Find which bridge this entity belongs to
+	bridgeID := m.findBridgeForEntity(item)
+	if bridgeID == "" {
+		m.status = "Could not find bridge for entity"
+		return nil
+	}
+
+	// Determine what to rename based on entity type
+	renameType := item.Type
+	renameID := item.ID
+	renameName := item.Name
+
+	switch item.Type {
+	case panels.EntityDevice, panels.EntityRoom, panels.EntityZone, panels.EntityScene:
+		// These are directly renameable
+	case panels.EntityLight:
+		// Lights are renamed via their owning device - find the device
+		// Use RawPtr if available since it has the light data
+		var light hueclient.LightGet
+		var hasLight bool
+		if item.RawPtr != nil {
+			if l, ok := item.RawPtr.(hueclient.LightGet); ok {
+				light = l
+				hasLight = true
+			}
+		}
+		if !hasLight {
+			// Fallback to state lookup
+			bridge := m.manager.GetBridge(bridgeID)
+			if bridge != nil {
+				if state := bridge.GetState(); state != nil {
+					light, hasLight = state.GetLight(item.ID)
+				}
+			}
+		}
+		if !hasLight {
+			m.status = "Light not found"
+			return nil
+		}
+		if light.Owner == nil || light.Owner.Rid == nil {
+			m.status = "Light has no owning device"
+			return nil
+		}
+		deviceID := *light.Owner.Rid
+		bridge := m.manager.GetBridge(bridgeID)
+		if bridge == nil {
+			m.status = "Bridge not found"
+			return nil
+		}
+		state := bridge.GetState()
+		if state == nil {
+			m.status = "Bridge state not available"
+			return nil
+		}
+		device, ok := state.GetDevice(deviceID)
+		if !ok {
+			m.status = "Owning device not found"
+			return nil
+		}
+		// Rename the device instead
+		renameType = panels.EntityDevice
+		renameID = deviceID
+		if device.Metadata != nil && device.Metadata.Name != nil {
+			renameName = *device.Metadata.Name
+		}
+	default:
+		m.status = fmt.Sprintf("Cannot rename %s", item.Type.String())
+		return nil
+	}
+
+	// Set up rename state
+	m.renaming = true
+	m.renameEntityType = renameType
+	m.renameEntityID = renameID
+	m.renameBridgeID = bridgeID
+	m.renameOriginalName = renameName
+
+	// Initialize the text input with current name
+	m.renameInput.SetValue(renameName)
+	m.renameInput.Focus()
+	m.renameInput.CursorEnd()
+
+	// Switch to detail panel
+	m.previousPane = m.focusedPane
+	m.focusedPane = PanelDetail
+
+	m.status = fmt.Sprintf("Renaming %s...", renameType.String())
+
+	// Update the UI immediately
+	m.updateDetailContent()
+
+	return textinput.Blink
+}
+
+// findBridgeForEntity finds the bridge ID that owns the given entity.
+func (m *Model) findBridgeForEntity(item *panels.EntityItem) string {
+	// Use the bridge ID stored in the entity item
+	if item.BridgeID != "" {
+		return item.BridgeID
+	}
+	// Fallback to active bridge if no bridge ID is stored (shouldn't happen)
+	return m.activeBridgeID
+}
+
+// cancelRename cancels rename mode and restores state.
+func (m *Model) cancelRename() {
+	m.renaming = false
+	m.renameEntityID = ""
+	m.renameEntityType = 0
+	m.renameBridgeID = ""
+	m.renameOriginalName = ""
+	m.renameInput.Blur()
+	m.status = "Rename cancelled"
+}
+
+// confirmRename saves the new name and exits rename mode.
+func (m *Model) confirmRename() tea.Cmd {
+	newName := m.renameInput.Value()
+	if newName == "" {
+		m.status = "Name cannot be empty"
+		return nil
+	}
+
+	if newName == m.renameOriginalName {
+		// No change
+		m.cancelRename()
+		m.status = "No change"
+		return nil
+	}
+
+	// Get the bridge
+	bridge := m.manager.GetBridge(m.renameBridgeID)
+	if bridge == nil {
+		m.status = "Bridge not found"
+		m.cancelRename()
+		return nil
+	}
+
+	// Call the appropriate rename function
+	var err error
+	switch m.renameEntityType {
+	case panels.EntityDevice:
+		err = bridge.RenameDevice(m.renameEntityID, newName)
+	case panels.EntityRoom:
+		err = bridge.RenameRoom(m.renameEntityID, newName)
+	case panels.EntityZone:
+		err = bridge.RenameZone(m.renameEntityID, newName)
+	case panels.EntityScene:
+		err = bridge.RenameScene(m.renameEntityID, newName)
+	default:
+		m.status = fmt.Sprintf("Cannot rename %s", m.renameEntityType.String())
+		m.cancelRename()
+		return nil
+	}
+
+	if err != nil {
+		m.status = fmt.Sprintf("Rename failed: %v", err)
+	} else {
+		m.status = fmt.Sprintf("Renamed to \"%s\"", newName)
+	}
+
+	// Exit rename mode
+	m.renaming = false
+	m.renameEntityID = ""
+	m.renameEntityType = 0
+	m.renameBridgeID = ""
+	m.renameOriginalName = ""
+	m.renameInput.Blur()
+
+	return nil
 }

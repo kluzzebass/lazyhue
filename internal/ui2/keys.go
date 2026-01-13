@@ -23,11 +23,11 @@ type KeyMap struct {
 	Escape key.Binding
 
 	// Actions
-	Edit      key.Binding
-	Delete    key.Binding
-	Create    key.Binding
-	Refresh   key.Binding
-	Toggle    key.Binding
+	Edit    key.Binding
+	Delete  key.Binding
+	Create  key.Binding
+	Rename  key.Binding
+	Toggle  key.Binding
 	BrightUp  key.Binding
 	BrightDn  key.Binding
 	TurnOn    key.Binding
@@ -112,9 +112,9 @@ func DefaultKeyMap() KeyMap {
 			key.WithKeys("n"),
 			key.WithHelp("n", "new"),
 		),
-		Refresh: key.NewBinding(
+		Rename: key.NewBinding(
 			key.WithKeys("r"),
-			key.WithHelp("r", "refresh"),
+			key.WithHelp("r", "rename"),
 		),
 		Toggle: key.NewBinding(
 			key.WithKeys(" "),
@@ -187,7 +187,7 @@ func (k KeyMap) FullHelp() [][]key.Binding {
 	return [][]key.Binding{
 		{k.Up, k.Down, k.Left, k.Right},
 		{k.Enter, k.Space, k.Escape},
-		{k.Edit, k.Delete, k.Create},
+		{k.Edit, k.Delete, k.Create, k.Rename},
 		{k.NextPanel, k.PrevPanel},
 		{k.TestForm, k.ToggleLog},
 		{k.Help, k.Quit},

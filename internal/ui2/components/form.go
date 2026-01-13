@@ -100,6 +100,11 @@ func (f *Form) SetFields(fields []FormField) {
 		f.ColorWheel.PosValid = false
 	}
 
+	// Reset dropdown state - the dropdown should be closed when fields are rebuilt
+	f.DropdownOpen = false
+	f.DropdownCursor = 0
+	f.DropdownScroll = 0
+
 	// Initialize text inputs
 	for i, field := range f.Fields {
 		if field.Type == FormFieldText {
@@ -358,6 +363,32 @@ func (f *Form) handleMouseClick(msg tea.MouseClickMsg) bool {
 		return false
 	}
 
+	// If dropdown is open, check for clicks on dropdown options first
+	if f.DropdownOpen && f.Cursor < len(f.Fields) {
+		field := &f.Fields[f.Cursor]
+		if field.Type == FormFieldSelect {
+			for optIdx := range field.Options {
+				optZoneID := ui2.DropdownOptionZone(field.ID, optIdx)
+				zoneInfo := f.Zones.Get(optZoneID)
+				if zoneInfo != nil && !zoneInfo.IsZero() && zoneInfo.InBounds(msg) {
+					// Option clicked - select it and close dropdown
+					field.Value = field.Options[optIdx].Value
+					f.DropdownOpen = false
+					f.DropdownCursor = 0
+					f.DropdownScroll = 0
+					f.notifyChange(*field)
+					return true
+				}
+			}
+			// Click was inside dropdown area but not on an option - close dropdown
+			// This prevents the dropdown from staying open when clicking borders/padding
+			f.DropdownOpen = false
+			f.DropdownCursor = 0
+			f.DropdownScroll = 0
+			return true
+		}
+	}
+
 	// Check zones to find which field was clicked
 	for i := range f.Fields {
 		field := &f.Fields[i]
@@ -429,6 +460,15 @@ func (f *Form) handleFieldClick(fieldIdx int, field *FormField, msg tea.MouseCli
 			if !f.DropdownOpen {
 				f.DropdownOpen = true
 				f.DropdownScroll = 0
+				// Initialize cursor to current value
+				f.DropdownCursor = 0
+				for i, opt := range field.Options {
+					if opt.Value == field.Value {
+						f.DropdownCursor = i
+						break
+					}
+				}
+				f.ensureDropdownCursorVisible()
 			}
 
 		case FormFieldColor:
@@ -470,8 +510,12 @@ func (f *Form) handleDropdownKey(keyStr string, field *FormField) bool {
 			f.notifyChange(*field)
 		}
 		f.DropdownOpen = false
+		f.DropdownCursor = 0
+		f.DropdownScroll = 0
 	case "esc":
 		f.DropdownOpen = false
+		f.DropdownCursor = 0
+		f.DropdownScroll = 0
 	default:
 		return false
 	}
@@ -1120,7 +1164,13 @@ func (f *Form) renderSelectDropdown(field *FormField, scroll int, cursor int) st
 			prefix = "> "
 		}
 		label := opt.Label + strings.Repeat(" ", maxLen-len(opt.Label))
-		out.WriteString(fmt.Sprintf("│%s%s│\n", prefix, label))
+		optionContent := fmt.Sprintf("│%s%s│", prefix, label)
+		// Wrap each option in a zone for mouse click handling
+		if f.Zones != nil {
+			optionZoneID := ui2.DropdownOptionZone(field.ID, i)
+			optionContent = f.Zones.Mark(optionZoneID, optionContent)
+		}
+		out.WriteString(optionContent + "\n")
 	}
 	out.WriteString("└" + strings.Repeat("─", maxLen+2) + "┘")
 	return out.String()

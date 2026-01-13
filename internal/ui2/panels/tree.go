@@ -376,8 +376,15 @@ func (p *TreePanel) Update(msg tea.Msg) (*TreePanel, tea.Cmd) {
 			}
 			return p, nil
 		case key.Matches(msg, key.NewBinding(key.WithKeys("enter", " "))):
-			p.ToggleExpanded()
-			return p, nil
+			// Enter on a node with children toggles expanded
+			// Enter on a node with an item should be handled by app layer (navigate to details)
+			node := p.SelectedNode()
+			if node != nil && len(node.Children) > 0 {
+				p.ToggleExpanded()
+				return p, nil
+			}
+			// If node has an item, let app layer handle it (will navigate to details)
+			// Pass through to list so app can catch it
 		}
 
 	case tea.MouseClickMsg:
@@ -400,11 +407,16 @@ func (p *TreePanel) Update(msg tea.Msg) (*TreePanel, tea.Cmd) {
 			for i, f := range p.flatList {
 				zoneID := ui2.TreeItemZone(f.Node.ID)
 				if p.zones.Get(zoneID).InBounds(msg) {
+					wasSelected := p.list.Index() == i
 					p.list.Select(i)
 					if msg.Button == tea.MouseLeft {
 						// Click on expand icon toggles
 						if f.HasChildren {
 							p.ToggleExpanded()
+						} else if f.Node.Item != nil && wasSelected {
+							// Double-click (click on already selected item) or special handling
+							// For now, just select - app layer can handle navigation on Enter
+							// We could add a special message here, but let's keep it simple
 						}
 					}
 					return p, nil

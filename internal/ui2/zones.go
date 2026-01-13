@@ -1,6 +1,8 @@
 package ui2
 
 import (
+	"fmt"
+
 	zone "github.com/lrstanley/bubblezone/v2"
 )
 
@@ -27,12 +29,13 @@ const (
 	ZoneDetailColor  = "detail-color-"
 
 	// Form zones
-	ZoneFormField   = "form-field-"
-	ZoneFormButton  = "form-button-"
-	ZoneFormSubmit  = "form-submit"
-	ZoneFormCancel  = "form-cancel"
-	ZoneColorWheel  = "color-wheel"
-	ZoneSliderTrack = "slider-track-"
+	ZoneFormField      = "form-field-"
+	ZoneFormButton     = "form-button-"
+	ZoneFormSubmit     = "form-submit"
+	ZoneFormCancel     = "form-cancel"
+	ZoneColorWheel     = "color-wheel"
+	ZoneSliderTrack    = "slider-track-"
+	ZoneDropdownOption = "dropdown-opt-"
 
 	// Popup zones
 	ZonePopupClose = "popup-close"
@@ -105,4 +108,9 @@ func SliderZone(id string) string {
 // DetailFieldZone returns a zone ID for a detail field.
 func DetailFieldZone(id string) string {
 	return ZoneDetailField + id
+}
+
+// DropdownOptionZone returns a zone ID for a dropdown option.
+func DropdownOptionZone(fieldID string, optionIndex int) string {
+	return fmt.Sprintf("%s%s-%d", ZoneDropdownOption, fieldID, optionIndex)
 }

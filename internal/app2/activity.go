@@ -580,8 +580,10 @@ func (e *UnhandledEvent) Render(styles *ui2.Styles, width int) string {
 
 // RequestActivity represents a request to the bridge (not an event).
 type RequestActivity struct {
-	timestamp time.Time
-	message   string
+	timestamp  time.Time
+	bridgeID   string
+	bridgeName string
+	message    string
 }
 
 func (a *RequestActivity) Time() time.Time {
@@ -591,8 +593,12 @@ func (a *RequestActivity) Time() time.Time {
 func (a *RequestActivity) Render(styles *ui2.Styles, width int) string {
 	timeStr := a.timestamp.Format("15:04:05")
 	typeStyle := lipgloss.NewStyle().Foreground(styles.Theme.Secondary)
-	typeIndicator := typeStyle.Render("r")
-	line := fmt.Sprintf("%s %s %s", styles.Dimmed.Render(timeStr), typeIndicator, a.message)
+	typeIndicator := typeStyle.Render("→")
+	bridgeStr := ""
+	if a.bridgeName != "" {
+		bridgeStr = styles.Dimmed.Render("["+a.bridgeName+"]") + " "
+	}
+	line := fmt.Sprintf("%s %s %s%s", styles.Dimmed.Render(timeStr), typeIndicator, bridgeStr, a.message)
 	if lipgloss.Width(line) > width {
 		maxLen := len(line)
 		if width-1 < maxLen {
@@ -605,8 +611,10 @@ func (a *RequestActivity) Render(styles *ui2.Styles, width int) string {
 
 // ErrorActivity represents an error activity.
 type ErrorActivity struct {
-	timestamp time.Time
-	message   string
+	timestamp  time.Time
+	bridgeID   string
+	bridgeName string
+	message    string
 }
 
 func (a *ErrorActivity) Time() time.Time {
@@ -616,8 +624,12 @@ func (a *ErrorActivity) Time() time.Time {
 func (a *ErrorActivity) Render(styles *ui2.Styles, width int) string {
 	timeStr := a.timestamp.Format("15:04:05")
 	typeStyle := lipgloss.NewStyle().Foreground(styles.Theme.Error)
-	typeIndicator := typeStyle.Render("e")
-	line := fmt.Sprintf("%s %s %s", styles.Dimmed.Render(timeStr), typeIndicator, a.message)
+	typeIndicator := typeStyle.Render("!")
+	bridgeStr := ""
+	if a.bridgeName != "" {
+		bridgeStr = styles.Dimmed.Render("["+a.bridgeName+"]") + " "
+	}
+	line := fmt.Sprintf("%s %s %s%s", styles.Dimmed.Render(timeStr), typeIndicator, bridgeStr, a.message)
 	if lipgloss.Width(line) > width {
 		maxLen := len(line)
 		if width-1 < maxLen {
