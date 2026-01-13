@@ -34,12 +34,20 @@ func max(a, b int) int {
 	return b
 }
 
+// renderHeader renders a section header field.
+func renderHeader(field *FormField, styles *ui2.Styles) string {
+	return styles.Subtitle.Render(field.Label)
+}
+
 // RenderFieldValue renders the value portion of a form field.
 // This is a reusable function that can be used by form systems.
 // Note: For multi-row fields (HSL, RGB), this only renders the first row.
 // The caller should call this for each sub-row with appropriate field data.
 func RenderFieldValue(field *FormField, isFocused bool, styles *ui2.Styles, subRow int) string {
 	switch field.Type {
+	case FormFieldHeader:
+		return renderHeader(field, styles)
+
 	case FormFieldToggle:
 		return renderToggle(field)
 

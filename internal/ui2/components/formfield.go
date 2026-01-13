@@ -15,6 +15,7 @@ const (
 	FormFieldRadio                       // Radio button group (inline options)
 	FormFieldHSL                         // HSL color picker (3 sliders: Hue, Saturation, Lightness)
 	FormFieldRGB                         // RGB color picker (3 sliders: Red, Green, Blue)
+	FormFieldHeader                      // Section header (non-interactive, Label only)
 )
 
 // FormSelectOption represents an option for FormFieldSelect or FormFieldRadio.
@@ -56,4 +57,12 @@ type FormField struct {
 	// Toggle labels (for FormFieldToggle) - if empty, defaults to "On"/"Off"
 	ToggleOnLabel  string
 	ToggleOffLabel string
+
+	// Read-only flag - if true, field cannot be edited (shows value only)
+	ReadOnly bool
+
+	// Link support - allows fields to navigate to related entities
+	IsLink         bool   // If true, field is clickable and navigates to LinkEntityID
+	LinkEntityType string // Type of entity to navigate to ("light", "device", "scene", etc.)
+	LinkEntityID   string // ID of entity to navigate to
 }

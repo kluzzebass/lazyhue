@@ -8,6 +8,7 @@ import (
 
 	"github.com/charmbracelet/bubbles/v2/textinput"
 	tea "github.com/charmbracelet/bubbletea/v2"
+	"github.com/charmbracelet/lipgloss/v2"
 	zone "github.com/lrstanley/bubblezone/v2"
 
 	"github.com/kluzzebass/lazyhue/internal/ui2"
@@ -54,7 +55,8 @@ type Form struct {
 	MouseCaptureZoneStartX int          // Zone start X position when capture started (for slider dragging)
 
 	// Callbacks
-	OnChange func(field FormField) // Called when a field value changes
+	OnChange    func(field FormField)                 // Called when a field value changes
+	OnLinkClick func(entityType string, entityID string) // Called when a link field is clicked
 
 	// Styling and zones
 	Styles *ui2.Styles
@@ -357,17 +359,35 @@ func (f *Form) handleKey(msg tea.KeyMsg) bool {
 	// Normal navigation
 	switch keyStr {
 	case "up", "k":
-		if f.Cursor > 0 {
-			f.Cursor--
+		// Move to previous non-header field
+		newCursor := f.Cursor - 1
+		for newCursor >= 0 && f.Fields[newCursor].Type == FormFieldHeader {
+			newCursor--
+		}
+		if newCursor >= 0 {
+			f.Cursor = newCursor
 			return true
 		}
 	case "down", "j":
-		if f.Cursor < len(f.Fields)-1 {
-			f.Cursor++
+		// Move to next non-header field
+		newCursor := f.Cursor + 1
+		for newCursor < len(f.Fields) && f.Fields[newCursor].Type == FormFieldHeader {
+			newCursor++
+		}
+		if newCursor < len(f.Fields) {
+			f.Cursor = newCursor
 			return true
 		}
 	case "enter", " ":
-		f.activateField(field)
+		// Handle link fields - call OnLinkClick instead of activateField
+		if field.IsLink && f.OnLinkClick != nil {
+			f.OnLinkClick(field.LinkEntityType, field.LinkEntityID)
+			return true
+		}
+		// Don't activate read-only fields (unless they're links, handled above)
+		if !field.ReadOnly {
+			f.activateField(field)
+		}
 		return true
 	case "left", "h":
 		f.adjustLeft(field)
@@ -482,6 +502,17 @@ func (f *Form) handleFieldClick(fieldIdx int, field *FormField, msg tea.MouseCli
 	f.Cursor = fieldIdx
 
 	if msg.Button == tea.MouseLeft {
+		// Handle link fields - call OnLinkClick
+		if field.IsLink && f.OnLinkClick != nil {
+			f.OnLinkClick(field.LinkEntityType, field.LinkEntityID)
+			return true
+		}
+
+		// Don't activate read-only fields (unless they're links, handled above)
+		if field.ReadOnly {
+			return true
+		}
+
 		switch field.Type {
 		case FormFieldToggle:
 			field.Value = 1 - field.Value
@@ -1108,6 +1139,13 @@ func (f *Form) View() string {
 			continue
 		}
 
+		// Special handling for headers - no cursor, no zones, just the header text
+		if field.Type == FormFieldHeader {
+			headerStr := RenderFieldValue(&field, false, f.Styles, 0)
+			content.WriteString(headerStr + "\n")
+			continue
+		}
+
 		for row := 0; row < rows; row++ {
 			// Label only on first row
 			var label string
@@ -1157,6 +1195,15 @@ func (f *Form) View() string {
 				valueStr = f.renderRGBWithFocus(&field, isFocused, row, sliderFocus)
 			} else {
 				valueStr = RenderFieldValue(&field, isFocused, f.Styles, row)
+			}
+
+			// Apply link styling if this is a link field (underline + accent color)
+			if field.IsLink && row == 0 {
+				// Only apply on first row for multi-row fields
+				valueStr = lipgloss.NewStyle().
+					Underline(true).
+					Foreground(f.Styles.Theme.Accent).
+					Render(valueStr)
 			}
 
 			// Mark with zone
