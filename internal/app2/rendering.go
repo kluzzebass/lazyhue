@@ -187,14 +187,6 @@ func (m *Model) updateDetailContent() {
 			light, ok = state.GetLight(node.Item.ID)
 		}
 
-		// Calculate unified max label width across form and detail fields (even if !ok, for fallback message)
-		maxLabelWidth := 0
-		if ok {
-			maxLabelWidth = m.calculateLightMaxLabelWidth()
-			m.lightForm.MaxLabelWidth = maxLabelWidth
-			m.lightForm.SectionHeader = "Controls:"
-		}
-
 		if ok {
 			// Get the actual light ID from the light object (use *light.Id, not node.Item.ID)
 			actualLightID := ""
@@ -208,9 +200,35 @@ func (m *Model) updateDetailContent() {
 			// Only rebuild form fields if light ID changed or form is empty
 			// But never rebuild while dropdown is open (user is actively interacting)
 			if !m.lightForm.DropdownOpen && (m.selectedLightID != actualLightID || len(m.lightForm.Fields) == 0) {
-				fields := m.buildLightFormFields(light)
-				m.lightForm.SetFields(fields)
+				// Build control fields
+				controlFields := m.buildLightFormFields(light)
+
+				// Add Controls header
+				allFields := []components.FormField{
+					{
+						Type:  components.FormFieldHeader,
+						Label: "Controls",
+					},
+				}
+				allFields = append(allFields, controlFields...)
+
+				// Build and append detail fields
+				detailFields := m.buildLightDetailFormFields(light, state)
+				allFields = append(allFields, detailFields...)
+
+				// Calculate max label width across all fields
+				maxLabelWidth := 0
+				for _, field := range allFields {
+					if len(field.Label) > maxLabelWidth {
+						maxLabelWidth = len(field.Label)
+					}
+				}
+				m.lightForm.MaxLabelWidth = maxLabelWidth
+				m.lightForm.SectionHeader = "" // No section header since we now use FormFieldHeader
+
+				m.lightForm.SetFields(allFields)
 				m.selectedLightID = actualLightID
+
 				// Capture bridgeID for callback closure
 				callbackBridgeID := bridgeID
 				// Set onChange callback
@@ -228,17 +246,47 @@ func (m *Model) updateDetailContent() {
 				m.lightForm.OnChange = func(field components.FormField) {
 					m.handleLightFieldChange(field, actualLightID, callbackBridgeID)
 				}
+				m.lightForm.OnLinkClick = func(entityType, entityID string) {
+					m.navigateToEntity(entityType, entityID, callbackBridgeID)
+				}
 			} else if !m.lightForm.Editing && m.lightForm.MouseCaptureIdx < 0 && !m.lightForm.DropdownOpen {
 				// Light ID unchanged, not editing, not dragging, and dropdown not open - sync form fields from state
 				// This prevents overwriting user input during color wheel adjustments and slider dragging
 				// Also prevents closing dropdown while user is selecting an option
-				fields := m.buildLightFormFields(light)
+
+				// Build control fields
+				controlFields := m.buildLightFormFields(light)
+
+				// Add Controls header
+				allFields := []components.FormField{
+					{
+						Type:  components.FormFieldHeader,
+						Label: "Controls",
+					},
+				}
+				allFields = append(allFields, controlFields...)
+
+				// Build and append detail fields
+				detailFields := m.buildLightDetailFormFields(light, state)
+				allFields = append(allFields, detailFields...)
+
+				// Calculate max label width across all fields
+				maxLabelWidth := 0
+				for _, field := range allFields {
+					if len(field.Label) > maxLabelWidth {
+						maxLabelWidth = len(field.Label)
+					}
+				}
+				m.lightForm.MaxLabelWidth = maxLabelWidth
+				m.lightForm.SectionHeader = "" // No section header since we now use FormFieldHeader
+
 				// Preserve cursor position
 				oldCursor := m.lightForm.Cursor
-				m.lightForm.SetFields(fields)
-				if oldCursor < len(fields) {
+				m.lightForm.SetFields(allFields)
+				if oldCursor < len(allFields) {
 					m.lightForm.Cursor = oldCursor
 				}
+
 				// Get the actual light ID from the light object (use *light.Id, not node.Item.ID)
 				actualLightID := ""
 				if light.Id != nil {
@@ -253,18 +301,18 @@ func (m *Model) updateDetailContent() {
 				m.lightForm.OnChange = func(field components.FormField) {
 					m.handleLightFieldChange(field, actualLightID, callbackBridgeID)
 				}
+				m.lightForm.OnLinkClick = func(entityType, entityID string) {
+					m.navigateToEntity(entityType, entityID, callbackBridgeID)
+				}
 			}
 
-			// Add form FIRST (controls at the top for efficiency)
+			// Render the unified form with both controls and details
 			if len(m.lightForm.Fields) > 0 {
 				formContent := m.lightForm.View()
 				// Zones are marked in form content - they'll be scanned from final output
 				content.WriteString(formContent)
-				content.WriteString("\n")
 			}
 		}
-		// Then add details (pass maxLabelWidth for consistent alignment)
-		content.WriteString(m.buildLightDetailsWithWidth(node.Item, state, maxLabelWidth))
 	default:
 		// Clear form for non-light entities
 		m.lightForm.SetFields([]components.FormField{})
@@ -569,102 +617,10 @@ func (m *Model) buildLightFormFields(light hueclient.LightGet) []components.Form
 	return fields
 }
 
-// calculateLightMaxLabelWidth calculates the max label width across form fields and detail fields.
-func (m *Model) calculateLightMaxLabelWidth() int {
-	maxWidth := 0
-
-	// Form field labels
-	for _, field := range m.lightForm.Fields {
-		if len(field.Label) > maxWidth {
-			maxWidth = len(field.Label)
-		}
-	}
-
-	// Detail field labels (duplicate logic from buildLightDetails)
-	checkLabel := func(label string) {
-		if len(label) > maxWidth {
-			maxWidth = len(label)
-		}
-	}
-
-	// Product fields
-	checkLabel("Product")
-	checkLabel("Manufacturer")
-	checkLabel("Model")
-	checkLabel("Firmware")
-	checkLabel("Hardware")
-
-	// Classification
-	checkLabel("Archetype")
-	checkLabel("Type")
-	checkLabel("Mode")
-
-	// Name
-	checkLabel("Name")
-	checkLabel("Alternate name")
-
-	// IDs
-	checkLabel("Light ID")
-	checkLabel("Device ID")
-	checkLabel("V1 ID")
-
-	// State
-	checkLabel("Brightness")
-	checkLabel("Min dim level")
-	checkLabel("Color XY")
-	checkLabel("Gamut")
-	checkLabel("Color temp")
-	checkLabel("CT range")
-
-	// Dynamics
-	checkLabel("Status")
-	checkLabel("Speed")
-
-	// Gradient
-	checkLabel("Pixels")
-	checkLabel("Points")
-	checkLabel("Mode")
-
-	// Powerup
-	checkLabel("Preset")
-
-	return maxWidth
-}
-
-// buildLightDetailsWithWidth builds the detail content for a light entity with specified label width.
-// Formatting matches v1 UI: aligned fields, proper headers, consistent spacing.
-func (m *Model) buildLightDetailsWithWidth(item *panels.EntityItem, state *hue.BridgeState, maxLabelWidth int) string {
-	// Get light from RawPtr first (most reliable), then fall back to state lookup
-	var light hueclient.LightGet
-	var ok bool
-
-	if item.RawPtr != nil {
-		if l, typeOk := item.RawPtr.(hueclient.LightGet); typeOk {
-			light = l
-			ok = true
-		}
-	}
-
-	// Fall back to state lookup if RawPtr didn't work
-	if !ok && state != nil {
-		light, ok = state.GetLight(item.ID)
-	}
-
-	// Last resort: search through all lights
-	if !ok && state != nil {
-		allLights := state.AllLights()
-		for _, l := range allLights {
-			if l.Id != nil && *l.Id == item.ID {
-				light = l
-				ok = true
-				break
-			}
-		}
-	}
-
-	if !ok {
-		return fmt.Sprintf("Light %s not found (RawPtr: %v, State: %v)", item.ID, item.RawPtr != nil, state != nil)
-	}
+// buildLightDetailFormFields builds form fields for all static detail sections.
+// These are read-only fields that display light information (not controls).
+func (m *Model) buildLightDetailFormFields(light hueclient.LightGet, state *hue.BridgeState) []components.FormField {
+	var fields []components.FormField
 
 	// Get owning device info for product details
 	var device *hueclient.DeviceGet
@@ -674,220 +630,213 @@ func (m *Model) buildLightDetailsWithWidth(item *panels.EntityItem, state *hue.B
 		}
 	}
 
-	// Collect all fields to calculate alignment
-	type fieldInfo struct {
-		label string
-		value string
-	}
-	var allFields []fieldInfo
-
-	// Product info from device
-	var productFields []fieldInfo
+	// Product section
+	var productFields []components.FormField
 	if device != nil && device.ProductData != nil {
 		pd := device.ProductData
-		if pd.ProductName != nil {
-			productFields = append(productFields, fieldInfo{"Product", *pd.ProductName})
-		}
-		if pd.ManufacturerName != nil {
-			productFields = append(productFields, fieldInfo{"Manufacturer", *pd.ManufacturerName})
-		}
-		if pd.ModelId != nil {
-			productFields = append(productFields, fieldInfo{"Model", *pd.ModelId})
-		}
-		if pd.SoftwareVersion != nil {
-			productFields = append(productFields, fieldInfo{"Firmware", *pd.SoftwareVersion})
-		}
-		if pd.HardwarePlatformType != nil {
-			productFields = append(productFields, fieldInfo{"Hardware", *pd.HardwarePlatformType})
-		}
-		allFields = append(allFields, productFields...)
-	}
-
-	// Classification fields
-	var classFields []fieldInfo
-	if device != nil && device.ProductData != nil && device.ProductData.ProductArchetype != nil {
-		classFields = append(classFields, fieldInfo{"Archetype", string(*device.ProductData.ProductArchetype)})
-	}
-	if light.Type != nil {
-		classFields = append(classFields, fieldInfo{"Type", string(*light.Type)})
-	}
-	if light.Mode != nil {
-		classFields = append(classFields, fieldInfo{"Mode", string(*light.Mode)})
-	}
-	allFields = append(allFields, classFields...)
-
-	// Name fields
-	var nameFields []fieldInfo
-	var hasNameSection bool
-	currentName := ""
-	if device != nil && device.Metadata != nil && device.Metadata.Name != nil {
-		currentName = *device.Metadata.Name
-		nameFields = append(nameFields, fieldInfo{"Name", currentName})
-		hasNameSection = true
-	}
-	// Show alternate name (from light.Metadata.Name) if available and different from current name
-	if light.Metadata != nil && light.Metadata.Name != nil {
-		alternateName := *light.Metadata.Name
-		if alternateName != currentName {
-			nameFields = append(nameFields, fieldInfo{"Alternate name", alternateName})
-			hasNameSection = true
-		}
-	}
-	allFields = append(allFields, nameFields...)
-
-	// ID fields
-	var idFields []fieldInfo
-	if light.Id != nil {
-		idFields = append(idFields, fieldInfo{"Light ID", *light.Id})
-	}
-	if light.Owner != nil && light.Owner.Rid != nil {
-		idFields = append(idFields, fieldInfo{"Device ID", *light.Owner.Rid})
-	}
-	if light.IdV1 != nil {
-		idFields = append(idFields, fieldInfo{"V1 ID", *light.IdV1})
-	}
-	allFields = append(allFields, idFields...)
-
-	// State fields
-	var stateFields []fieldInfo
-	if light.Dimming != nil {
-		if light.Dimming.Brightness != nil {
-			stateFields = append(stateFields, fieldInfo{"Brightness", fmt.Sprintf("%.0f%%", float64(*light.Dimming.Brightness))})
-		}
-		if light.Dimming.MinDimLevel != nil {
-			stateFields = append(stateFields, fieldInfo{"Min dim level", fmt.Sprintf("%.0f%%", float64(*light.Dimming.MinDimLevel))})
-		}
-	}
-	if light.Color != nil && light.Color.Xy != nil {
-		xy := light.Color.Xy
-		if xy.X != nil && xy.Y != nil {
-			x, y := *xy.X, *xy.Y
-			stateFields = append(stateFields, fieldInfo{"Color XY", fmt.Sprintf("(%.4f, %.4f)", x, y)})
-		}
-		if light.Color.GamutType != nil {
-			stateFields = append(stateFields, fieldInfo{"Gamut", string(*light.Color.GamutType)})
-		}
-	}
-	if light.ColorTemperature != nil {
-		if light.ColorTemperature.Mirek != nil {
-			mirek := *light.ColorTemperature.Mirek
-			kelvin := 1000000 / int(mirek)
-			stateFields = append(stateFields, fieldInfo{"Color temp", fmt.Sprintf("%d mirek (~%dK)", mirek, kelvin)})
-		}
-		if light.ColorTemperature.MirekSchema != nil {
-			schema := light.ColorTemperature.MirekSchema
-			if schema.MirekMinimum != nil && schema.MirekMaximum != nil {
-				minK := 1000000 / int(*schema.MirekMaximum)
-				maxK := 1000000 / int(*schema.MirekMinimum)
-				stateFields = append(stateFields, fieldInfo{"CT range", fmt.Sprintf("%dK - %dK", minK, maxK)})
+		if pd.ProductName != nil || pd.ManufacturerName != nil || pd.ModelId != nil || pd.SoftwareVersion != nil || pd.HardwarePlatformType != nil {
+			productFields = append(productFields, components.FormField{
+				Type:  components.FormFieldHeader,
+				Label: "Product",
+			})
+			if pd.ProductName != nil {
+				productFields = append(productFields, components.FormField{
+					ID:        "product",
+					Label:     "Product",
+					Type:      components.FormFieldText,
+					TextValue: *pd.ProductName,
+					ReadOnly:  true,
+				})
+			}
+			if pd.ManufacturerName != nil {
+				productFields = append(productFields, components.FormField{
+					ID:        "manufacturer",
+					Label:     "Manufacturer",
+					Type:      components.FormFieldText,
+					TextValue: *pd.ManufacturerName,
+					ReadOnly:  true,
+				})
+			}
+			if pd.ModelId != nil {
+				productFields = append(productFields, components.FormField{
+					ID:        "model",
+					Label:     "Model",
+					Type:      components.FormFieldText,
+					TextValue: *pd.ModelId,
+					ReadOnly:  true,
+				})
+			}
+			if pd.SoftwareVersion != nil {
+				productFields = append(productFields, components.FormField{
+					ID:        "firmware",
+					Label:     "Firmware",
+					Type:      components.FormFieldText,
+					TextValue: *pd.SoftwareVersion,
+					ReadOnly:  true,
+				})
+			}
+			if pd.HardwarePlatformType != nil {
+				productFields = append(productFields, components.FormField{
+					ID:        "hardware",
+					Label:     "Hardware",
+					Type:      components.FormFieldText,
+					TextValue: *pd.HardwarePlatformType,
+					ReadOnly:  true,
+				})
 			}
 		}
 	}
-	allFields = append(allFields, stateFields...)
+	fields = append(fields, productFields...)
 
-	// Dynamics fields
-	var dynamicsFields []fieldInfo
-	if light.Dynamics != nil {
-		if light.Dynamics.Status != nil {
-			dynamicsFields = append(dynamicsFields, fieldInfo{"Status", string(*light.Dynamics.Status)})
-		}
-		if light.Dynamics.Speed != nil {
-			dynamicsFields = append(dynamicsFields, fieldInfo{"Speed", fmt.Sprintf("%.2f", *light.Dynamics.Speed)})
-		}
-		allFields = append(allFields, dynamicsFields...)
+	// Classification section
+	var classFields []components.FormField
+	hasClassSection := false
+	if device != nil && device.ProductData != nil && device.ProductData.ProductArchetype != nil {
+		hasClassSection = true
 	}
-
-	// Gradient fields
-	var gradientFields []fieldInfo
-	if light.Gradient != nil {
-		if light.Gradient.PixelCount != nil {
-			gradientFields = append(gradientFields, fieldInfo{"Pixels", fmt.Sprintf("%d", *light.Gradient.PixelCount)})
+	if light.Type != nil {
+		hasClassSection = true
+	}
+	if light.Mode != nil {
+		hasClassSection = true
+	}
+	if hasClassSection {
+		classFields = append(classFields, components.FormField{
+			Type:  components.FormFieldHeader,
+			Label: "Classification",
+		})
+		if device != nil && device.ProductData != nil && device.ProductData.ProductArchetype != nil {
+			classFields = append(classFields, components.FormField{
+				ID:        "archetype",
+				Label:     "Archetype",
+				Type:      components.FormFieldText,
+				TextValue: string(*device.ProductData.ProductArchetype),
+				ReadOnly:  true, // TODO: Make editable in Phase 5
+			})
 		}
-		if light.Gradient.Points != nil && len(*light.Gradient.Points) > 0 {
-			gradientFields = append(gradientFields, fieldInfo{"Points", fmt.Sprintf("%d", len(*light.Gradient.Points))})
+		if light.Type != nil {
+			classFields = append(classFields, components.FormField{
+				ID:        "type",
+				Label:     "Type",
+				Type:      components.FormFieldText,
+				TextValue: string(*light.Type),
+				ReadOnly:  true,
+			})
 		}
-		allFields = append(allFields, gradientFields...)
-	}
-
-	// Powerup fields
-	var powerupFields []fieldInfo
-	if light.Powerup != nil && light.Powerup.Preset != nil {
-		powerupFields = append(powerupFields, fieldInfo{"Preset", string(*light.Powerup.Preset)})
-		allFields = append(allFields, powerupFields...)
-	}
-
-	// maxLabelWidth is now passed as parameter for consistent alignment with form fields
-
-	var content strings.Builder
-
-	// Helper to render header (newline before, colon after, newline after)
-	renderHeader := func(title string) {
-		content.WriteString("\n")
-		content.WriteString(m.styles.Subtitle.Render(title + ":"))
-		content.WriteString("\n")
-	}
-
-	// Helper to render aligned field
-	renderField := func(label, value string) {
-		labelWithColon := label + ":"
-		padding := maxLabelWidth - len(label)
-		if padding < 0 {
-			padding = 0
+		if light.Mode != nil {
+			classFields = append(classFields, components.FormField{
+				ID:        "mode",
+				Label:     "Mode",
+				Type:      components.FormFieldText,
+				TextValue: string(*light.Mode),
+				ReadOnly:  true,
+			})
 		}
-		labelStr := labelWithColon + strings.Repeat(" ", padding) + " "
-		content.WriteString(fmt.Sprintf("  %s%s\n", labelStr, value))
 	}
-
-	// Helper to render muted field
-	renderMutedField := func(label, value string) {
-		labelWithColon := label + ":"
-		padding := maxLabelWidth - len(label)
-		if padding < 0 {
-			padding = 0
-		}
-		mutedLabel := lipgloss.NewStyle().Foreground(m.styles.Theme.TextMuted).Render(labelWithColon)
-		labelStr := mutedLabel + strings.Repeat(" ", padding) + " "
-		content.WriteString(fmt.Sprintf("  %s%s\n", labelStr, value))
-	}
-
-	// Product info
-	if len(productFields) > 0 {
-		renderHeader("Product")
-		for _, f := range productFields {
-			renderField(f.label, f.value)
-		}
-		content.WriteString("\n")
-	}
-
-	// Classification
-	if len(classFields) > 0 {
-		renderHeader("Classification")
-		for _, f := range classFields {
-			renderField(f.label, f.value)
-		}
-		content.WriteString("\n")
-	}
+	fields = append(fields, classFields...)
 
 	// Name section
+	var nameFields []components.FormField
+	currentName := ""
+	hasNameSection := false
+	if device != nil && device.Metadata != nil && device.Metadata.Name != nil {
+		currentName = *device.Metadata.Name
+		hasNameSection = true
+	}
+	if light.Metadata != nil && light.Metadata.Name != nil {
+		alternateName := *light.Metadata.Name
+		if alternateName != currentName {
+			hasNameSection = true
+		}
+	}
 	if hasNameSection {
-		renderHeader("Name")
-		for _, f := range nameFields {
-			renderField(f.label, f.value)
+		nameFields = append(nameFields, components.FormField{
+			Type:  components.FormFieldHeader,
+			Label: "Name",
+		})
+		if currentName != "" {
+			nameFields = append(nameFields, components.FormField{
+				ID:        "name",
+				Label:     "Name",
+				Type:      components.FormFieldText,
+				TextValue: currentName,
+				ReadOnly:  true, // TODO: Make editable in Phase 5
+			})
 		}
-		content.WriteString("\n")
-	}
-
-	// IDs
-	if len(idFields) > 0 {
-		renderHeader("IDs")
-		for _, f := range idFields {
-			renderField(f.label, f.value)
+		if light.Metadata != nil && light.Metadata.Name != nil {
+			alternateName := *light.Metadata.Name
+			if alternateName != currentName {
+				nameFields = append(nameFields, components.FormField{
+					ID:        "alternate-name",
+					Label:     "Alternate name",
+					Type:      components.FormFieldText,
+					TextValue: alternateName,
+					ReadOnly:  true,
+				})
+			}
 		}
-		content.WriteString("\n")
 	}
+	fields = append(fields, nameFields...)
 
-	// Current State
-	renderHeader("State")
+	// IDs section
+	var idFields []components.FormField
+	hasIDSection := false
+	if light.Id != nil {
+		hasIDSection = true
+	}
+	if light.Owner != nil && light.Owner.Rid != nil {
+		hasIDSection = true
+	}
+	if light.IdV1 != nil {
+		hasIDSection = true
+	}
+	if hasIDSection {
+		idFields = append(idFields, components.FormField{
+			Type:  components.FormFieldHeader,
+			Label: "IDs",
+		})
+		if light.Id != nil {
+			idFields = append(idFields, components.FormField{
+				ID:        "light-id",
+				Label:     "Light ID",
+				Type:      components.FormFieldText,
+				TextValue: *light.Id,
+				ReadOnly:  true,
+			})
+		}
+		if light.Owner != nil && light.Owner.Rid != nil {
+			deviceID := *light.Owner.Rid
+			idFields = append(idFields, components.FormField{
+				ID:             "device-id",
+				Label:          "Device ID",
+				Type:           components.FormFieldText,
+				TextValue:      deviceID,
+				ReadOnly:       true,
+				IsLink:         true,
+				LinkEntityType: "device",
+				LinkEntityID:   deviceID,
+			})
+		}
+		if light.IdV1 != nil {
+			idFields = append(idFields, components.FormField{
+				ID:        "v1-id",
+				Label:     "V1 ID",
+				Type:      components.FormFieldText,
+				TextValue: *light.IdV1,
+				ReadOnly:  true,
+			})
+		}
+	}
+	fields = append(fields, idFields...)
+
+	// State section
+	var stateFields []components.FormField
+	stateFields = append(stateFields, components.FormField{
+		Type:  components.FormFieldHeader,
+		Label: "State",
+	})
+
+	// Status indicator (custom rendering - not a standard field)
 	isOn := panels.IsLightOn(light)
 	status := "off"
 	if isOn {
@@ -903,111 +852,285 @@ func (m *Model) buildLightDetailsWithWidth(item *panels.EntityItem, state *hue.B
 		}
 	}
 	indicator := ui2.RenderBrightnessIndicatorFromHex(brightness, hexColor)
-	content.WriteString(fmt.Sprintf("  %s %s\n", indicator, status))
-	if len(stateFields) > 0 {
-		for _, f := range stateFields {
-			renderField(f.label, f.value)
-		}
-	}
-	content.WriteString("\n")
+	stateFields = append(stateFields, components.FormField{
+		ID:        "status",
+		Label:     "",
+		Type:      components.FormFieldText,
+		TextValue: fmt.Sprintf("%s %s", indicator, status),
+		ReadOnly:  true,
+	})
 
-	// Dynamics
-	if len(dynamicsFields) > 0 {
-		renderHeader("Dynamics")
-		for _, f := range dynamicsFields {
-			renderField(f.label, f.value)
-		}
-		content.WriteString("\n")
-	}
-
-	// Capabilities
-	renderHeader("Capabilities")
-	var caps []string
 	if light.Dimming != nil {
-		caps = append(caps, "Dimming")
+		if light.Dimming.Brightness != nil {
+			stateFields = append(stateFields, components.FormField{
+				ID:        "state-brightness",
+				Label:     "Brightness",
+				Type:      components.FormFieldText,
+				TextValue: fmt.Sprintf("%.0f%%", float64(*light.Dimming.Brightness)),
+				ReadOnly:  true,
+			})
+		}
+		if light.Dimming.MinDimLevel != nil {
+			stateFields = append(stateFields, components.FormField{
+				ID:        "min-dim-level",
+				Label:     "Min dim level",
+				Type:      components.FormFieldText,
+				TextValue: fmt.Sprintf("%.0f%%", float64(*light.Dimming.MinDimLevel)),
+				ReadOnly:  true,
+			})
+		}
 	}
-	if light.Color != nil {
-		caps = append(caps, "Color")
+	if light.Color != nil && light.Color.Xy != nil {
+		xy := light.Color.Xy
+		if xy.X != nil && xy.Y != nil {
+			x, y := *xy.X, *xy.Y
+			stateFields = append(stateFields, components.FormField{
+				ID:        "color-xy",
+				Label:     "Color XY",
+				Type:      components.FormFieldText,
+				TextValue: fmt.Sprintf("(%.4f, %.4f)", x, y),
+				ReadOnly:  true,
+			})
+		}
+		if light.Color.GamutType != nil {
+			stateFields = append(stateFields, components.FormField{
+				ID:        "gamut",
+				Label:     "Gamut",
+				Type:      components.FormFieldText,
+				TextValue: string(*light.Color.GamutType),
+				ReadOnly:  true,
+			})
+		}
 	}
 	if light.ColorTemperature != nil {
-		caps = append(caps, "Color Temperature")
+		if light.ColorTemperature.Mirek != nil {
+			mirek := *light.ColorTemperature.Mirek
+			kelvin := 1000000 / int(mirek)
+			stateFields = append(stateFields, components.FormField{
+				ID:        "state-colortemp",
+				Label:     "Color temp",
+				Type:      components.FormFieldText,
+				TextValue: fmt.Sprintf("%d mirek (~%dK)", mirek, kelvin),
+				ReadOnly:  true,
+			})
+		}
+		if light.ColorTemperature.MirekSchema != nil {
+			schema := light.ColorTemperature.MirekSchema
+			if schema.MirekMinimum != nil && schema.MirekMaximum != nil {
+				minK := 1000000 / int(*schema.MirekMaximum)
+				maxK := 1000000 / int(*schema.MirekMinimum)
+				stateFields = append(stateFields, components.FormField{
+					ID:        "ct-range",
+					Label:     "CT range",
+					Type:      components.FormFieldText,
+					TextValue: fmt.Sprintf("%dK - %dK", minK, maxK),
+					ReadOnly:  true,
+				})
+			}
+		}
+	}
+	fields = append(fields, stateFields...)
+
+	// Dynamics section
+	var dynamicsFields []components.FormField
+	if light.Dynamics != nil && (light.Dynamics.Status != nil || light.Dynamics.Speed != nil) {
+		dynamicsFields = append(dynamicsFields, components.FormField{
+			Type:  components.FormFieldHeader,
+			Label: "Dynamics",
+		})
+		if light.Dynamics.Status != nil {
+			dynamicsFields = append(dynamicsFields, components.FormField{
+				ID:        "dynamics-status",
+				Label:     "Status",
+				Type:      components.FormFieldText,
+				TextValue: string(*light.Dynamics.Status),
+				ReadOnly:  true,
+			})
+		}
+		if light.Dynamics.Speed != nil {
+			dynamicsFields = append(dynamicsFields, components.FormField{
+				ID:        "dynamics-speed",
+				Label:     "Speed",
+				Type:      components.FormFieldText,
+				TextValue: fmt.Sprintf("%.2f", *light.Dynamics.Speed),
+				ReadOnly:  true,
+			})
+		}
+	}
+	fields = append(fields, dynamicsFields...)
+
+	// Capabilities section (multiline bullet list)
+	var caps []string
+	if light.Dimming != nil {
+		caps = append(caps, "• Dimming")
+	}
+	if light.Color != nil {
+		caps = append(caps, "• Color")
+	}
+	if light.ColorTemperature != nil {
+		caps = append(caps, "• Color Temperature")
 	}
 	if light.Gradient != nil {
-		caps = append(caps, "Gradient")
+		caps = append(caps, "• Gradient")
 	}
 	if light.Effects != nil {
-		caps = append(caps, "Effects")
+		caps = append(caps, "• Effects")
 	}
 	if light.TimedEffects != nil {
-		caps = append(caps, "Timed Effects")
+		caps = append(caps, "• Timed Effects")
 	}
+	capText := ""
 	if len(caps) > 0 {
-		for _, cap := range caps {
-			content.WriteString(fmt.Sprintf("  • %s\n", cap))
-		}
+		capText = strings.Join(caps, "\n  ")
 	} else {
-		content.WriteString(fmt.Sprintf("  %s\n", lipgloss.NewStyle().Foreground(m.styles.Theme.TextMuted).Render("On/Off only")))
+		capText = lipgloss.NewStyle().Foreground(m.styles.Theme.TextMuted).Render("On/Off only")
 	}
-	content.WriteString("\n")
+	fields = append(fields, components.FormField{
+		Type:  components.FormFieldHeader,
+		Label: "Capabilities",
+	})
+	// For bullet lists, we add them as separate fields each with indentation
+	for _, cap := range caps {
+		fields = append(fields, components.FormField{
+			ID:        "capabilities",
+			Label:     "",
+			Type:      components.FormFieldText,
+			TextValue: cap,
+			ReadOnly:  true,
+		})
+	}
+	if len(caps) == 0 {
+		fields = append(fields, components.FormField{
+			ID:        "capabilities",
+			Label:     "",
+			Type:      components.FormFieldText,
+			TextValue: capText,
+			ReadOnly:  true,
+		})
+	}
 
-	// Effects
+	// Available Effects section (multiline bullet list)
 	if light.Effects != nil && light.Effects.EffectValues != nil && len(*light.Effects.EffectValues) > 0 {
-		renderHeader("Available Effects")
+		fields = append(fields, components.FormField{
+			Type:  components.FormFieldHeader,
+			Label: "Available Effects",
+		})
 		for _, effect := range *light.Effects.EffectValues {
-			content.WriteString(fmt.Sprintf("  • %s\n", hue.EffectDisplayName(string(effect))))
+			fields = append(fields, components.FormField{
+				ID:        "available-effects",
+				Label:     "",
+				Type:      components.FormFieldText,
+				TextValue: fmt.Sprintf("• %s", hue.EffectDisplayName(string(effect))),
+				ReadOnly:  true,
+			})
 		}
-		content.WriteString("\n")
 	}
 
-	// Gradient
+	// Gradient section
 	if light.Gradient != nil {
-		renderHeader("Gradient")
-		if light.Gradient.Mode != nil {
-			renderMutedField("Mode", string(*light.Gradient.Mode))
+		hasGradientFields := false
+		if light.Gradient.Mode != nil || light.Gradient.PixelCount != nil || light.Gradient.Points != nil {
+			hasGradientFields = true
 		}
-		for _, f := range gradientFields {
-			renderField(f.label, f.value)
+		if hasGradientFields {
+			fields = append(fields, components.FormField{
+				Type:  components.FormFieldHeader,
+				Label: "Gradient",
+			})
+			if light.Gradient.Mode != nil {
+				// Mode field shown as muted in original - use TextMuted style
+				modeText := lipgloss.NewStyle().Foreground(m.styles.Theme.TextMuted).Render(string(*light.Gradient.Mode))
+				fields = append(fields, components.FormField{
+					ID:        "gradient-mode",
+					Label:     "Mode",
+					Type:      components.FormFieldText,
+					TextValue: modeText,
+					ReadOnly:  true,
+				})
+			}
+			if light.Gradient.PixelCount != nil {
+				fields = append(fields, components.FormField{
+					ID:        "gradient-pixels",
+					Label:     "Pixels",
+					Type:      components.FormFieldText,
+					TextValue: fmt.Sprintf("%d", *light.Gradient.PixelCount),
+					ReadOnly:  true,
+				})
+			}
+			if light.Gradient.Points != nil && len(*light.Gradient.Points) > 0 {
+				fields = append(fields, components.FormField{
+					ID:        "gradient-points",
+					Label:     "Points",
+					Type:      components.FormFieldText,
+					TextValue: fmt.Sprintf("%d", len(*light.Gradient.Points)),
+					ReadOnly:  true,
+				})
+			}
 		}
-		content.WriteString("\n")
 	}
 
-	// Signaling
+	// Signaling Modes section (multiline bullet list)
 	if light.Signaling != nil && light.Signaling.SignalValues != nil && len(*light.Signaling.SignalValues) > 0 {
-		renderHeader("Signaling Modes")
+		fields = append(fields, components.FormField{
+			Type:  components.FormFieldHeader,
+			Label: "Signaling Modes",
+		})
 		for _, sig := range *light.Signaling.SignalValues {
-			content.WriteString(fmt.Sprintf("  • %s\n", string(sig)))
+			fields = append(fields, components.FormField{
+				ID:        "signaling-modes",
+				Label:     "",
+				Type:      components.FormFieldText,
+				TextValue: fmt.Sprintf("• %s", string(sig)),
+				ReadOnly:  true,
+			})
 		}
-		content.WriteString("\n")
 	}
 
-	// Powerup behavior
-	if len(powerupFields) > 0 {
-		renderHeader("Power-on Behavior")
-		for _, f := range powerupFields {
-			renderField(f.label, f.value)
-		}
-		content.WriteString("\n")
+	// Power-on Behavior section
+	if light.Powerup != nil && light.Powerup.Preset != nil {
+		fields = append(fields, components.FormField{
+			Type:  components.FormFieldHeader,
+			Label: "Power-on Behavior",
+		})
+		fields = append(fields, components.FormField{
+			ID:        "powerup-preset",
+			Label:     "Preset",
+			Type:      components.FormFieldText,
+			TextValue: string(*light.Powerup.Preset),
+			ReadOnly:  true, // TODO: Make editable in Phase 5
+		})
 	}
 
-	// Device services
+	// Device Services section (multiline bullet list)
 	if device != nil && device.Services != nil && len(*device.Services) > 0 {
-		renderHeader("Device Services")
+		fields = append(fields, components.FormField{
+			Type:  components.FormFieldHeader,
+			Label: "Device Services",
+		})
 		for _, svc := range *device.Services {
 			rtype := "unknown"
 			if svc.Rtype != nil {
 				rtype = string(*svc.Rtype)
 			}
+			var svcText string
 			if svc.Rid != nil && light.Id != nil && *svc.Rid == *light.Id {
-				content.WriteString(fmt.Sprintf("  • %s %s\n", rtype, lipgloss.NewStyle().Foreground(m.styles.Theme.TextMuted).Render("(this)")))
+				svcText = fmt.Sprintf("• %s %s", rtype, lipgloss.NewStyle().Foreground(m.styles.Theme.TextMuted).Render("(this)"))
 			} else {
-				content.WriteString(fmt.Sprintf("  • %s\n", rtype))
+				svcText = fmt.Sprintf("• %s", rtype)
 			}
+			fields = append(fields, components.FormField{
+				ID:        "device-services",
+				Label:     "",
+				Type:      components.FormFieldText,
+				TextValue: svcText,
+				ReadOnly:  true,
+			})
 		}
-		content.WriteString("\n")
 	}
 
-	return content.String()
+	return fields
 }
+
 
 // handleLightFieldChange handles changes to light form fields and updates the light via bridge actions.
 func (m *Model) handleLightFieldChange(field components.FormField, lightID string, bridgeID string) {

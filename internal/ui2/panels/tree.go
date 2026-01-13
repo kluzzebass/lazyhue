@@ -653,3 +653,79 @@ func (p *TreePanel) Select(index int) {
 func (p *TreePanel) Len() int {
 	return len(p.flatList)
 }
+
+// FindEntity searches the tree for a node with the given entity type and ID.
+// Returns nil if not found.
+func (p *TreePanel) FindEntity(entityType, entityID string) *TreeNode {
+	// Search all roots
+	for _, root := range p.roots {
+		if node := findEntityInNode(root, entityType, entityID); node != nil {
+			return node
+		}
+	}
+	return nil
+}
+
+// findEntityInNode recursively searches a node and its children for an entity.
+func findEntityInNode(node *TreeNode, entityType, entityID string) *TreeNode {
+	// Check this node
+	if node.Item != nil && node.Item.Type.String() == entityType && node.Item.ID == entityID {
+		return node
+	}
+
+	// Search children
+	for _, child := range node.Children {
+		if found := findEntityInNode(child, entityType, entityID); found != nil {
+			return found
+		}
+	}
+
+	return nil
+}
+
+// SelectNode selects a specific node in the tree.
+// If the node is not currently visible (parent collapsed), expands ancestors to make it visible.
+func (p *TreePanel) SelectNode(node *TreeNode) {
+	// First, expand all ancestors to make this node visible
+	expandAncestors(node, p.roots)
+
+	// Rebuild flat list with ancestors expanded
+	p.rebuildFlatList()
+
+	// Find the node in the flat list and select it
+	for i, flat := range p.flatList {
+		if flat.Node == node {
+			p.list.Select(i)
+			return
+		}
+	}
+}
+
+// expandAncestors recursively expands all ancestors of the target node.
+func expandAncestors(target *TreeNode, roots []*TreeNode) bool {
+	for _, root := range roots {
+		if expandAncestorsInNode(target, root) {
+			return true
+		}
+	}
+	return false
+}
+
+// expandAncestorsInNode checks if target is a descendant of node, and if so, expands the path to it.
+func expandAncestorsInNode(target *TreeNode, node *TreeNode) bool {
+	// Check if this node is the target
+	if node == target {
+		return true
+	}
+
+	// Check children
+	for _, child := range node.Children {
+		if expandAncestorsInNode(target, child) {
+			// Found in this subtree - expand this node
+			node.Expanded = true
+			return true
+		}
+	}
+
+	return false
+}

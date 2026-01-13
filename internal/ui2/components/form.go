@@ -1040,7 +1040,10 @@ func (f *Form) View() string {
 		if field.Type == FormFieldSelect && f.DropdownOpen && isFocused {
 			// Label on first line
 			cursor := "> "
-			labelStr := field.Label + ":"
+			labelStr := field.Label
+			if labelStr != "" {
+				labelStr += ":"
+			}
 			padding := maxLabelWidth - len(field.Label) + 1
 			labelPadded := labelStr + strings.Repeat(" ", padding)
 			label := cursor + f.Styles.Accent.Render(labelPadded)
@@ -1070,7 +1073,10 @@ func (f *Form) View() string {
 			if isFocused {
 				cursor = "> "
 			}
-			labelStr := field.Label + ":"
+			labelStr := field.Label
+			if labelStr != "" {
+				labelStr += ":"
+			}
 			padding := maxLabelWidth - len(field.Label) + 1
 			labelPadded := labelStr + strings.Repeat(" ", padding)
 			var label string
@@ -1141,6 +1147,10 @@ func (f *Form) View() string {
 
 		// Special handling for headers - no cursor, no zones, just the header text
 		if field.Type == FormFieldHeader {
+			// Add blank line before header (except for first field)
+			if i > 0 {
+				content.WriteString("\n")
+			}
 			headerStr := RenderFieldValue(&field, false, f.Styles, 0)
 			content.WriteString(headerStr + "\n")
 			continue
@@ -1156,7 +1166,11 @@ func (f *Form) View() string {
 					cursor = "> "
 				}
 
-				labelStr := field.Label + ":"
+				// Only add colon if label is not empty
+				labelStr := field.Label
+				if labelStr != "" {
+					labelStr += ":"
+				}
 				padding := maxLabelWidth - len(field.Label) + 1
 				labelPadded := labelStr + strings.Repeat(" ", padding)
 

@@ -32,6 +32,14 @@ const (
 )
 
 // Model is the main application model.
+// NavigationEntry represents a point in navigation history.
+type NavigationEntry struct {
+	EntityType string    // Type of entity ("light", "device", "scene", etc.)
+	EntityID   string    // ID of the entity
+	BridgeID   string    // Bridge the entity belongs to
+	Timestamp  time.Time // When this navigation occurred
+}
+
 type Model struct {
 	// Service layer
 	manager     *hue.Manager
@@ -79,6 +87,10 @@ type Model struct {
 
 	// Help display
 	showHelp bool // Whether help is displayed in detail panel
+
+	// Navigation history
+	navigationHistory []NavigationEntry
+	historyIndex      int // Current position in history (-1 if no history or at latest)
 }
 
 // New creates a new application model.
@@ -152,6 +164,7 @@ func New(creds *config.CredentialStore) Model {
 		lightForm:        components.NewForm(&styles, zones),
 		selectedLightID:  "",
 		renameInput:      renameInput,
+		historyIndex:     -1, // No history initially
 	}
 }
 
@@ -429,6 +442,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.previousPane = m.focusedPane
 				m.focusedPane = PanelTree
 			}
+			return m, nil
+
+		case key.Matches(msg, key.NewBinding(key.WithKeys("[", "alt+left"))):
+			// Navigate back in history
+			m.navigateBack()
+			return m, nil
+
+		case key.Matches(msg, key.NewBinding(key.WithKeys("]", "alt+right"))):
+			// Navigate forward in history
+			m.navigateForward()
 			return m, nil
 
 		case key.Matches(msg, key.NewBinding(key.WithKeys("esc"))):
@@ -1083,4 +1106,115 @@ func (m *Model) confirmRename() tea.Cmd {
 	m.renameInput.Blur()
 
 	return nil
+}
+
+// navigateToEntity navigates to a specific entity by type and ID.
+func (m *Model) navigateToEntity(entityType, entityID, bridgeID string) {
+	// Find the entity in the tree
+	node := m.tree.FindEntity(entityType, entityID)
+	if node == nil {
+		m.status = fmt.Sprintf("Entity not found: %s %s", entityType, entityID)
+		return
+	}
+
+	// Add current position to history before navigating (if we have a current selection)
+	if currentNode := m.tree.SelectedNode(); currentNode != nil && currentNode.Item != nil {
+		// Only add to history if we're not already in the middle of history navigation
+		if m.historyIndex == -1 || m.historyIndex == len(m.navigationHistory)-1 {
+			// At the end of history or no history - add new entry
+			entry := NavigationEntry{
+				EntityType: currentNode.Item.Type.String(),
+				EntityID:   currentNode.Item.ID,
+				BridgeID:   currentNode.Item.BridgeID,
+				Timestamp:  time.Now(),
+			}
+			m.navigationHistory = append(m.navigationHistory, entry)
+			m.historyIndex = len(m.navigationHistory) - 1
+		} else {
+			// In the middle of history - truncate forward history and add new entry
+			m.navigationHistory = m.navigationHistory[:m.historyIndex+1]
+			entry := NavigationEntry{
+				EntityType: currentNode.Item.Type.String(),
+				EntityID:   currentNode.Item.ID,
+				BridgeID:   currentNode.Item.BridgeID,
+				Timestamp:  time.Now(),
+			}
+			m.navigationHistory = append(m.navigationHistory, entry)
+			m.historyIndex = len(m.navigationHistory) - 1
+		}
+	}
+
+	// Select the node in the tree
+	m.tree.SelectNode(node)
+
+	// Update detail panel
+	m.updateDetailContent()
+
+	// Auto-focus detail panel for easier interaction
+	m.previousPane = m.focusedPane
+	m.focusedPane = PanelDetail
+
+	m.status = fmt.Sprintf("Navigated to %s", node.Item.Name)
+}
+
+// navigateBack navigates backward in history.
+func (m *Model) navigateBack() {
+	if len(m.navigationHistory) == 0 || m.historyIndex <= 0 {
+		m.status = "No previous navigation"
+		return
+	}
+
+	// Move back in history
+	m.historyIndex--
+	entry := m.navigationHistory[m.historyIndex]
+
+	// Find and select the entity
+	node := m.tree.FindEntity(entry.EntityType, entry.EntityID)
+	if node == nil {
+		m.status = fmt.Sprintf("Entity no longer exists: %s", entry.EntityID)
+		// Remove invalid entry and try again
+		m.navigationHistory = append(m.navigationHistory[:m.historyIndex], m.navigationHistory[m.historyIndex+1:]...)
+		if m.historyIndex >= len(m.navigationHistory) {
+			m.historyIndex = len(m.navigationHistory) - 1
+		}
+		return
+	}
+
+	m.tree.SelectNode(node)
+	m.updateDetailContent()
+	m.previousPane = m.focusedPane
+	m.focusedPane = PanelDetail
+
+	m.status = fmt.Sprintf("Back: %s (%d/%d)", node.Item.Name, m.historyIndex+1, len(m.navigationHistory))
+}
+
+// navigateForward navigates forward in history.
+func (m *Model) navigateForward() {
+	if len(m.navigationHistory) == 0 || m.historyIndex >= len(m.navigationHistory)-1 {
+		m.status = "No forward navigation"
+		return
+	}
+
+	// Move forward in history
+	m.historyIndex++
+	entry := m.navigationHistory[m.historyIndex]
+
+	// Find and select the entity
+	node := m.tree.FindEntity(entry.EntityType, entry.EntityID)
+	if node == nil {
+		m.status = fmt.Sprintf("Entity no longer exists: %s", entry.EntityID)
+		// Remove invalid entry and try again
+		m.navigationHistory = append(m.navigationHistory[:m.historyIndex], m.navigationHistory[m.historyIndex+1:]...)
+		if m.historyIndex >= len(m.navigationHistory) {
+			m.historyIndex = len(m.navigationHistory) - 1
+		}
+		return
+	}
+
+	m.tree.SelectNode(node)
+	m.updateDetailContent()
+	m.previousPane = m.focusedPane
+	m.focusedPane = PanelDetail
+
+	m.status = fmt.Sprintf("Forward: %s (%d/%d)", node.Item.Name, m.historyIndex+1, len(m.navigationHistory))
 }
