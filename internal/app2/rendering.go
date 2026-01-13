@@ -725,7 +725,17 @@ func (m *Model) buildLightDetailFormFields(light hueclient.LightGet, state *hue.
 			Type:  components.FormFieldHeader,
 			Label: "Classification",
 		})
-		if device != nil && device.ProductData != nil && device.ProductData.ProductArchetype != nil {
+		// Check if device has archetype in metadata (user-changeable) or product data (manufacturer default)
+		var currentArchetypePtr *hueclient.ProductArchetype
+		if device != nil && device.Metadata != nil && device.Metadata.Archetype != nil {
+			// Prefer metadata archetype (user-changeable)
+			currentArchetypePtr = device.Metadata.Archetype
+		} else if device != nil && device.ProductData != nil && device.ProductData.ProductArchetype != nil {
+			// Fall back to product data archetype (manufacturer default)
+			currentArchetypePtr = device.ProductData.ProductArchetype
+		}
+
+		if currentArchetypePtr != nil {
 			// Build archetype options from complete list
 			archetypeKeys := getSortedProductArchetypes()
 			archetypeOptions := make([]components.FormSelectOption, len(archetypeKeys))
@@ -737,7 +747,7 @@ func (m *Model) buildLightDetailFormFields(light hueclient.LightGet, state *hue.
 			}
 
 			// Find current archetype index
-			currentArchetype := string(*device.ProductData.ProductArchetype)
+			currentArchetype := string(*currentArchetypePtr)
 			currentIndex := 0 // default to first option
 			for i, key := range archetypeKeys {
 				if key == currentArchetype {

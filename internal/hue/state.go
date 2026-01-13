@@ -1363,6 +1363,24 @@ func (s *BridgeState) SetLightPowerupPreset(id string, preset hueclient.PowerupP
 	}
 }
 
+// SetDeviceArchetype optimistically updates a device's archetype in the cache.
+func (s *BridgeState) SetDeviceArchetype(id string, archetype hueclient.ProductArchetype) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if device, ok := s.Devices[id]; ok {
+		// Update metadata archetype (user-changeable, what the API actually updates)
+		if device.Metadata == nil {
+			device.Metadata = &struct {
+				Archetype *hueclient.ProductArchetype `json:"archetype,omitempty"`
+				Name      *string                     `json:"name,omitempty"`
+			}{}
+		}
+		device.Metadata.Archetype = &archetype
+		s.Devices[id] = device
+	}
+}
+
 // SetGroupedLightBrightness optimistically updates a grouped light's brightness in the cache.
 func (s *BridgeState) SetGroupedLightBrightness(id string, brightness float64) {
 	s.mu.Lock()

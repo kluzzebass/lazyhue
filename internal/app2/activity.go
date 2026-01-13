@@ -579,6 +579,53 @@ func (e *UnhandledEvent) Render(styles *ui2.Styles, width int) string {
 	return renderEvent(styles, width, e.baseEvent, "", fmt.Sprintf("unhandled %s event", e.resourceType), "", 0, false)
 }
 
+// DeviceEvent represents a device update event.
+type DeviceEvent struct {
+	baseEvent
+	Name    string
+	Details string
+}
+
+func (e *DeviceEvent) Parse(bridgeID, eventType string, data json.RawMessage, state *hue.BridgeState) (Event, error) {
+	var updates []hue.ResourceUpdate
+	if err := json.Unmarshal(data, &updates); err != nil {
+		return nil, fmt.Errorf("parse device event: %w", err)
+	}
+
+	if len(updates) == 0 {
+		return nil, fmt.Errorf("no updates in device event")
+	}
+
+	update := updates[0]
+
+	e.baseEvent = baseEvent{
+		bridgeID:     bridgeID,
+		resourceType: update.Type,
+		resourceID:   update.ID,
+		eventType:    eventType,
+		timestamp:    time.Now(),
+	}
+
+	// Look up device name from state
+	if state != nil {
+		if device, ok := state.GetDevice(update.ID); ok {
+			e.Name = state.GetDeviceName(device)
+		}
+	}
+
+	if e.Name == "" {
+		e.Name = update.ID
+	}
+
+	e.Details = eventType
+
+	return e, nil
+}
+
+func (e *DeviceEvent) Render(styles *ui2.Styles, width int) string {
+	return renderEvent(styles, width, e.baseEvent, e.Name, e.Details, "", 0, false)
+}
+
 // RequestActivity represents a request to the bridge (not an event).
 type RequestActivity struct {
 	timestamp  time.Time

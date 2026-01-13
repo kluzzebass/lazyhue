@@ -40,6 +40,9 @@ func parseEventFromBridgeCallback(bridgeID, resourceType, resourceID, eventType 
 	case "grouped_light_level":
 		evt := &GroupedLightLevelEvent{}
 		event, err = evt.Parse(bridgeID, eventType, data, state)
+	case "device":
+		evt := &DeviceEvent{}
+		event, err = evt.Parse(bridgeID, eventType, data, state)
 	default:
 		evt := &UnhandledEvent{}
 		event, err = evt.Parse(bridgeID, eventType, data, state)

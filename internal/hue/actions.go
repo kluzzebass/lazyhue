@@ -946,6 +946,10 @@ func (b *Bridge) SetDeviceArchetype(deviceID string, archetype hueclient.Product
 	if device, ok := b.state.GetDevice(deviceID); ok && device.Metadata != nil && device.Metadata.Name != nil {
 		deviceName = *device.Metadata.Name
 	}
+
+	// Optimistic update: apply to cache immediately
+	b.state.SetDeviceArchetype(deviceID, archetype)
+
 	b.logRequest(fmt.Sprintf("%s: archetype changed to \"%s\"", deviceName, string(archetype)))
 	_, err := client.UpdateDevice(context.Background(), deviceID, hueclient.UpdateDeviceJSONRequestBody{
 		Metadata: &struct {
