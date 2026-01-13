@@ -311,10 +311,45 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.rebuildTreeForActiveTab()
 			// Update form if the event is for the currently selected light
 			// BUT only if the form is not currently being edited (to prevent interrupting user input)
-			if msg.resourceType == "light" && msg.resourceID == m.selectedLightID && state != nil && !m.lightForm.Editing {
+			// AND not when dropdown is open (to prevent interrupting dropdown interaction)
+			if msg.resourceType == "light" && msg.resourceID == m.selectedLightID && state != nil && !m.lightForm.Editing && !m.lightForm.DropdownOpen {
 				if light, ok := state.GetLight(msg.resourceID); ok {
-					fields := m.buildLightFormFields(light)
-					m.lightForm.SetFields(fields)
+					// Build ALL fields (control + detail), not just control fields
+					// This prevents cursor reset due to field count change
+					oldCursor := m.lightForm.Cursor
+
+					// Build control fields
+					controlFields := m.buildLightFormFields(light)
+
+					// Add Controls header
+					allFields := []components.FormField{
+						{
+							Type:  components.FormFieldHeader,
+							Label: "Controls",
+						},
+					}
+					allFields = append(allFields, controlFields...)
+
+					// Build and append detail fields
+					detailFields := m.buildLightDetailFormFields(light, state)
+					allFields = append(allFields, detailFields...)
+
+					// Calculate max label width across all fields
+					maxLabelWidth := 0
+					for _, field := range allFields {
+						if len(field.Label) > maxLabelWidth {
+							maxLabelWidth = len(field.Label)
+						}
+					}
+					m.lightForm.MaxLabelWidth = maxLabelWidth
+
+					m.lightForm.SetFields(allFields)
+
+					// Restore cursor position (SetFields preserves it if field count unchanged)
+					// But just to be safe, restore it explicitly
+					if oldCursor < len(allFields) {
+						m.lightForm.Cursor = oldCursor
+					}
 				}
 			}
 		}
@@ -457,6 +492,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case key.Matches(msg, key.NewBinding(key.WithKeys("esc"))):
 			// Don't handle escape globally if in rename mode - let panel handle it
 			if m.renaming {
+				break
+			}
+			// Don't handle escape globally if form has dropdown open or is editing - let panel handle it
+			if m.lightForm != nil && (m.lightForm.Editing || m.lightForm.DropdownOpen) {
 				break
 			}
 			// Close help if showing
@@ -661,8 +700,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Handle Escape key to return to previous panel
 		if keyMsg, ok := msg.(tea.KeyMsg); ok {
 			if keyMsg.String() == "esc" {
-				// Check if form is editing - if so, cancel edit first
-				if m.lightForm != nil && m.lightForm.Editing {
+				// Check if form is editing or dropdown is open - if so, cancel edit first
+				if m.lightForm != nil && (m.lightForm.Editing || m.lightForm.DropdownOpen) {
 					var cmd tea.Cmd
 					m.lightForm, cmd = m.lightForm.Update(msg)
 					if cmd != nil {
@@ -769,6 +808,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					if m.lightForm.Cursor != oldCursor || m.lightForm.MouseCaptureIdx != oldCapture || fieldChanged || dropdownChanged {
 						formHandledMouse = true
 						m.updateDetailContent()
+						// Scroll viewport if cursor changed or dropdown opened/closed
+						if m.lightForm.Cursor != oldCursor || dropdownChanged {
+							m.scrollDetailViewportToCursor()
+						}
 						// If dropdown just opened, add a null command to force another render cycle
 						// This ensures dropdown option zones are scanned before next mouse click
 						if dropdownChanged && m.lightForm.DropdownOpen {
@@ -801,6 +844,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if formNavigationKeys[keyStr] {
 					// Always let form handle these keys when it has fields
 					formHandledKey = true
+					oldCursor := m.lightForm.Cursor
+					oldDropdownOpen := m.lightForm.DropdownOpen
 					var cmd tea.Cmd
 					m.lightForm, cmd = m.lightForm.Update(msg)
 					if cmd != nil {
@@ -809,6 +854,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					// Update detail content to reflect form changes
 					// updateDetailContent preserves form state when editing, so this is safe
 					m.updateDetailContent()
+
+					// Scroll viewport to keep cursor visible if cursor moved OR dropdown opened/closed
+					if oldCursor != m.lightForm.Cursor || oldDropdownOpen != m.lightForm.DropdownOpen {
+						m.scrollDetailViewportToCursor()
+					}
 				} else {
 					// Other keys, let form try to handle them first
 					var cmd tea.Cmd
@@ -1223,4 +1273,76 @@ func (m *Model) navigateForward() {
 	m.focusedPane = PanelDetail
 
 	m.status = fmt.Sprintf("Forward: %s (%d/%d)", node.Item.Name, m.historyIndex+1, len(m.navigationHistory))
+}
+
+// scrollDetailViewportToCursor scrolls the detail viewport to ensure the current form cursor is visible.
+func (m *Model) scrollDetailViewportToCursor() {
+	if m.lightForm == nil || len(m.lightForm.Fields) == 0 {
+		return
+	}
+
+	// Calculate line number where cursor field starts
+	// Start at 0 and count all lines before the cursor field
+	cursorLine := 0
+
+	for i := 0; i < m.lightForm.Cursor && i < len(m.lightForm.Fields); i++ {
+		field := &m.lightForm.Fields[i]
+		// Count lines for this field
+		if field.Type == components.FormFieldHeader {
+			// First header (i=0) takes 1 line, subsequent headers take 2 lines (blank + header)
+			if i == 0 {
+				cursorLine += 1
+			} else {
+				cursorLine += 2
+			}
+		} else if field.Type == components.FormFieldColor {
+			cursorLine += m.lightForm.ColorWheel.Height()
+		} else if field.Type == components.FormFieldHSL || field.Type == components.FormFieldRGB {
+			cursorLine += 3 // 3 rows for HSL/RGB
+		} else if field.Type == components.FormFieldRadio && field.Vertical {
+			cursorLine += len(field.Options)
+		} else if field.Type == components.FormFieldSelect && m.lightForm.DropdownOpen && i == m.lightForm.Cursor {
+			cursorLine += 6 // 1 for label + 5 for dropdown
+		} else {
+			cursorLine++ // Standard 1-line field
+		}
+	}
+
+	// Calculate the height of the current field (to ensure entire field is visible)
+	currentFieldHeight := 1 // Default: 1 line
+	if m.lightForm.Cursor < len(m.lightForm.Fields) {
+		currentField := &m.lightForm.Fields[m.lightForm.Cursor]
+		if currentField.Type == components.FormFieldColor {
+			currentFieldHeight = m.lightForm.ColorWheel.Height()
+		} else if currentField.Type == components.FormFieldHSL || currentField.Type == components.FormFieldRGB {
+			currentFieldHeight = 3
+		} else if currentField.Type == components.FormFieldRadio && currentField.Vertical {
+			currentFieldHeight = len(currentField.Options)
+		} else if currentField.Type == components.FormFieldSelect && m.lightForm.DropdownOpen {
+			// Dropdown: label line + dropdown content (up to 6 lines total with border)
+			currentFieldHeight = min(6, len(currentField.Options)+2) // +2 for top/bottom borders
+		}
+	}
+
+	// Get viewport dimensions
+	viewportHeight := m.detailViewport.Height()
+	viewportY := m.detailViewport.YOffset
+
+	// Calculate where the field ends
+	cursorEndLine := cursorLine + currentFieldHeight - 1
+
+	// Check if entire field is visible
+	if cursorLine < viewportY {
+		// Field start is above viewport, scroll up to show start
+		m.detailViewport.SetYOffset(cursorLine)
+	} else if cursorEndLine >= viewportY+viewportHeight {
+		// Field end is below viewport, scroll down to show entire field
+		// Position the field end at the bottom of the viewport
+		newOffset := cursorEndLine - viewportHeight + 1
+		// Make sure we don't scroll past the field start
+		if newOffset > cursorLine {
+			newOffset = cursorLine
+		}
+		m.detailViewport.SetYOffset(newOffset)
+	}
 }

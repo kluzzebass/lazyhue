@@ -706,12 +706,89 @@ func (m *Model) buildLightDetailFormFields(light hueclient.LightGet, state *hue.
 			Label: "Classification",
 		})
 		if device != nil && device.ProductData != nil && device.ProductData.ProductArchetype != nil {
+			// Build archetype options (common light archetypes)
+			archetypeOptions := []components.FormSelectOption{
+				{Label: "Bollard", Value: 0},
+				{Label: "Candle Bulb", Value: 1},
+				{Label: "Ceiling Horizontal", Value: 2},
+				{Label: "Ceiling Round", Value: 3},
+				{Label: "Ceiling Square", Value: 4},
+				{Label: "Ceiling Tube", Value: 5},
+				{Label: "Classic Bulb", Value: 6},
+				{Label: "Double Spot", Value: 7},
+				{Label: "Edison Bulb", Value: 8},
+				{Label: "Ellipse Bulb", Value: 9},
+				{Label: "Flexible Lamp", Value: 10},
+				{Label: "Flood Bulb", Value: 11},
+				{Label: "Floor Lantern", Value: 12},
+				{Label: "Floor Shade", Value: 13},
+				{Label: "Ground Spot", Value: 14},
+				{Label: "Hue Bloom", Value: 15},
+				{Label: "Hue Go", Value: 16},
+				{Label: "Hue Iris", Value: 17},
+				{Label: "Hue Lightstrip", Value: 18},
+				{Label: "Hue Play", Value: 19},
+				{Label: "Hue Signe", Value: 20},
+				{Label: "Hue Tube", Value: 21},
+				{Label: "Large Globe Bulb", Value: 22},
+				{Label: "Luster Bulb", Value: 23},
+				{Label: "Pendant Long", Value: 24},
+				{Label: "Pendant Round", Value: 25},
+				{Label: "Pendant Spot", Value: 26},
+				{Label: "Plug", Value: 27},
+				{Label: "Recessed Ceiling", Value: 28},
+				{Label: "Recessed Floor", Value: 29},
+				{Label: "Single Spot", Value: 30},
+				{Label: "Small Globe Bulb", Value: 31},
+				{Label: "Spot Bulb", Value: 32},
+				{Label: "String Light", Value: 33},
+				{Label: "Sultan Bulb", Value: 34},
+				{Label: "Table Shade", Value: 35},
+				{Label: "Table Wash", Value: 36},
+				{Label: "Triangle Bulb", Value: 37},
+				{Label: "Unknown Archetype", Value: 38},
+				{Label: "Vintage Bulb", Value: 39},
+				{Label: "Vintage Candle Bulb", Value: 40},
+				{Label: "Wall Lantern", Value: 41},
+				{Label: "Wall Shade", Value: 42},
+				{Label: "Wall Spot", Value: 43},
+				{Label: "Wall Washer", Value: 44},
+			}
+
+			// Find current archetype index
+			currentArchetype := string(*device.ProductData.ProductArchetype)
+			currentIndex := 38 // default to "unknown_archetype"
+			archetypeMap := map[string]int{
+				"bollard": 0, "candle_bulb": 1, "ceiling_horizontal": 2, "ceiling_round": 3,
+				"ceiling_square": 4, "ceiling_tube": 5, "classic_bulb": 6, "double_spot": 7,
+				"edison_bulb": 8, "ellipse_bulb": 9, "flexible_lamp": 10, "flood_bulb": 11,
+				"floor_lantern": 12, "floor_shade": 13, "ground_spot": 14, "hue_bloom": 15,
+				"hue_go": 16, "hue_iris": 17, "hue_lightstrip": 18, "hue_play": 19,
+				"hue_signe": 20, "hue_tube": 21, "large_globe_bulb": 22, "luster_bulb": 23,
+				"pendant_long": 24, "pendant_round": 25, "pendant_spot": 26, "plug": 27,
+				"recessed_ceiling": 28, "recessed_floor": 29, "single_spot": 30, "small_globe_bulb": 31,
+				"spot_bulb": 32, "string_light": 33, "sultan_bulb": 34, "table_shade": 35,
+				"table_wash": 36, "triangle_bulb": 37, "unknown_archetype": 38, "vintage_bulb": 39,
+				"vintage_candle_bulb": 40, "wall_lantern": 41, "wall_shade": 42, "wall_spot": 43,
+				"wall_washer": 44,
+			}
+			if idx, ok := archetypeMap[currentArchetype]; ok {
+				currentIndex = idx
+			}
+
+			// Store device ID for updates
+			deviceID := ""
+			if light.Owner != nil && light.Owner.Rid != nil {
+				deviceID = *light.Owner.Rid
+			}
+
 			classFields = append(classFields, components.FormField{
-				ID:        "archetype",
-				Label:     "Archetype",
-				Type:      components.FormFieldText,
-				TextValue: string(*device.ProductData.ProductArchetype),
-				ReadOnly:  true, // TODO: Make editable in Phase 5
+				ID:       "archetype:" + deviceID,
+				Label:    "Archetype",
+				Type:     components.FormFieldSelect,
+				Value:    currentIndex,
+				Options:  archetypeOptions,
+				ReadOnly: false,
 			})
 		}
 		if light.Type != nil {
@@ -754,13 +831,18 @@ func (m *Model) buildLightDetailFormFields(light hueclient.LightGet, state *hue.
 			Type:  components.FormFieldHeader,
 			Label: "Name",
 		})
-		if currentName != "" {
+		if currentName != "" && device != nil {
+			// Store device ID in a custom field for onChange handling
+			deviceID := ""
+			if light.Owner != nil && light.Owner.Rid != nil {
+				deviceID = *light.Owner.Rid
+			}
 			nameFields = append(nameFields, components.FormField{
-				ID:        "name",
+				ID:        "name:" + deviceID, // Include device ID for updates
 				Label:     "Name",
 				Type:      components.FormFieldText,
 				TextValue: currentName,
-				ReadOnly:  true, // TODO: Make editable in Phase 5
+				ReadOnly:  false,
 			})
 		}
 		if light.Metadata != nil && light.Metadata.Name != nil {
@@ -1092,12 +1174,41 @@ func (m *Model) buildLightDetailFormFields(light hueclient.LightGet, state *hue.
 			Type:  components.FormFieldHeader,
 			Label: "Power-on Behavior",
 		})
+
+		// Build preset options
+		presetOptions := []components.FormSelectOption{
+			{Label: "Safety", Value: 0},
+			{Label: "Power Fail", Value: 1},
+			{Label: "Last On State", Value: 2},
+			{Label: "Custom", Value: 3},
+		}
+
+		// Find current preset index
+		currentPreset := string(*light.Powerup.Preset)
+		currentIndex := 0
+		presetMap := map[string]int{
+			"safety":         0,
+			"powerfail":      1,
+			"last_on_state":  2,
+			"custom":         3,
+		}
+		if idx, ok := presetMap[currentPreset]; ok {
+			currentIndex = idx
+		}
+
+		// Get light ID for updates
+		lightID := ""
+		if light.Id != nil {
+			lightID = *light.Id
+		}
+
 		fields = append(fields, components.FormField{
-			ID:        "powerup-preset",
-			Label:     "Preset",
-			Type:      components.FormFieldText,
-			TextValue: string(*light.Powerup.Preset),
-			ReadOnly:  true, // TODO: Make editable in Phase 5
+			ID:       "powerup-preset:" + lightID,
+			Label:    "Preset",
+			Type:     components.FormFieldSelect,
+			Value:    currentIndex,
+			Options:  presetOptions,
+			ReadOnly: false,
 		})
 	}
 
@@ -1155,25 +1266,61 @@ func (m *Model) handleLightFieldChange(field components.FormField, lightID strin
 	}
 
 	var err error
-	switch field.ID {
-	case "on":
-		newOn := field.Value != 0
-		err = bridge.SetLightOn(lightID, newOn)
-	case "brightness":
-		err = bridge.SetLightBrightness(lightID, float64(field.Value))
-	case "colortemp":
-		err = bridge.SetLightColorTemperature(lightID, field.Value)
-	case "color":
-		err = bridge.SetLightColor(lightID, field.ColorX, field.ColorY)
-	case "effect":
-		// Get the effect from the options based on the Value (index)
-		if state := bridge.GetState(); state != nil {
-			if light, ok := state.GetLight(lightID); ok {
-				if light.Effects != nil && light.Effects.EffectValues != nil {
-					effects := *light.Effects.EffectValues
-					if field.Value >= 0 && field.Value < len(effects) {
-						effect := effects[field.Value]
-						err = bridge.SetLightEffect(lightID, effect)
+	// Handle fields with embedded IDs (name:deviceID, archetype:deviceID, powerup-preset:lightID)
+	if strings.HasPrefix(field.ID, "name:") {
+		deviceID := strings.TrimPrefix(field.ID, "name:")
+		err = bridge.SetDeviceName(deviceID, field.TextValue)
+	} else if strings.HasPrefix(field.ID, "archetype:") {
+		deviceID := strings.TrimPrefix(field.ID, "archetype:")
+		// Map index back to archetype string
+		archetypeStrings := []string{
+			"bollard", "candle_bulb", "ceiling_horizontal", "ceiling_round",
+			"ceiling_square", "ceiling_tube", "classic_bulb", "double_spot",
+			"edison_bulb", "ellipse_bulb", "flexible_lamp", "flood_bulb",
+			"floor_lantern", "floor_shade", "ground_spot", "hue_bloom",
+			"hue_go", "hue_iris", "hue_lightstrip", "hue_play",
+			"hue_signe", "hue_tube", "large_globe_bulb", "luster_bulb",
+			"pendant_long", "pendant_round", "pendant_spot", "plug",
+			"recessed_ceiling", "recessed_floor", "single_spot", "small_globe_bulb",
+			"spot_bulb", "string_light", "sultan_bulb", "table_shade",
+			"table_wash", "triangle_bulb", "unknown_archetype", "vintage_bulb",
+			"vintage_candle_bulb", "wall_lantern", "wall_shade", "wall_spot",
+			"wall_washer",
+		}
+		if field.Value >= 0 && field.Value < len(archetypeStrings) {
+			archetype := hueclient.ProductArchetype(archetypeStrings[field.Value])
+			err = bridge.SetDeviceArchetype(deviceID, archetype)
+		}
+	} else if strings.HasPrefix(field.ID, "powerup-preset:") {
+		lightIDFromField := strings.TrimPrefix(field.ID, "powerup-preset:")
+		// Map index back to preset string
+		presetStrings := []string{"safety", "powerfail", "last_on_state", "custom"}
+		if field.Value >= 0 && field.Value < len(presetStrings) {
+			preset := hueclient.PowerupPreset(presetStrings[field.Value])
+			err = bridge.SetLightPowerupPreset(lightIDFromField, preset)
+		}
+	} else {
+		// Handle regular fields
+		switch field.ID {
+		case "on":
+			newOn := field.Value != 0
+			err = bridge.SetLightOn(lightID, newOn)
+		case "brightness":
+			err = bridge.SetLightBrightness(lightID, float64(field.Value))
+		case "colortemp":
+			err = bridge.SetLightColorTemperature(lightID, field.Value)
+		case "color":
+			err = bridge.SetLightColor(lightID, field.ColorX, field.ColorY)
+		case "effect":
+			// Get the effect from the options based on the Value (index)
+			if state := bridge.GetState(); state != nil {
+				if light, ok := state.GetLight(lightID); ok {
+					if light.Effects != nil && light.Effects.EffectValues != nil {
+						effects := *light.Effects.EffectValues
+						if field.Value >= 0 && field.Value < len(effects) {
+							effect := effects[field.Value]
+							err = bridge.SetLightEffect(lightID, effect)
+						}
 					}
 				}
 			}

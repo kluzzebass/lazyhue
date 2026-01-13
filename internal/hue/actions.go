@@ -893,14 +893,89 @@ func (b *Bridge) SetZoneArchetype(zoneID string, archetype hueclient.RoomArchety
 	zoneName := "Unknown"
 	if zone, ok := b.state.GetZone(zoneID); ok {
 		zoneName = zone.RoomName("")
-		}
-	b.logRequest(fmt.Sprintf("%s: renamed to \"%s\"", zoneName, zoneName))
+	}
+	b.logRequest(fmt.Sprintf("%s: archetype changed", zoneName))
 	_, err := client.UpdateZone(context.Background(), zoneID, hueclient.UpdateZoneJSONRequestBody{
 		Metadata: &struct {
 		Archetype *hueclient.RoomArchetype `json:"archetype,omitempty"`
 		Name      *string                  `json:"name,omitempty"`
 		}{
 		Archetype: &archetype,
+		},
+	})
+	return err
+}
+
+// SetDeviceName updates a device's name.
+func (b *Bridge) SetDeviceName(deviceID string, name string) error {
+	b.mu.RLock()
+	client := b.client
+	b.mu.RUnlock()
+
+	if client == nil {
+		return ErrAuthFailed
+	}
+
+	oldName := "Unknown"
+	if device, ok := b.state.GetDevice(deviceID); ok && device.Metadata != nil && device.Metadata.Name != nil {
+		oldName = *device.Metadata.Name
+	}
+	b.logRequest(fmt.Sprintf("%s: renamed to \"%s\"", oldName, name))
+	_, err := client.UpdateDevice(context.Background(), deviceID, hueclient.UpdateDeviceJSONRequestBody{
+		Metadata: &struct {
+			Archetype *hueclient.ProductArchetype `json:"archetype,omitempty"`
+			Name      *string                     `json:"name,omitempty"`
+		}{
+			Name: &name,
+		},
+	})
+	return err
+}
+
+// SetDeviceArchetype updates a device's archetype.
+func (b *Bridge) SetDeviceArchetype(deviceID string, archetype hueclient.ProductArchetype) error {
+	b.mu.RLock()
+	client := b.client
+	b.mu.RUnlock()
+
+	if client == nil {
+		return ErrAuthFailed
+	}
+
+	deviceName := "Unknown"
+	if device, ok := b.state.GetDevice(deviceID); ok && device.Metadata != nil && device.Metadata.Name != nil {
+		deviceName = *device.Metadata.Name
+	}
+	b.logRequest(fmt.Sprintf("%s: archetype changed to \"%s\"", deviceName, string(archetype)))
+	_, err := client.UpdateDevice(context.Background(), deviceID, hueclient.UpdateDeviceJSONRequestBody{
+		Metadata: &struct {
+			Archetype *hueclient.ProductArchetype `json:"archetype,omitempty"`
+			Name      *string                     `json:"name,omitempty"`
+		}{
+			Archetype: &archetype,
+		},
+	})
+	return err
+}
+
+// SetLightPowerupPreset updates a light's power-on behavior preset.
+func (b *Bridge) SetLightPowerupPreset(lightID string, preset hueclient.PowerupPreset) error {
+	b.mu.RLock()
+	client := b.client
+	b.mu.RUnlock()
+
+	if client == nil {
+		return ErrAuthFailed
+	}
+
+	lightName := "Unknown"
+	if light, ok := b.state.GetLight(lightID); ok && light.Metadata != nil && light.Metadata.Name != nil {
+		lightName = *light.Metadata.Name
+	}
+	b.logRequest(fmt.Sprintf("%s: power-on preset changed to \"%s\"", lightName, string(preset)))
+	_, err := client.UpdateLight(context.Background(), lightID, hueclient.UpdateLightJSONRequestBody{
+		Powerup: &hueclient.Powerup{
+			Preset: &preset,
 		},
 	})
 	return err
