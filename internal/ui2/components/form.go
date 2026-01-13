@@ -60,6 +60,12 @@ type Form struct {
 	Styles *ui2.Styles
 	Zones  *zone.Manager
 
+	// Label alignment - if set, use this width for all labels (for cross-section alignment)
+	MaxLabelWidth int
+
+	// Optional section header to render before fields
+	SectionHeader string
+
 	// Blink timer
 	blinkTimerActive bool
 	blinkTimerScheduled bool // Track if timer is already scheduled to avoid duplicates
@@ -904,10 +910,13 @@ func (f *Form) handleColorWheelClick(field *FormField, mouseX, mouseY int) {
 	}
 
 	// Calculate indent width (must match View rendering)
-	maxLabelWidth := 0
-	for _, fld := range f.Fields {
-		if len(fld.Label) > maxLabelWidth {
-			maxLabelWidth = len(fld.Label)
+	// Use externally set MaxLabelWidth if available, otherwise calculate
+	maxLabelWidth := f.MaxLabelWidth
+	if maxLabelWidth == 0 {
+		for _, fld := range f.Fields {
+			if len(fld.Label) > maxLabelWidth {
+				maxLabelWidth = len(fld.Label)
+			}
 		}
 	}
 	indentWidth := 2 + maxLabelWidth + 2 // "> " + label + ": "
@@ -938,11 +947,23 @@ func (f *Form) View() string {
 
 	var content strings.Builder
 
-	// Find max label width
-	maxLabelWidth := 0
-	for _, field := range f.Fields {
-		if len(field.Label) > maxLabelWidth {
-			maxLabelWidth = len(field.Label)
+	// Render section header if set
+	if f.SectionHeader != "" {
+		if f.Styles != nil {
+			content.WriteString(f.Styles.Subtitle.Render(f.SectionHeader))
+		} else {
+			content.WriteString(f.SectionHeader)
+		}
+		content.WriteString("\n")
+	}
+
+	// Find max label width - use externally set width if available, otherwise calculate
+	maxLabelWidth := f.MaxLabelWidth
+	if maxLabelWidth == 0 {
+		for _, field := range f.Fields {
+			if len(field.Label) > maxLabelWidth {
+				maxLabelWidth = len(field.Label)
+			}
 		}
 	}
 
@@ -996,7 +1017,6 @@ func (f *Form) View() string {
 			} else {
 				label = cursor + f.Styles.Label.Render(labelPadded)
 			}
-			content.WriteString(label + "\n")
 
 			// Always sync color wheel with field color
 			if f.Editing && isFocused {
@@ -1036,9 +1056,16 @@ func (f *Form) View() string {
 			// Bubblezone overwrites bounds when same ID is used multiple times,
 			// so we use row-specific IDs: form-field-color-0, form-field-color-1, etc.
 			rowIdx := 0
-			for _, line := range wheelLines {
+			for lineIdx, line := range wheelLines {
 				if line != "" {
-					lineContent := indent + line
+					var lineContent string
+					if lineIdx == 0 {
+						// First line goes on same line as label
+						lineContent = label + line
+					} else {
+						// Subsequent lines are indented to value column
+						lineContent = indent + line
+					}
 					if f.Zones != nil {
 						rowZoneID := fmt.Sprintf("%s-%d", ui2.FormFieldZone(field.ID), rowIdx)
 						lineContent = f.Zones.Mark(rowZoneID, lineContent)

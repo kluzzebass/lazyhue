@@ -186,6 +186,15 @@ func (m *Model) updateDetailContent() {
 		if !ok && state != nil {
 			light, ok = state.GetLight(node.Item.ID)
 		}
+
+		// Calculate unified max label width across form and detail fields (even if !ok, for fallback message)
+		maxLabelWidth := 0
+		if ok {
+			maxLabelWidth = m.calculateLightMaxLabelWidth()
+			m.lightForm.MaxLabelWidth = maxLabelWidth
+			m.lightForm.SectionHeader = "Controls:"
+		}
+
 		if ok {
 			// Get the actual light ID from the light object (use *light.Id, not node.Item.ID)
 			actualLightID := ""
@@ -243,6 +252,7 @@ func (m *Model) updateDetailContent() {
 					m.handleLightFieldChange(field, actualLightID, callbackBridgeID)
 				}
 			}
+
 			// Add form FIRST (controls at the top for efficiency)
 			if len(m.lightForm.Fields) > 0 {
 				formContent := m.lightForm.View()
@@ -251,8 +261,8 @@ func (m *Model) updateDetailContent() {
 				content.WriteString("\n")
 			}
 		}
-		// Then add details
-		content.WriteString(m.buildLightDetails(node.Item, state))
+		// Then add details (pass maxLabelWidth for consistent alignment)
+		content.WriteString(m.buildLightDetailsWithWidth(node.Item, state, maxLabelWidth))
 	default:
 		// Clear form for non-light entities
 		m.lightForm.SetFields([]components.FormField{})
@@ -557,9 +567,71 @@ func (m *Model) buildLightFormFields(light hueclient.LightGet) []components.Form
 	return fields
 }
 
-// buildLightDetails builds the detail content for a light entity.
+// calculateLightMaxLabelWidth calculates the max label width across form fields and detail fields.
+func (m *Model) calculateLightMaxLabelWidth() int {
+	maxWidth := 0
+
+	// Form field labels
+	for _, field := range m.lightForm.Fields {
+		if len(field.Label) > maxWidth {
+			maxWidth = len(field.Label)
+		}
+	}
+
+	// Detail field labels (duplicate logic from buildLightDetails)
+	checkLabel := func(label string) {
+		if len(label) > maxWidth {
+			maxWidth = len(label)
+		}
+	}
+
+	// Product fields
+	checkLabel("Product")
+	checkLabel("Manufacturer")
+	checkLabel("Model")
+	checkLabel("Firmware")
+	checkLabel("Hardware")
+
+	// Classification
+	checkLabel("Archetype")
+	checkLabel("Type")
+	checkLabel("Mode")
+
+	// Name
+	checkLabel("Name")
+	checkLabel("Alternate name")
+
+	// IDs
+	checkLabel("Light ID")
+	checkLabel("Device ID")
+	checkLabel("V1 ID")
+
+	// State
+	checkLabel("Brightness")
+	checkLabel("Min dim level")
+	checkLabel("Color XY")
+	checkLabel("Gamut")
+	checkLabel("Color temp")
+	checkLabel("CT range")
+
+	// Dynamics
+	checkLabel("Status")
+	checkLabel("Speed")
+
+	// Gradient
+	checkLabel("Pixels")
+	checkLabel("Points")
+	checkLabel("Mode")
+
+	// Powerup
+	checkLabel("Preset")
+
+	return maxWidth
+}
+
+// buildLightDetailsWithWidth builds the detail content for a light entity with specified label width.
 // Formatting matches v1 UI: aligned fields, proper headers, consistent spacing.
-func (m *Model) buildLightDetails(item *panels.EntityItem, state *hue.BridgeState) string {
+func (m *Model) buildLightDetailsWithWidth(item *panels.EntityItem, state *hue.BridgeState, maxLabelWidth int) string {
 	// Get light from RawPtr first (most reliable), then fall back to state lookup
 	var light hueclient.LightGet
 	var ok bool
@@ -742,13 +814,7 @@ func (m *Model) buildLightDetails(item *panels.EntityItem, state *hue.BridgeStat
 		allFields = append(allFields, powerupFields...)
 	}
 
-	// Calculate max label width for alignment
-	maxLabelWidth := 0
-	for _, f := range allFields {
-		if len(f.label) > maxLabelWidth {
-			maxLabelWidth = len(f.label)
-		}
-	}
+	// maxLabelWidth is now passed as parameter for consistent alignment with form fields
 
 	var content strings.Builder
 
