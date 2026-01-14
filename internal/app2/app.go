@@ -4,7 +4,6 @@ package app2
 import (
 	"context"
 	"fmt"
-	"log/slog"
 	"strings"
 	"time"
 
@@ -1204,8 +1203,6 @@ func (m *Model) getPanelKey(panelID string) string {
 
 // rebuildTreeForActiveTab rebuilds the tree for the active tab, showing all bridges.
 func (m *Model) rebuildTreeForActiveTab() {
-	slog.Debug("rebuildTreeForActiveTab called", "tab", m.tree.ActiveTabID())
-	// All tree builders now show entities from all bridges
 	tabID := m.tree.ActiveTabID()
 
 	switch tabID {
@@ -1224,8 +1221,7 @@ func (m *Model) rebuildTreeForActiveTab() {
 	// Try to apply pending selection if we have one
 	if m.pendingSelectionID != "" {
 		if m.tree.SelectByID(m.pendingSelectionID) {
-			slog.Debug("rebuildTreeForActiveTab: applied pending selection", "id", m.pendingSelectionID)
-			m.pendingSelectionID = "" // Clear pending selection
+			m.pendingSelectionID = ""
 			m.updateDetailContent()
 		}
 	}
