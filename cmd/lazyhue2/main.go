@@ -4,6 +4,8 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"os/signal"
+	"syscall"
 
 	tea "github.com/charmbracelet/bubbletea/v2"
 	zone "github.com/lrstanley/bubblezone/v2"
@@ -47,6 +49,15 @@ func main() {
 		tea.WithAltScreen(),
 		tea.WithMouseAllMotion(),
 	)
+
+	// Set up signal handling to save state on SIGINT, SIGTERM, SIGHUP
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP)
+	go func() {
+		<-sigChan
+		// Send quit message to trigger graceful shutdown with state save
+		p.Send(app2.SignalQuitMsg{})
+	}()
 
 	if _, err := p.Run(); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)

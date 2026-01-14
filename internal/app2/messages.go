@@ -71,4 +71,8 @@ type (
 		BridgeID string
 		Err      error
 	}
+
+	// SignalQuitMsg is sent when the app receives SIGINT, SIGTERM, or SIGHUP.
+	// Exported so it can be sent from main.go.
+	SignalQuitMsg struct{}
 )

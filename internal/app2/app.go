@@ -4,6 +4,7 @@ package app2
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -125,6 +126,10 @@ type Model struct {
 
 	// Help display
 	showHelp bool // Whether help is displayed in detail panel
+
+	// State restoration
+	stateRestored      bool   // Whether UI state has been restored from disk
+	pendingSelectionID string // Entity ID to select once it appears in the tree
 
 	// Navigation history
 	navigationHistory []NavigationEntry
@@ -288,6 +293,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 
 	switch msg := msg.(type) {
+	case SignalQuitMsg:
+		// Handle signal-triggered quit (SIGINT, SIGTERM, SIGHUP)
+		m.saveState()
+		m.quitting = true
+		for _, cancel := range m.eventCancelFuncs {
+			cancel()
+		}
+		return m, tea.Quit
+
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
@@ -557,8 +571,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// Rebuild tree and restore state after bridge state has loaded
 			m.status = "Ready"
 			m.rebuildTreeForActiveTab()
-			// Restore UI state (only once, when first bridge connects)
-			if len(m.manager.ConnectedBridges()) == 1 {
+			// Restore UI state (only once, after first bridge state is synced)
+			if !m.stateRestored {
+				m.stateRestored = true
 				m.restoreState()
 			}
 		}
@@ -1189,6 +1204,7 @@ func (m *Model) getPanelKey(panelID string) string {
 
 // rebuildTreeForActiveTab rebuilds the tree for the active tab, showing all bridges.
 func (m *Model) rebuildTreeForActiveTab() {
+	slog.Debug("rebuildTreeForActiveTab called", "tab", m.tree.ActiveTabID())
 	// All tree builders now show entities from all bridges
 	tabID := m.tree.ActiveTabID()
 
@@ -1203,6 +1219,15 @@ func (m *Model) rebuildTreeForActiveTab() {
 		m.buildScenesTree(nil)
 	default:
 		m.buildHomeTree(nil)
+	}
+
+	// Try to apply pending selection if we have one
+	if m.pendingSelectionID != "" {
+		if m.tree.SelectByID(m.pendingSelectionID) {
+			slog.Debug("rebuildTreeForActiveTab: applied pending selection", "id", m.pendingSelectionID)
+			m.pendingSelectionID = "" // Clear pending selection
+			m.updateDetailContent()
+		}
 	}
 }
 

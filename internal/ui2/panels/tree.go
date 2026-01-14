@@ -742,13 +742,34 @@ func (p *TreePanel) SetExpandedStates(state map[string]bool) {
 }
 
 // SelectByID selects a node by entity ID. Returns true if found and selected.
+// If the node is in a collapsed branch, expands ancestors to make it visible.
 func (p *TreePanel) SelectByID(entityID string) bool {
-	// Search through flat list
-	for i, flatNode := range p.flatList {
-		if flatNode.Node.Item != nil && flatNode.Node.Item.ID == entityID {
-			p.Select(i)
-			return true
-		}
+	// Search through full tree (not just flat list) to find the node
+	node := p.findNodeByItemID(entityID)
+	if node == nil {
+		return false
 	}
-	return false
+
+	// Use SelectNode which handles expanding ancestors
+	p.SelectNode(node)
+	return true
+}
+
+// findNodeByItemID searches the full tree for a node with matching Item.ID.
+func (p *TreePanel) findNodeByItemID(entityID string) *TreeNode {
+	var search func(nodes []*TreeNode) *TreeNode
+	search = func(nodes []*TreeNode) *TreeNode {
+		for _, node := range nodes {
+			if node.Item != nil && node.Item.ID == entityID {
+				return node
+			}
+			if len(node.Children) > 0 {
+				if found := search(node.Children); found != nil {
+					return found
+				}
+			}
+		}
+		return nil
+	}
+	return search(p.roots)
 }
