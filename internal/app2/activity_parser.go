@@ -43,6 +43,15 @@ func parseEventFromBridgeCallback(bridgeID, bridgeName, resourceType, resourceID
 	case "device":
 		evt := &DeviceEvent{}
 		event, err = evt.Parse(bridgeID, bridgeName, eventType, data, state)
+	case "room":
+		evt := &RoomEvent{}
+		event, err = evt.Parse(bridgeID, bridgeName, eventType, data, state)
+	case "zone":
+		evt := &ZoneEvent{}
+		event, err = evt.Parse(bridgeID, bridgeName, eventType, data, state)
+	case "bridge_home":
+		evt := &BridgeHomeEvent{}
+		event, err = evt.Parse(bridgeID, bridgeName, eventType, data, state)
 	default:
 		evt := &UnhandledEvent{}
 		event, err = evt.Parse(bridgeID, bridgeName, eventType, data, state)

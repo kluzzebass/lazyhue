@@ -48,6 +48,7 @@ func getSortedProductArchetypes() []string {
 	return archetypes
 }
 
+
 // getSortedPowerupPresets returns a sorted list of power-on preset keys from the display names map.
 // This ensures the dropdown and value handling use the same order.
 func getSortedPowerupPresets() []string {
@@ -244,15 +245,16 @@ func (m *Model) buildRenameContent() string {
 	content.WriteString(fmt.Sprintf("  Current: %s\n\n", m.renameOriginalName))
 
 	// Text input - manually add cursor since virtual cursor isn't rendering
-	inputValue := m.renameInput.Value()
-	cursorPos := m.renameInput.Position()
+	renameInput := m.renameModal.Input()
+	inputValue := renameInput.Value()
+	cursorPos := renameInput.Position()
 
 	// Build the input display with a visible cursor
 	// Convert to runes to handle multi-byte UTF-8 characters properly
 	runes := []rune(inputValue)
 	var displayValue string
 
-	if m.renameInput.Focused() {
+	if renameInput.Focused() {
 		// Insert a block cursor at the cursor position
 		if cursorPos >= len(runes) {
 			// Cursor at end - append block
@@ -268,12 +270,68 @@ func (m *Model) buildRenameContent() string {
 	}
 
 	content.WriteString("  ")
-	content.WriteString(m.renameInput.Prompt)
+	content.WriteString(renameInput.Prompt)
 	content.WriteString(displayValue)
 	content.WriteString("\n\n")
 
 	// Instructions
 	content.WriteString(m.styles.Dimmed.Render("  Enter to save, Esc to cancel"))
+	content.WriteString("\n")
+
+	return content.String()
+}
+
+// buildCreateContent builds the create room/zone input dialog.
+func (m *Model) buildCreateContent() string {
+	var content strings.Builder
+
+	// Header
+	entityType := "Room"
+	if m.creatingZone {
+		entityType = "Zone"
+	}
+	content.WriteString(m.styles.Subtitle.Render(fmt.Sprintf("Create %s", entityType)))
+	content.WriteString("\n\n")
+
+	// Get bridge name
+	bridgeName := ""
+	if bridge := m.manager.GetBridge(m.createBridgeID); bridge != nil {
+		bridgeName = bridge.Info.Name
+	}
+	content.WriteString(fmt.Sprintf("  Bridge: %s\n\n", m.styles.Dimmed.Render(bridgeName)))
+
+	// Text input - manually add cursor since virtual cursor isn't rendering
+	createInput := m.createModal.Input()
+	inputValue := createInput.Value()
+	cursorPos := createInput.Position()
+
+	// Build the input display with a visible cursor
+	// Convert to runes to handle multi-byte UTF-8 characters properly
+	runes := []rune(inputValue)
+	var displayValue string
+
+	if createInput.Focused() {
+		// Insert a block cursor at the cursor position
+		if cursorPos >= len(runes) {
+			// Cursor at end - append block
+			displayValue = inputValue + "█"
+		} else {
+			// Cursor in middle - insert block between characters
+			beforeCursor := string(runes[:cursorPos])
+			afterCursor := string(runes[cursorPos:])
+			displayValue = beforeCursor + "█" + afterCursor
+		}
+	} else {
+		displayValue = inputValue
+	}
+
+	content.WriteString("  ")
+	content.WriteString(createInput.Prompt)
+	content.WriteString(displayValue)
+	content.WriteString("\n\n")
+
+	// Instructions
+	content.WriteString(m.styles.Dimmed.Render("  Enter to create, Esc to cancel"))
 	content.WriteString("\n")
 
 	return content.String()
@@ -447,6 +505,12 @@ func (m *Model) updateDetailContent() {
 	// If in rename mode, show rename input
 	if m.renaming {
 		m.detailViewport.SetContent(m.buildRenameContent())
+		return
+	}
+
+	// If in create room/zone mode, show create form
+	if m.creatingRoom || m.creatingZone {
+		m.detailViewport.SetContent(m.buildCreateContent())
 		return
 	}
 

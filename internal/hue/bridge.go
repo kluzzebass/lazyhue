@@ -221,8 +221,15 @@ func (b *Bridge) handleEvents(container EventContainer) {
 		for _, update := range updates {
 			debug.Log("SSE %s: %s %s", event.Type, update.Type, update.ID)
 
-			// Apply the update directly to our cached state (if we handle this type)
-			b.applyResourceUpdate(update)
+			// Apply the update/delete to our cached state based on event type
+			switch event.Type {
+			case EventTypeDelete:
+				b.applyResourceDelete(update)
+			case EventTypeAdd:
+				b.applyResourceAdd(update)
+			case EventTypeUpdate:
+				b.applyResourceUpdate(update)
+			}
 
 			// Notify listener for all events, even unhandled ones
 			if callback != nil {
@@ -304,6 +311,109 @@ func (b *Bridge) applyResourceUpdate(update ResourceUpdate) bool {
 	default:
 		// Unknown resource type - will be picked up by fallback polling
 		return false
+	}
+}
+
+// applyResourceDelete removes a resource from the bridge state.
+func (b *Bridge) applyResourceDelete(update ResourceUpdate) bool {
+	if b.state == nil {
+		return false
+	}
+
+	switch update.Type {
+	case "light":
+		return b.state.RemoveLight(update.ID)
+	case "room":
+		return b.state.RemoveRoom(update.ID)
+	case "zone":
+		return b.state.RemoveZone(update.ID)
+	case "scene":
+		return b.state.RemoveScene(update.ID)
+	case "device":
+		return b.state.RemoveDevice(update.ID)
+	case "grouped_light":
+		return b.state.RemoveGroupedLight(update.ID)
+	default:
+		return false
+	}
+}
+
+// applyResourceAdd fetches a new resource from the API and adds it to the cache.
+func (b *Bridge) applyResourceAdd(update ResourceUpdate) bool {
+	b.mu.RLock()
+	client := b.client
+	b.mu.RUnlock()
+
+	if client == nil || b.state == nil {
+		return false
+	}
+
+	ctx := context.Background()
+
+	switch update.Type {
+	case "room":
+		resp, err := client.GetRoomWithResponse(ctx, update.ID)
+		if err != nil || resp.JSON200 == nil || resp.JSON200.Data == nil {
+			debug.Log("Failed to fetch new room %s: %v", update.ID, err)
+			return false
+		}
+		for _, room := range *resp.JSON200.Data {
+			if room.Id != nil {
+				b.state.AddRoom(*room.Id, room)
+				debug.Log("Added new room %s to cache", *room.Id)
+				return true
+			}
+		}
+		return false
+
+	case "zone":
+		resp, err := client.GetZoneWithResponse(ctx, update.ID)
+		if err != nil || resp.JSON200 == nil || resp.JSON200.Data == nil {
+			debug.Log("Failed to fetch new zone %s: %v", update.ID, err)
+			return false
+		}
+		for _, zone := range *resp.JSON200.Data {
+			if zone.Id != nil {
+				b.state.AddZone(*zone.Id, zone)
+				debug.Log("Added new zone %s to cache", *zone.Id)
+				return true
+			}
+		}
+		return false
+
+	case "scene":
+		resp, err := client.GetSceneWithResponse(ctx, update.ID)
+		if err != nil || resp.JSON200 == nil || resp.JSON200.Data == nil {
+			debug.Log("Failed to fetch new scene %s: %v", update.ID, err)
+			return false
+		}
+		for _, scene := range *resp.JSON200.Data {
+			if scene.Id != nil {
+				b.state.AddScene(*scene.Id, scene)
+				debug.Log("Added new scene %s to cache", *scene.Id)
+				return true
+			}
+		}
+		return false
+
+	case "grouped_light":
+		resp, err := client.GetGroupedLightWithResponse(ctx, update.ID)
+		if err != nil || resp.JSON200 == nil || resp.JSON200.Data == nil {
+			debug.Log("Failed to fetch new grouped_light %s: %v", update.ID, err)
+			return false
+		}
+		for _, gl := range *resp.JSON200.Data {
+			if gl.Id != nil {
+				b.state.AddGroupedLight(*gl.Id, gl)
+				debug.Log("Added new grouped_light %s to cache", *gl.Id)
+				return true
+			}
+		}
+		return false
+
+	default:
+		// For other resource types, fall through to regular update handling
+		return b.applyResourceUpdate(update)
 	}
 }
 

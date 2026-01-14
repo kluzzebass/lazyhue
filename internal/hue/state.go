@@ -778,6 +778,118 @@ func (s *BridgeState) ApplyDeviceMetadata(id string, name *string) bool {
 	return false
 }
 
+// RemoveLight removes a light from the cache.
+func (s *BridgeState) RemoveLight(id string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if _, ok := s.Lights[id]; ok {
+		delete(s.Lights, id)
+		return true
+	}
+	return false
+}
+
+// RemoveRoom removes a room from the cache.
+func (s *BridgeState) RemoveRoom(id string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if _, ok := s.Rooms[id]; ok {
+		delete(s.Rooms, id)
+		return true
+	}
+	return false
+}
+
+// RemoveZone removes a zone from the cache.
+func (s *BridgeState) RemoveZone(id string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if _, ok := s.Zones[id]; ok {
+		delete(s.Zones, id)
+		return true
+	}
+	return false
+}
+
+// RemoveScene removes a scene from the cache.
+func (s *BridgeState) RemoveScene(id string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if _, ok := s.Scenes[id]; ok {
+		delete(s.Scenes, id)
+		return true
+	}
+	return false
+}
+
+// RemoveDevice removes a device from the cache.
+func (s *BridgeState) RemoveDevice(id string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if _, ok := s.Devices[id]; ok {
+		delete(s.Devices, id)
+		return true
+	}
+	return false
+}
+
+// RemoveGroupedLight removes a grouped light from the cache.
+func (s *BridgeState) RemoveGroupedLight(id string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if _, ok := s.GroupedLights[id]; ok {
+		delete(s.GroupedLights, id)
+		return true
+	}
+	return false
+}
+
+// AddRoom adds a room to the cache.
+func (s *BridgeState) AddRoom(id string, room hueclient.RoomGet) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.Rooms == nil {
+		s.Rooms = make(map[string]hueclient.RoomGet)
+	}
+	s.Rooms[id] = room
+}
+
+// AddZone adds a zone to the cache.
+func (s *BridgeState) AddZone(id string, zone hueclient.RoomGet) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.Zones == nil {
+		s.Zones = make(map[string]hueclient.RoomGet)
+	}
+	s.Zones[id] = zone
+}
+
+// AddScene adds a scene to the cache.
+func (s *BridgeState) AddScene(id string, scene hueclient.SceneGet) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.Scenes == nil {
+		s.Scenes = make(map[string]hueclient.SceneGet)
+	}
+	s.Scenes[id] = scene
+}
+
+// AddGroupedLight adds a grouped light to the cache.
+func (s *BridgeState) AddGroupedLight(id string, gl hueclient.GroupedLightGet) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.GroupedLights == nil {
+		s.GroupedLights = make(map[string]hueclient.GroupedLightGet)
+	}
+	s.GroupedLights[id] = gl
+}
+
 // UpdateMotionSensors replaces the motion sensors cache.
 func (s *BridgeState) UpdateMotionSensors(sensors map[string]hueclient.MotionGet) {
 	s.mu.Lock()

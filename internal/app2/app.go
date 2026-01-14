@@ -20,6 +20,7 @@ import (
 	"github.com/kluzzebass/lazyhue/internal/hue"
 	"github.com/kluzzebass/lazyhue/internal/hueclient"
 	"github.com/kluzzebass/lazyhue/internal/ui2"
+	"github.com/kluzzebass/lazyhue/internal/ui2/component"
 	"github.com/kluzzebass/lazyhue/internal/ui2/components"
 	"github.com/kluzzebass/lazyhue/internal/ui2/layout"
 	"github.com/kluzzebass/lazyhue/internal/ui2/panels"
@@ -57,6 +58,9 @@ type Model struct {
 	zones          *zone.Manager
 	layout         *layout.Tree
 
+	// Component tree for event routing
+	componentRoot component.Component
+
 	// Panel management
 	panelOrder []string // Panel IDs in focus-cycle order
 
@@ -80,7 +84,7 @@ type Model struct {
 
 	// Rename mode state
 	renaming           bool                 // Whether we're in rename mode
-	renameInput        textinput.Model      // Text input for renaming
+	// renameInput removed - now owned by renameModal (TextInputModal)
 	renameEntityType   panels.EntityType    // Type of entity being renamed
 	renameEntityID     string               // ID of entity being renamed
 	renameBridgeID     string               // Bridge ID the entity belongs to
@@ -104,6 +108,19 @@ type Model struct {
 	discoveredBridges []hue.BridgeInfo        // Discovered bridges available for pairing
 	pairingRemaining  int                     // Seconds remaining in pairing countdown
 	pairingRequested  bool                    // Whether user explicitly requested pairing via 'p' key
+
+	// Create mode state
+	creatingRoom   bool   // Whether we're creating a room
+	creatingZone   bool   // Whether we're creating a zone
+	createBridgeID string // Bridge to create room/zone in
+
+	// Input capture stack (for modal input handling) - legacy, being replaced
+	inputStack *InputStack
+
+	// Modal components for the component tree
+	renameModal *component.TextInputModal
+	createModal *component.TextInputModal // For creating rooms/zones
+	detailStack *component.StackedContainer
 
 	// Help display
 	showHelp bool // Whether help is displayed in detail panel
@@ -166,13 +183,6 @@ func New(creds *config.CredentialStore) Model {
 	)
 	layoutTree := layout.NewTree(layoutRoot)
 
-	// Initialize rename text input
-	renameInput := textinput.New()
-	renameInput.Prompt = "Name: "
-	renameInput.CharLimit = 32
-	// Apply default styles which include proper cursor configuration
-	renameInput.Styles = textinput.DefaultStyles(true) // true = dark theme
-
 	m := Model{
 		manager:          hue.NewManager(creds),
 		credentials:      creds,
@@ -197,12 +207,49 @@ func New(creds *config.CredentialStore) Model {
 		bridgeBlinkUntil: make(map[string]time.Time),
 		lightForm:        components.NewForm(&styles, zones),
 		selectedLightID:  "",
-		renameInput:      renameInput,
 		historyIndex:     -1, // No history initially
+		inputStack:       NewInputStack(),
 	}
 
 	// Initialize keybindings
 	m.initBindings()
+
+	// Initialize input capture stack (legacy - keeping for now)
+	m.inputStack.Push(NewRenameCapture(&m))
+
+	// Build component tree for event routing
+	// Mirrors the layout tree structure:
+	// HSplit(Tree, VSplit(DetailStack, Log))
+	treeComponent := component.NewTreePanelComponent(PanelTree, m.tree)
+	detailViewport := component.NewViewportComponent(PanelDetail, &m.detailViewport)
+	logComponent := component.NewViewportComponent(PanelLog, &m.logViewport)
+
+	// Create rename modal - a TextInputModal that owns its own text input
+	// and communicates via messages (TextInputConfirmedMsg, TextInputCancelledMsg)
+	m.renameModal = component.NewTextInputModal("rename-modal")
+	m.renameModal.Input().Prompt = "Name: "
+	m.renameModal.Input().CharLimit = 32
+	m.renameModal.Input().Styles = textinput.DefaultStyles(true)
+
+	// Create modal for creating rooms/zones - same pattern as rename
+	m.createModal = component.NewTextInputModal("create-modal")
+	m.createModal.Input().Prompt = "Name: "
+	m.createModal.Input().CharLimit = 32
+	m.createModal.Input().Styles = textinput.DefaultStyles(true)
+
+	// Detail area uses a StackedContainer so modals can overlay the viewport
+	m.detailStack = component.NewStackedContainer(detailViewport, m.renameModal, m.createModal)
+
+	m.componentRoot = component.NewHSplit(
+		component.ComponentChild{Size: component.Flex(0.4), Component: treeComponent},
+		component.ComponentChild{Size: component.Flex(0.6), Component: component.NewVSplit(
+			component.ComponentChild{Size: component.Flex(0.67), Component: m.detailStack},
+			component.ComponentChild{Size: component.Flex(0.33), Component: logComponent},
+		)},
+	)
+
+	// Set initial focus on tree panel
+	treeComponent.Focus()
 
 	return m
 }
@@ -250,8 +297,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		helpHeight := 1 // status line only
 		contentHeight := m.height - helpHeight
 
-		// Update layout
+		// Update old layout (for rendering)
 		m.layout.Layout(m.width, contentHeight)
+
+		// Update component tree layout (for event routing)
+		m.componentRoot.Layout(component.Rect{
+			X:      0,
+			Y:      0,
+			Width:  m.width,
+			Height: contentHeight,
+		})
 
 		// Update panel sizes
 		treeBounds := m.layout.Bounds(PanelTree)
@@ -640,20 +695,48 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.updateLogContent()
 		return m, nil
 
-	case tea.KeyMsg:
-		// Check for panel focus shortcuts (number keys)
-		keyStr := msg.String()
+	case component.TextInputConfirmedMsg:
+		// Handle confirmed input from text input modals
+		switch msg.ModalID {
+		case "rename-modal":
+			cmd := m.confirmRenameWithValue(msg.Value)
+			m.updateDetailContent()
+			return m, cmd
+		case "create-modal":
+			cmd := m.confirmCreateWithValue(msg.Value)
+			m.updateDetailContent()
+			return m, cmd
+		}
+		return m, nil
 
-		// Check panels in panelOrder - keys are assigned automatically based on position
-		// Keys are 0-based: first panel gets "0", second gets "1", etc.
-		for _, panelID := range m.panelOrder {
-			panelKey := m.getPanelKey(panelID)
-			if keyStr == panelKey {
-				m.previousPane = m.focusedPane
-				m.focusedPane = panelID
-				return m, nil
+	case component.TextInputCancelledMsg:
+		// Handle cancelled input from text input modals
+		switch msg.ModalID {
+		case "rename-modal":
+			m.cancelRename()
+			m.updateDetailContent()
+		case "create-modal":
+			m.cancelCreate()
+			m.updateDetailContent()
+		}
+		return m, nil
+
+	case tea.KeyMsg:
+		// 1. Modal input takes highest priority - route through component tree
+		//    when any modal is active to capture all input
+		if m.renameModal.IsActive() || m.createModal.IsActive() {
+			if handled, cmd := m.componentRoot.RouteEvent(msg); handled {
+				if cmd != nil {
+					cmds = append(cmds, cmd)
+				}
+				// Refresh the detail panel to show updated input
+				m.updateDetailContent()
+				return m, tea.Batch(cmds...)
 			}
 		}
+
+		// 2. Global keys - always available (except when modal is active, handled above)
+		keyStr := msg.String()
 
 		switch {
 		case key.Matches(msg, m.keys.Quit):
@@ -718,6 +801,20 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, nil
 
+		case key.Matches(msg, m.keys.PrevPanel):
+			switch m.focusedPane {
+			case PanelTree:
+				m.previousPane = m.focusedPane
+				m.focusedPane = PanelLog
+			case PanelLog:
+				m.previousPane = m.focusedPane
+				m.focusedPane = PanelDetail
+			default:
+				m.previousPane = m.focusedPane
+				m.focusedPane = PanelTree
+			}
+			return m, nil
+
 		case key.Matches(msg, key.NewBinding(key.WithKeys("[", "alt+left"))):
 			// Navigate back in history
 			m.navigateBack()
@@ -754,6 +851,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 			// If in tree panel, let it handle escape (might collapse or something)
+		}
+
+		// 3. Panel focus shortcuts (number keys)
+		for _, panelID := range m.panelOrder {
+			panelKey := m.getPanelKey(panelID)
+			if keyStr == panelKey {
+				m.previousPane = m.focusedPane
+				m.focusedPane = panelID
+				return m, nil
+			}
 		}
 
 	case tea.MouseWheelMsg:
@@ -884,6 +991,20 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.status = "Cannot delete this item"
 				}
 				return m, nil
+
+			case "n":
+				// Create new room
+				if cmd := m.startCreateRoom(); cmd != nil {
+					return m, cmd
+				}
+				return m, nil
+
+			case "N":
+				// Create new zone
+				if cmd := m.startCreateZone(); cmd != nil {
+					return m, cmd
+				}
+				return m, nil
 			}
 		}
 
@@ -987,28 +1108,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 
-		// Handle rename mode - all messages go to rename input (including ticks for cursor blinking)
-		if m.renaming {
-			if keyMsg, ok := msg.(tea.KeyMsg); ok {
-				switch keyMsg.String() {
-				case "enter":
-					// Save and exit rename mode
-					cmd := m.confirmRename()
-					m.updateDetailContent()
-					return m, cmd
-				case "esc":
-					// Cancel rename mode
-					m.cancelRename()
-					m.updateDetailContent()
-					return m, nil
-				}
-			}
-			// Pass all messages (keys, ticks, etc.) to text input for proper cursor blinking
-			var cmd tea.Cmd
-			m.renameInput, cmd = m.renameInput.Update(msg)
-			m.updateDetailContent()
-			return m, cmd
-		}
+		// NOTE: Create room/zone mode is now handled early in Update() via handleCreateFormInput()
+		// to prevent global keys from triggering while editing the name.
+
+		// NOTE: Rename mode is now handled via TextInputModal in the component tree.
+		// When renaming, events are routed through componentRoot.RouteEvent() which
+		// sends TextInputConfirmedMsg/TextInputCancelledMsg that we handle above.
 
 		// Handle Escape key to return to previous panel
 		if keyMsg, ok := msg.(tea.KeyMsg); ok {
@@ -1173,12 +1278,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						m.scrollDetailViewportToCursor()
 					}
 				} else {
-					// Other keys, let form try to handle them first
+					// Other keys (including typing), let form handle them
 					var cmd tea.Cmd
 					m.lightForm, cmd = m.lightForm.Update(msg)
 					if cmd != nil {
 						cmds = append(cmds, cmd)
 					}
+					// Refresh to show typed characters immediately
+					m.updateDetailContent()
 				}
 			} else if _, ok := msg.(tea.MouseClickMsg); !ok {
 				// Non-key, non-mouse messages, let form handle them
@@ -1387,10 +1494,12 @@ func (m *Model) startRenameMode() tea.Cmd {
 	m.renameBridgeID = bridgeID
 	m.renameOriginalName = renameName
 
-	// Initialize the text input with current name
-	m.renameInput.SetValue(renameName)
-	focusCmd := m.renameInput.Focus() // Capture focus command for cursor
-	m.renameInput.CursorEnd()
+	// Blur all components so the modal can capture input exclusively
+	component.BlurAll(m.componentRoot)
+
+	// Set up the rename modal with the current name
+	m.renameModal.SetValue(renameName)
+	m.renameModal.SetActive(true)
 
 	// Switch to detail panel
 	m.previousPane = m.focusedPane
@@ -1401,7 +1510,7 @@ func (m *Model) startRenameMode() tea.Cmd {
 	// Update the UI immediately
 	m.updateDetailContent()
 
-	return focusCmd // Return focus command to enable cursor
+	return nil
 }
 
 // findBridgeForEntity finds the bridge ID that owns the given entity.
@@ -1417,13 +1526,13 @@ func (m *Model) cancelRename() {
 	m.renameEntityType = 0
 	m.renameBridgeID = ""
 	m.renameOriginalName = ""
-	m.renameInput.Blur()
+	m.renameModal.SetActive(false) // Deactivate modal to release input capture
 	m.status = "Rename cancelled"
 }
 
-// confirmRename saves the new name and exits rename mode.
-func (m *Model) confirmRename() tea.Cmd {
-	newName := m.renameInput.Value()
+// confirmRenameWithValue saves the new name and exits rename mode.
+// This is called via TextInputConfirmedMsg from the rename modal.
+func (m *Model) confirmRenameWithValue(newName string) tea.Cmd {
 	if newName == "" {
 		m.status = "Name cannot be empty"
 		return nil
@@ -1473,7 +1582,7 @@ func (m *Model) confirmRename() tea.Cmd {
 	m.renameEntityType = 0
 	m.renameBridgeID = ""
 	m.renameOriginalName = ""
-	m.renameInput.Blur()
+	m.renameModal.SetActive(false) // Deactivate modal to release input capture
 
 	return nil
 }
@@ -1671,6 +1780,155 @@ func (m *Model) confirmEntityDelete() tea.Cmd {
 	})
 
 	return nil
+}
+
+// startCreateRoom initiates room creation using the modal.
+func (m *Model) startCreateRoom() tea.Cmd {
+	// Close help if showing
+	m.showHelp = false
+
+	// Find the bridge to create the room in
+	bridgeID := m.findBridgeForCurrentContext()
+	if bridgeID == "" {
+		m.status = "No bridge available"
+		return nil
+	}
+
+	// Set creation state
+	m.creatingRoom = true
+	m.creatingZone = false
+	m.createBridgeID = bridgeID
+
+	// Activate the create modal
+	component.BlurAll(m.componentRoot)
+	m.createModal.SetActive(true)
+	m.createModal.Input().SetValue("")
+	m.createModal.Input().Focus()
+
+	// Switch to detail panel to show the modal
+	m.previousPane = m.focusedPane
+	m.focusedPane = PanelDetail
+
+	m.status = "Enter room name..."
+	m.updateDetailContent()
+
+	return nil
+}
+
+// startCreateZone initiates zone creation using the modal.
+func (m *Model) startCreateZone() tea.Cmd {
+	// Close help if showing
+	m.showHelp = false
+
+	// Find the bridge to create the zone in
+	bridgeID := m.findBridgeForCurrentContext()
+	if bridgeID == "" {
+		m.status = "No bridge available"
+		return nil
+	}
+
+	// Set creation state
+	m.creatingRoom = false
+	m.creatingZone = true
+	m.createBridgeID = bridgeID
+
+	// Activate the create modal
+	component.BlurAll(m.componentRoot)
+	m.createModal.SetActive(true)
+	m.createModal.Input().SetValue("")
+	m.createModal.Input().Focus()
+
+	// Switch to detail panel to show the modal
+	m.previousPane = m.focusedPane
+	m.focusedPane = PanelDetail
+
+	m.status = "Enter zone name..."
+	m.updateDetailContent()
+
+	return nil
+}
+
+// cancelCreate cancels room/zone creation.
+func (m *Model) cancelCreate() {
+	m.creatingRoom = false
+	m.creatingZone = false
+	m.createBridgeID = ""
+	m.createModal.SetActive(false)
+	m.status = "Creation cancelled"
+}
+
+// confirmCreateWithValue performs the actual room/zone creation with the given name.
+func (m *Model) confirmCreateWithValue(name string) tea.Cmd {
+	if name == "" {
+		m.status = "Name is required"
+		return nil
+	}
+
+	// Get the bridge
+	bridge := m.manager.GetBridge(m.createBridgeID)
+	if bridge == nil {
+		m.status = "Bridge not found"
+		m.cancelCreate()
+		return nil
+	}
+
+	// Use "other" as default archetype
+	archetype := hueclient.RoomArchetypeOther
+
+	// Call the appropriate create function
+	var err error
+	var entityType string
+	if m.creatingRoom {
+		entityType = "Room"
+		err = bridge.CreateRoom(name, archetype, nil)
+	} else if m.creatingZone {
+		entityType = "Zone"
+		err = bridge.CreateZone(name, archetype, nil)
+	}
+
+	if err != nil {
+		m.status = fmt.Sprintf("Create failed: %v", err)
+	} else {
+		m.status = fmt.Sprintf("%s \"%s\" created", entityType, name)
+	}
+
+	// Clear creation state
+	m.creatingRoom = false
+	m.creatingZone = false
+	m.createBridgeID = ""
+	m.createModal.SetActive(false)
+
+	// Rebuild tree to reflect creation
+	m.rebuildTreeForActiveTab()
+
+	// Log the creation
+	m.activities = append(m.activities, &RequestActivity{
+		timestamp: time.Now(),
+		message:   fmt.Sprintf("%s \"%s\" created", entityType, name),
+	})
+	m.updateLogContent()
+
+	return nil
+}
+
+// findBridgeForCurrentContext returns the bridge ID for the current selection context.
+func (m *Model) findBridgeForCurrentContext() string {
+	// First try to find from selected item
+	if item := m.tree.SelectedItem(); item != nil {
+		if bridgeID := m.findBridgeForEntity(item); bridgeID != "" {
+			return bridgeID
+		}
+	}
+
+	// Fall back to first connected bridge
+	bridges := m.manager.AllBridges()
+	for _, bridge := range bridges {
+		if bridge.IsConnected() {
+			return bridge.Info.ID
+		}
+	}
+
+	return ""
 }
 
 // startBridgePairing starts the bridge pairing process.

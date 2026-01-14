@@ -20,6 +20,8 @@ func (m *Model) initBindings() {
 			{Keys: []string{"enter"}, Display: "Enter", Desc: "Expand/collapse or select", Priority: 100},
 			{Keys: []string{" "}, Display: "Space", Desc: "Toggle on/off", Priority: 95},
 			{Keys: []string{"r"}, Display: "r", Desc: "Rename selected", Priority: 92},
+			{Keys: []string{"n"}, Display: "n", Desc: "New room", Priority: 91},
+			{Keys: []string{"N"}, Display: "N", Desc: "New zone", Priority: 91},
 			{Keys: []string{"x"}, Display: "x", Desc: "Delete selected", Priority: 90},
 			{Keys: []string{"left", "h"}, Display: "←/h", Desc: "Collapse / prev tab", Priority: 85},
 			{Keys: []string{"right", "l"}, Display: "→/l", Desc: "Expand / next tab", Priority: 85},
@@ -125,6 +127,20 @@ func (m *Model) getContextBindings() (panelBindings []Binding, globalBindings []
 			panelTitle = "Rename"
 			panelBindings = []Binding{
 				{Display: "Enter", Desc: "Save"},
+				{Display: "Esc", Desc: "Cancel"},
+			}
+		} else if m.creatingRoom {
+			panelTitle = "Create Room"
+			panelBindings = []Binding{
+				{Display: "↑/↓", Desc: "Navigate fields"},
+				{Display: "Enter", Desc: "Submit"},
+				{Display: "Esc", Desc: "Cancel"},
+			}
+		} else if m.creatingZone {
+			panelTitle = "Create Zone"
+			panelBindings = []Binding{
+				{Display: "↑/↓", Desc: "Navigate fields"},
+				{Display: "Enter", Desc: "Submit"},
 				{Display: "Esc", Desc: "Cancel"},
 			}
 		} else {
