@@ -1,7 +1,6 @@
 package layout
 
 import (
-	"log/slog"
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea/v2"
@@ -263,18 +262,14 @@ func (g *Grid) RouteEvent(msg tea.Msg) (bool, tea.Cmd) {
 
 	// For mouse wheel, route to focused cell (for dropdowns, sliders, etc.)
 	if _, isMouseWheel := msg.(tea.MouseWheelMsg); isMouseWheel {
-		slog.Debug("Grid.RouteEvent: MouseWheelMsg", "focusRow", g.focusRow, "focusCol", g.focusCol)
 		if g.focusRow >= 0 && g.focusRow < len(g.rows) {
 			row := g.rows[g.focusRow]
 			if row.Type == RowTypeNormal && g.focusCol >= 0 && g.focusCol < len(row.Cells) {
 				cell := row.Cells[g.focusCol]
 				if cell.Component != nil {
-					slog.Debug("Grid.RouteEvent: routing wheel to focused cell")
 					if handled, cmd := cell.Component.RouteEvent(msg); handled {
-						slog.Debug("Grid.RouteEvent: wheel handled by cell")
 						return true, cmd
 					}
-					slog.Debug("Grid.RouteEvent: wheel NOT handled by cell")
 				}
 			}
 		}

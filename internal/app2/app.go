@@ -4,7 +4,6 @@ package app2
 import (
 	"context"
 	"fmt"
-	"log/slog"
 	"strings"
 	"time"
 
@@ -834,12 +833,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		mouseY := msg.Y
 		mouseX := msg.X
 
-		slog.Debug("app.Update: MouseWheelMsg", "x", mouseX, "y", mouseY, "button", msg.Button)
-
 		// Check which panel the mouse is over
 		if mouseY < m.height-helpHeight {
 			if leaf := m.layout.At(mouseX, mouseY); leaf != nil {
-				slog.Debug("app.Update: routing wheel to panel", "panel", leaf.ID)
 				// Route scroll event to the panel under the mouse
 				switch leaf.ID {
 				case PanelTree:

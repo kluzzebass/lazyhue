@@ -2,7 +2,6 @@ package field
 
 import (
 	"fmt"
-	"log/slog"
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea/v2"
@@ -117,7 +116,6 @@ func (s *SelectComponent) RouteEvent(msg tea.Msg) (bool, tea.Cmd) {
 		}
 
 	case tea.MouseWheelMsg:
-		slog.Debug("SelectComponent.RouteEvent: MouseWheelMsg", "id", s.ID, "open", s.Open, "button", msg.Button)
 		if s.Open {
 			_, cmd := s.handleMouseWheel(msg)
 			return true, cmd
@@ -196,7 +194,6 @@ func (s *SelectComponent) handleMouseWheel(msg tea.MouseWheelMsg) (component.Com
 }
 
 func (s *SelectComponent) openDropdown() (component.Component, tea.Cmd) {
-	slog.Debug("SelectComponent.openDropdown", "id", s.ID)
 	s.Open = true
 	s.Cursor = s.Value
 	s.ensureCursorVisible()
