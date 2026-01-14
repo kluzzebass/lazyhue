@@ -4,6 +4,7 @@ import (
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea/v2"
+	"github.com/charmbracelet/lipgloss/v2"
 	"github.com/kluzzebass/lazyhue/internal/ui2/component"
 	"github.com/kluzzebass/lazyhue/internal/ui2/component/field"
 )
@@ -426,14 +427,9 @@ func (g *Grid) View() string {
 
 		switch row.Type {
 		case RowTypeSection:
-			// Section rows render their component directly (full width)
+			// Section rows render their component directly (full width, flush left)
 			if row.Section != nil {
-				sectionContent := row.Section.View()
-				// Add blank focus indicator space for alignment if enabled
-				if g.ShowFocusIndicator {
-					sectionContent = g.BlurIndicator + sectionContent
-				}
-				out.WriteString(sectionContent)
+				out.WriteString(row.Section.View())
 			}
 		case RowTypeNormal:
 			// Normal rows render cells in columns
@@ -566,6 +562,40 @@ func (g *Grid) Children() []component.Component {
 // FocusedCell returns the currently focused row and column indices.
 func (g *Grid) FocusedCell() (int, int) {
 	return g.focusRow, g.focusCol
+}
+
+// NewInfoRow creates a read-only info row with a label and value.
+// This is a convenience function for displaying read-only key-value pairs.
+func NewInfoRow(label, value string, labelWidth int) GridRow {
+	return GridRow{
+		Type: RowTypeNormal,
+		Cells: []GridCell{
+			{Component: NewLabelWithWidth(label, labelWidth)},
+			{Component: NewLabel(value)},
+		},
+	}
+}
+
+// NewStyledInfoRow creates a read-only info row with a styled value.
+func NewStyledInfoRow(label, value string, labelWidth int, valueStyle lipgloss.Style) GridRow {
+	return GridRow{
+		Type: RowTypeNormal,
+		Cells: []GridCell{
+			{Component: NewLabelWithWidth(label, labelWidth)},
+			{Component: NewLabel(value).SetStyle(valueStyle)},
+		},
+	}
+}
+
+// NewListItemRow creates a row for a list item with a bullet prefix.
+func NewListItemRow(bullet, text string) GridRow {
+	return GridRow{
+		Type: RowTypeNormal,
+		Cells: []GridCell{
+			{Component: NewLabel(bullet)},
+			{Component: NewLabel(text)},
+		},
+	}
 }
 
 // SetFocus sets focus to a specific cell (only works for normal rows).

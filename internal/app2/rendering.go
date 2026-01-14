@@ -13,6 +13,7 @@ import (
 	"github.com/charmbracelet/lipgloss/v2"
 	"github.com/kluzzebass/lazyhue/internal/hue"
 	"github.com/kluzzebass/lazyhue/internal/hueclient"
+	"github.com/kluzzebass/lazyhue/internal/ui2"
 	"github.com/kluzzebass/lazyhue/internal/ui2/component/field"
 	gridlayout "github.com/kluzzebass/lazyhue/internal/ui2/component/layout"
 	"github.com/kluzzebass/lazyhue/internal/ui2/panels"
@@ -771,141 +772,52 @@ func (m *Model) renderPanelHeader(width int, keyStr, title string, focused bool,
 		borderStyle.Render(border.TopRight)
 }
 
-// buildLightGridRows builds grid rows for controlling a light.
-// This uses the Grid layout with Label + Control cells.
+// buildLightGridRows builds grid rows for a light's full details panel.
+// This uses the Grid layout with sections for product info, controls, state, etc.
 func (m *Model) buildLightGridRows(light hueclient.LightGet) {
 	var rows []gridlayout.GridRow
 
-	// Calculate the maximum label width for alignment
-	labels := []string{"Power", "Brightness", "Color Temp", "Color", "Effect"}
-	maxLabelWidth := 0
-	for _, label := range labels {
-		if len(label) > maxLabelWidth {
-			maxLabelWidth = len(label)
-		}
-	}
+	// Get owning device for product info
+	device := m.getDeviceForLight(light)
 
-	// Add Controls section header
-	header := field.NewHeaderComponent("controls-header", "Controls", &m.styles, m.zones)
-	rows = append(rows, gridlayout.GridRow{
-		Type:    gridlayout.RowTypeSection,
-		Section: header,
-	})
+	// 1. Controls section (editable) - most important, at the top
+	rows = append(rows, m.buildControlsRows(light)...)
 
-	// On/Off toggle
-	onValue := false
-	if light.On != nil && light.On.On != nil && *light.On.On {
-		onValue = true
-	}
-	toggle := field.NewToggleComponent("on", "Power", onValue, &m.styles, m.zones)
-	toggle.SetLabels("On", "Off")
-	rows = append(rows, gridlayout.GridRow{
-		Type: gridlayout.RowTypeNormal,
-		Cells: []gridlayout.GridCell{
-			{Component: gridlayout.NewLabelWithWidth("Power", maxLabelWidth)},
-			{Component: toggle},
-		},
-	})
+	// 2. Power-on Behavior section (editable)
+	rows = append(rows, m.buildPowerupRows(light)...)
 
-	// Brightness (if dimmable)
-	if light.Dimming != nil && light.Dimming.Brightness != nil {
-		brightness := int(*light.Dimming.Brightness)
-		slider := field.NewBrightnessSliderComponent(
-			"brightness", "Brightness", brightness,
-			&m.styles, m.zones,
-		)
-		rows = append(rows, gridlayout.GridRow{
-			Type: gridlayout.RowTypeNormal,
-			Cells: []gridlayout.GridCell{
-				{Component: gridlayout.NewLabelWithWidth("Brightness", maxLabelWidth)},
-				{Component: slider},
-			},
-		})
-	}
+	// 3. State Info section
+	rows = append(rows, m.buildStateRows(light)...)
 
-	// Color temperature (if supported)
-	if light.ColorTemperature != nil && light.ColorTemperature.MirekSchema != nil {
-		mirek := 250
-		if light.ColorTemperature.Mirek != nil {
-			mirek = *light.ColorTemperature.Mirek
-		}
-		minMirek := 153
-		maxMirek := 500
-		if light.ColorTemperature.MirekSchema.MirekMinimum != nil {
-			minMirek = *light.ColorTemperature.MirekSchema.MirekMinimum
-		}
-		if light.ColorTemperature.MirekSchema.MirekMaximum != nil {
-			maxMirek = *light.ColorTemperature.MirekSchema.MirekMaximum
-		}
-		slider := field.NewColorTempSliderComponent(
-			"colortemp", "Color Temp", mirek, minMirek, maxMirek,
-			&m.styles, m.zones,
-		)
-		rows = append(rows, gridlayout.GridRow{
-			Type: gridlayout.RowTypeNormal,
-			Cells: []gridlayout.GridCell{
-				{Component: gridlayout.NewLabelWithWidth("Color Temp", maxLabelWidth)},
-				{Component: slider},
-			},
-		})
-	}
+	// 4. Dynamics section
+	rows = append(rows, m.buildDynamicsRows(light)...)
 
-	// Color (if supported)
-	if light.Color != nil && light.Color.Xy != nil {
-		x, y := 0.3127, 0.329
-		if light.Color.Xy.X != nil {
-			x = float64(*light.Color.Xy.X)
-		}
-		if light.Color.Xy.Y != nil {
-			y = float64(*light.Color.Xy.Y)
-		}
-		colorWheel := field.NewColorWheelComponent(
-			"color", "Color", x, y,
-			&m.styles, m.zones,
-		)
-		rows = append(rows, gridlayout.GridRow{
-			Type: gridlayout.RowTypeNormal,
-			Cells: []gridlayout.GridCell{
-				{Component: gridlayout.NewLabelWithWidth("Color", maxLabelWidth)},
-				{Component: colorWheel},
-			},
-		})
-	}
+	// 5. Product Info section
+	rows = append(rows, m.buildProductInfoRows(device)...)
 
-	// Effect (if supported)
-	if light.Effects != nil && light.Effects.EffectValues != nil {
-		var options []field.Option
-		currentEffect := -1
-		if light.Effects.Status != nil {
-			for i, effect := range *light.Effects.EffectValues {
-				effectStr := string(effect)
-				displayName := hue.EffectDisplayName(effectStr)
-				options = append(options, field.Option{
-					Label: displayName,
-					Value: i,
-				})
-				if effect == *light.Effects.Status {
-					currentEffect = i
-				}
-			}
-		}
-		if len(options) > 0 {
-			if currentEffect == -1 {
-				currentEffect = 0
-			}
-			selectComp := field.NewSelectComponent(
-				"effect", "Effect", currentEffect, options,
-				&m.styles, m.zones,
-			)
-			rows = append(rows, gridlayout.GridRow{
-				Type: gridlayout.RowTypeNormal,
-				Cells: []gridlayout.GridCell{
-					{Component: gridlayout.NewLabelWithWidth("Effect", maxLabelWidth)},
-					{Component: selectComp},
-				},
-			})
-		}
-	}
+	// 6. Classification section
+	rows = append(rows, m.buildClassificationRows(light, device)...)
+
+	// 7. Name section (editable)
+	rows = append(rows, m.buildNameRows(light, device)...)
+
+	// 8. IDs section
+	rows = append(rows, m.buildIDsRows(light)...)
+
+	// 9. Capabilities section
+	rows = append(rows, m.buildCapabilitiesRows(light)...)
+
+	// 10. Effects list section
+	rows = append(rows, m.buildEffectsListRows(light)...)
+
+	// 11. Gradient section
+	rows = append(rows, m.buildGradientRows(light)...)
+
+	// 12. Signaling section
+	rows = append(rows, m.buildSignalingRows(light)...)
+
+	// 13. Device Services section
+	rows = append(rows, m.buildDeviceServicesRows(light, device)...)
 
 	m.lightGrid.SetRows(rows)
 }
@@ -1002,4 +914,624 @@ func (m *Model) handleNewFieldChange(msg field.FieldChangedMsg) {
 		// Rebuild tree to update indicators
 		m.rebuildTreeForActiveTab()
 	}
+}
+
+// getDeviceForLight looks up the device that owns a light.
+func (m *Model) getDeviceForLight(light hueclient.LightGet) *hueclient.DeviceGet {
+	if light.Owner == nil || light.Owner.Rid == nil {
+		return nil
+	}
+	node := m.tree.SelectedNode()
+	if node == nil || node.Item == nil {
+		return nil
+	}
+	bridge := m.manager.GetBridge(node.Item.BridgeID)
+	if bridge == nil {
+		return nil
+	}
+	state := bridge.GetState()
+	if state == nil {
+		return nil
+	}
+	if device, ok := state.GetDevice(*light.Owner.Rid); ok {
+		return &device
+	}
+	return nil
+}
+
+// renderLightIndicator renders a brightness indicator for a light.
+func (m *Model) renderLightIndicator(light hueclient.LightGet, isOn bool) string {
+	if !isOn {
+		// Return dimmed off indicator
+		return m.styles.Dimmed.Render(ui2.BrightnessIndicator(0))
+	}
+
+	brightness := 100.0
+	if light.Dimming != nil && light.Dimming.Brightness != nil {
+		brightness = float64(*light.Dimming.Brightness)
+	}
+
+	hexColor := ui2.GetLightColor(light)
+	return ui2.RenderBrightnessIndicatorFromHex(brightness, hexColor)
+}
+
+// infoLabelWidth is the width for labels in info rows.
+const infoLabelWidth = 14
+
+// buildProductInfoRows builds rows for the product info section.
+func (m *Model) buildProductInfoRows(device *hueclient.DeviceGet) []gridlayout.GridRow {
+	if device == nil || device.ProductData == nil {
+		return nil
+	}
+
+	var rows []gridlayout.GridRow
+	pd := device.ProductData
+
+	// Section header
+	header := field.NewHeaderComponent("product-header", "Product", &m.styles, m.zones)
+	rows = append(rows, gridlayout.GridRow{
+		Type:    gridlayout.RowTypeSection,
+		Section: header,
+	})
+
+	if pd.ProductName != nil {
+		rows = append(rows, gridlayout.NewInfoRow("Product", *pd.ProductName, infoLabelWidth))
+	}
+	if pd.ManufacturerName != nil {
+		rows = append(rows, gridlayout.NewInfoRow("Manufacturer", *pd.ManufacturerName, infoLabelWidth))
+	}
+	if pd.ModelId != nil {
+		rows = append(rows, gridlayout.NewInfoRow("Model", *pd.ModelId, infoLabelWidth))
+	}
+	if pd.SoftwareVersion != nil {
+		rows = append(rows, gridlayout.NewInfoRow("Firmware", *pd.SoftwareVersion, infoLabelWidth))
+	}
+	if pd.HardwarePlatformType != nil {
+		rows = append(rows, gridlayout.NewInfoRow("Hardware", *pd.HardwarePlatformType, infoLabelWidth))
+	}
+
+	return rows
+}
+
+// buildClassificationRows builds rows for the classification section.
+func (m *Model) buildClassificationRows(light hueclient.LightGet, device *hueclient.DeviceGet) []gridlayout.GridRow {
+	var rows []gridlayout.GridRow
+
+	// Section header
+	header := field.NewHeaderComponent("class-header", "Classification", &m.styles, m.zones)
+	rows = append(rows, gridlayout.GridRow{
+		Type:    gridlayout.RowTypeSection,
+		Section: header,
+	})
+
+	// Archetype (editable if device available)
+	if device != nil && device.ProductData != nil && device.ProductData.ProductArchetype != nil {
+		archetypeKeys := getSortedProductArchetypes()
+		var options []field.Option
+		currentIndex := 0
+		currentArchetype := string(*device.ProductData.ProductArchetype)
+
+		for i, key := range archetypeKeys {
+			displayName := hue.ProductArchetypeDisplayNames[key]
+			options = append(options, field.Option{Label: displayName, Value: i})
+			if key == currentArchetype {
+				currentIndex = i
+			}
+		}
+
+		deviceID := ""
+		if device.Id != nil {
+			deviceID = *device.Id
+		}
+
+		selectComp := field.NewSelectComponent(
+			"archetype:"+deviceID, "Archetype", currentIndex, options,
+			&m.styles, m.zones,
+		)
+		rows = append(rows, gridlayout.GridRow{
+			Type: gridlayout.RowTypeNormal,
+			Cells: []gridlayout.GridCell{
+				{Component: gridlayout.NewLabelWithWidth("Archetype", infoLabelWidth)},
+				{Component: selectComp},
+			},
+		})
+	}
+
+	// Type (read-only)
+	if light.Type != nil {
+		rows = append(rows, gridlayout.NewInfoRow("Type", string(*light.Type), infoLabelWidth))
+	}
+
+	// Mode (read-only)
+	if light.Mode != nil {
+		rows = append(rows, gridlayout.NewInfoRow("Mode", string(*light.Mode), infoLabelWidth))
+	}
+
+	return rows
+}
+
+// buildNameRows builds rows for the name section.
+func (m *Model) buildNameRows(light hueclient.LightGet, device *hueclient.DeviceGet) []gridlayout.GridRow {
+	var rows []gridlayout.GridRow
+
+	// Section header
+	header := field.NewHeaderComponent("name-header", "Name", &m.styles, m.zones)
+	rows = append(rows, gridlayout.GridRow{
+		Type:    gridlayout.RowTypeSection,
+		Section: header,
+	})
+
+	// Device name (editable)
+	if device != nil && device.Metadata != nil && device.Metadata.Name != nil {
+		deviceID := ""
+		if device.Id != nil {
+			deviceID = *device.Id
+		}
+
+		textInput := field.NewTextComponent(
+			"name:"+deviceID, "Name", *device.Metadata.Name,
+			&m.styles, m.zones,
+		)
+		rows = append(rows, gridlayout.GridRow{
+			Type: gridlayout.RowTypeNormal,
+			Cells: []gridlayout.GridCell{
+				{Component: gridlayout.NewLabelWithWidth("Name", infoLabelWidth)},
+				{Component: textInput},
+			},
+		})
+	}
+
+	// Show deprecated light name if different from device name
+	if light.Metadata != nil && light.Metadata.Name != nil {
+		deprecatedName := *light.Metadata.Name
+		currentName := ""
+		if device != nil && device.Metadata != nil && device.Metadata.Name != nil {
+			currentName = *device.Metadata.Name
+		}
+		if deprecatedName != currentName {
+			dimStyle := m.styles.Dimmed
+			rows = append(rows, gridlayout.NewStyledInfoRow("Deprecated", deprecatedName, infoLabelWidth, dimStyle))
+		}
+	}
+
+	return rows
+}
+
+// buildIDsRows builds rows for the IDs section.
+func (m *Model) buildIDsRows(light hueclient.LightGet) []gridlayout.GridRow {
+	var rows []gridlayout.GridRow
+
+	// Section header
+	header := field.NewHeaderComponent("ids-header", "IDs", &m.styles, m.zones)
+	rows = append(rows, gridlayout.GridRow{
+		Type:    gridlayout.RowTypeSection,
+		Section: header,
+	})
+
+	dimStyle := m.styles.Dimmed
+
+	if light.Id != nil {
+		rows = append(rows, gridlayout.NewStyledInfoRow("Light ID", *light.Id, infoLabelWidth, dimStyle))
+	}
+	if light.Owner != nil && light.Owner.Rid != nil {
+		rows = append(rows, gridlayout.NewStyledInfoRow("Device ID", *light.Owner.Rid, infoLabelWidth, dimStyle))
+	}
+	if light.IdV1 != nil {
+		rows = append(rows, gridlayout.NewStyledInfoRow("V1 ID", *light.IdV1, infoLabelWidth, dimStyle))
+	}
+
+	return rows
+}
+
+// buildControlsRows builds rows for the controls section (existing functionality).
+func (m *Model) buildControlsRows(light hueclient.LightGet) []gridlayout.GridRow {
+	var rows []gridlayout.GridRow
+
+	// Section header
+	header := field.NewHeaderComponent("controls-header", "Controls", &m.styles, m.zones)
+	rows = append(rows, gridlayout.GridRow{
+		Type:    gridlayout.RowTypeSection,
+		Section: header,
+	})
+
+	// On/Off toggle
+	onValue := false
+	if light.On != nil && light.On.On != nil && *light.On.On {
+		onValue = true
+	}
+	toggle := field.NewToggleComponent("on", "Power", onValue, &m.styles, m.zones)
+	toggle.SetLabels("On", "Off")
+	rows = append(rows, gridlayout.GridRow{
+		Type: gridlayout.RowTypeNormal,
+		Cells: []gridlayout.GridCell{
+			{Component: gridlayout.NewLabelWithWidth("Power", infoLabelWidth)},
+			{Component: toggle},
+		},
+	})
+
+	// Brightness (if dimmable)
+	if light.Dimming != nil && light.Dimming.Brightness != nil {
+		brightness := int(*light.Dimming.Brightness)
+		slider := field.NewBrightnessSliderComponent(
+			"brightness", "Brightness", brightness,
+			&m.styles, m.zones,
+		)
+		rows = append(rows, gridlayout.GridRow{
+			Type: gridlayout.RowTypeNormal,
+			Cells: []gridlayout.GridCell{
+				{Component: gridlayout.NewLabelWithWidth("Brightness", infoLabelWidth)},
+				{Component: slider},
+			},
+		})
+	}
+
+	// Color temperature (if supported)
+	if light.ColorTemperature != nil && light.ColorTemperature.MirekSchema != nil {
+		mirek := 250
+		if light.ColorTemperature.Mirek != nil {
+			mirek = *light.ColorTemperature.Mirek
+		}
+		minMirek := 153
+		maxMirek := 500
+		if light.ColorTemperature.MirekSchema.MirekMinimum != nil {
+			minMirek = *light.ColorTemperature.MirekSchema.MirekMinimum
+		}
+		if light.ColorTemperature.MirekSchema.MirekMaximum != nil {
+			maxMirek = *light.ColorTemperature.MirekSchema.MirekMaximum
+		}
+		slider := field.NewColorTempSliderComponent(
+			"colortemp", "Color Temp", mirek, minMirek, maxMirek,
+			&m.styles, m.zones,
+		)
+		rows = append(rows, gridlayout.GridRow{
+			Type: gridlayout.RowTypeNormal,
+			Cells: []gridlayout.GridCell{
+				{Component: gridlayout.NewLabelWithWidth("Color Temp", infoLabelWidth)},
+				{Component: slider},
+			},
+		})
+	}
+
+	// Color (if supported)
+	if light.Color != nil && light.Color.Xy != nil {
+		x, y := 0.3127, 0.329
+		if light.Color.Xy.X != nil {
+			x = float64(*light.Color.Xy.X)
+		}
+		if light.Color.Xy.Y != nil {
+			y = float64(*light.Color.Xy.Y)
+		}
+		colorWheel := field.NewColorWheelComponent(
+			"color", "Color", x, y,
+			&m.styles, m.zones,
+		)
+		rows = append(rows, gridlayout.GridRow{
+			Type: gridlayout.RowTypeNormal,
+			Cells: []gridlayout.GridCell{
+				{Component: gridlayout.NewLabelWithWidth("Color", infoLabelWidth)},
+				{Component: colorWheel},
+			},
+		})
+	}
+
+	// Effect (if supported)
+	if light.Effects != nil && light.Effects.EffectValues != nil {
+		var options []field.Option
+		currentEffect := -1
+		if light.Effects.Status != nil {
+			for i, effect := range *light.Effects.EffectValues {
+				effectStr := string(effect)
+				displayName := hue.EffectDisplayName(effectStr)
+				options = append(options, field.Option{
+					Label: displayName,
+					Value: i,
+				})
+				if effect == *light.Effects.Status {
+					currentEffect = i
+				}
+			}
+		}
+		if len(options) > 0 {
+			if currentEffect == -1 {
+				currentEffect = 0
+			}
+			selectComp := field.NewSelectComponent(
+				"effect", "Effect", currentEffect, options,
+				&m.styles, m.zones,
+			)
+			rows = append(rows, gridlayout.GridRow{
+				Type: gridlayout.RowTypeNormal,
+				Cells: []gridlayout.GridCell{
+					{Component: gridlayout.NewLabelWithWidth("Effect", infoLabelWidth)},
+					{Component: selectComp},
+				},
+			})
+		}
+	}
+
+	return rows
+}
+
+// buildStateRows builds rows for the current state section.
+func (m *Model) buildStateRows(light hueclient.LightGet) []gridlayout.GridRow {
+	var rows []gridlayout.GridRow
+
+	// Section header
+	header := field.NewHeaderComponent("state-header", "State", &m.styles, m.zones)
+	rows = append(rows, gridlayout.GridRow{
+		Type:    gridlayout.RowTypeSection,
+		Section: header,
+	})
+
+	// On/off status with indicator
+	status := "off"
+	isOn := light.On != nil && light.On.On != nil && *light.On.On
+	if isOn {
+		status = "on"
+	}
+	indicator := m.renderLightIndicator(light, isOn)
+	rows = append(rows, gridlayout.NewInfoRow("Status", indicator+" "+status, infoLabelWidth))
+
+	// Brightness
+	if light.Dimming != nil {
+		if light.Dimming.Brightness != nil {
+			rows = append(rows, gridlayout.NewInfoRow("Brightness", fmt.Sprintf("%.0f%%", *light.Dimming.Brightness), infoLabelWidth))
+		}
+		if light.Dimming.MinDimLevel != nil {
+			rows = append(rows, gridlayout.NewInfoRow("Min Dim", fmt.Sprintf("%.0f%%", *light.Dimming.MinDimLevel), infoLabelWidth))
+		}
+	}
+
+	// Color
+	if light.Color != nil && light.Color.Xy != nil {
+		xy := light.Color.Xy
+		if xy.X != nil && xy.Y != nil {
+			rows = append(rows, gridlayout.NewInfoRow("Color XY", fmt.Sprintf("(%.4f, %.4f)", *xy.X, *xy.Y), infoLabelWidth))
+		}
+		if light.Color.GamutType != nil {
+			rows = append(rows, gridlayout.NewInfoRow("Gamut", string(*light.Color.GamutType), infoLabelWidth))
+		}
+	}
+
+	// Color temperature
+	if light.ColorTemperature != nil {
+		if light.ColorTemperature.Mirek != nil {
+			mirek := *light.ColorTemperature.Mirek
+			kelvin := 1000000 / int(mirek)
+			rows = append(rows, gridlayout.NewInfoRow("Color Temp", fmt.Sprintf("%d mirek (~%dK)", mirek, kelvin), infoLabelWidth))
+		}
+		if light.ColorTemperature.MirekSchema != nil {
+			schema := light.ColorTemperature.MirekSchema
+			if schema.MirekMinimum != nil && schema.MirekMaximum != nil {
+				minK := 1000000 / int(*schema.MirekMaximum)
+				maxK := 1000000 / int(*schema.MirekMinimum)
+				rows = append(rows, gridlayout.NewInfoRow("CT Range", fmt.Sprintf("%dK - %dK", minK, maxK), infoLabelWidth))
+			}
+		}
+	}
+
+	return rows
+}
+
+// buildDynamicsRows builds rows for the dynamics section.
+func (m *Model) buildDynamicsRows(light hueclient.LightGet) []gridlayout.GridRow {
+	if light.Dynamics == nil {
+		return nil
+	}
+
+	var rows []gridlayout.GridRow
+
+	// Section header
+	header := field.NewHeaderComponent("dynamics-header", "Dynamics", &m.styles, m.zones)
+	rows = append(rows, gridlayout.GridRow{
+		Type:    gridlayout.RowTypeSection,
+		Section: header,
+	})
+
+	if light.Dynamics.Status != nil {
+		rows = append(rows, gridlayout.NewInfoRow("Status", string(*light.Dynamics.Status), infoLabelWidth))
+	}
+	if light.Dynamics.Speed != nil {
+		rows = append(rows, gridlayout.NewInfoRow("Speed", fmt.Sprintf("%.2f", *light.Dynamics.Speed), infoLabelWidth))
+	}
+
+	return rows
+}
+
+// buildCapabilitiesRows builds rows for the capabilities section.
+func (m *Model) buildCapabilitiesRows(light hueclient.LightGet) []gridlayout.GridRow {
+	var rows []gridlayout.GridRow
+
+	// Section header
+	header := field.NewHeaderComponent("caps-header", "Capabilities", &m.styles, m.zones)
+	rows = append(rows, gridlayout.GridRow{
+		Type:    gridlayout.RowTypeSection,
+		Section: header,
+	})
+
+	// Collect capabilities
+	var caps []string
+	if light.Dimming != nil {
+		caps = append(caps, "Dimming")
+	}
+	if light.Color != nil {
+		caps = append(caps, "Color")
+	}
+	if light.ColorTemperature != nil {
+		caps = append(caps, "Color Temperature")
+	}
+	if light.Gradient != nil {
+		caps = append(caps, "Gradient")
+	}
+	if light.Effects != nil {
+		caps = append(caps, "Effects")
+	}
+	if light.TimedEffects != nil {
+		caps = append(caps, "Timed Effects")
+	}
+
+	if len(caps) == 0 {
+		caps = append(caps, "On/Off only")
+	}
+
+	for _, cap := range caps {
+		rows = append(rows, gridlayout.NewListItemRow("•", cap))
+	}
+
+	return rows
+}
+
+// buildEffectsListRows builds rows for the available effects section.
+func (m *Model) buildEffectsListRows(light hueclient.LightGet) []gridlayout.GridRow {
+	if light.Effects == nil || light.Effects.EffectValues == nil || len(*light.Effects.EffectValues) == 0 {
+		return nil
+	}
+
+	var rows []gridlayout.GridRow
+
+	// Section header
+	header := field.NewHeaderComponent("effects-header", "Available Effects", &m.styles, m.zones)
+	rows = append(rows, gridlayout.GridRow{
+		Type:    gridlayout.RowTypeSection,
+		Section: header,
+	})
+
+	for _, effect := range *light.Effects.EffectValues {
+		displayName := hue.EffectDisplayName(string(effect))
+		rows = append(rows, gridlayout.NewListItemRow("•", displayName))
+	}
+
+	return rows
+}
+
+// buildGradientRows builds rows for the gradient section.
+func (m *Model) buildGradientRows(light hueclient.LightGet) []gridlayout.GridRow {
+	if light.Gradient == nil {
+		return nil
+	}
+
+	var rows []gridlayout.GridRow
+
+	// Section header
+	header := field.NewHeaderComponent("gradient-header", "Gradient", &m.styles, m.zones)
+	rows = append(rows, gridlayout.GridRow{
+		Type:    gridlayout.RowTypeSection,
+		Section: header,
+	})
+
+	if light.Gradient.Mode != nil {
+		rows = append(rows, gridlayout.NewInfoRow("Mode", string(*light.Gradient.Mode), infoLabelWidth))
+	}
+	if light.Gradient.PixelCount != nil {
+		rows = append(rows, gridlayout.NewInfoRow("Pixels", fmt.Sprintf("%d", *light.Gradient.PixelCount), infoLabelWidth))
+	}
+	if light.Gradient.Points != nil && len(*light.Gradient.Points) > 0 {
+		rows = append(rows, gridlayout.NewInfoRow("Points", fmt.Sprintf("%d", len(*light.Gradient.Points)), infoLabelWidth))
+	}
+
+	return rows
+}
+
+// buildSignalingRows builds rows for the signaling section.
+func (m *Model) buildSignalingRows(light hueclient.LightGet) []gridlayout.GridRow {
+	if light.Signaling == nil || light.Signaling.SignalValues == nil || len(*light.Signaling.SignalValues) == 0 {
+		return nil
+	}
+
+	var rows []gridlayout.GridRow
+
+	// Section header
+	header := field.NewHeaderComponent("signaling-header", "Signaling Modes", &m.styles, m.zones)
+	rows = append(rows, gridlayout.GridRow{
+		Type:    gridlayout.RowTypeSection,
+		Section: header,
+	})
+
+	for _, sig := range *light.Signaling.SignalValues {
+		displayName := hue.SignalingModeDisplayName(string(sig))
+		rows = append(rows, gridlayout.NewListItemRow("•", displayName))
+	}
+
+	return rows
+}
+
+// buildPowerupRows builds rows for the power-on behavior section.
+func (m *Model) buildPowerupRows(light hueclient.LightGet) []gridlayout.GridRow {
+	if light.Powerup == nil {
+		return nil
+	}
+
+	var rows []gridlayout.GridRow
+
+	// Section header
+	header := field.NewHeaderComponent("powerup-header", "Power-on Behavior", &m.styles, m.zones)
+	rows = append(rows, gridlayout.GridRow{
+		Type:    gridlayout.RowTypeSection,
+		Section: header,
+	})
+
+	// Powerup preset (editable)
+	if light.Powerup.Preset != nil {
+		presetKeys := getSortedPowerupPresets()
+		var options []field.Option
+		currentIndex := 0
+		currentPreset := string(*light.Powerup.Preset)
+
+		for i, key := range presetKeys {
+			displayName := hue.PowerupPresetDisplayNames[key]
+			options = append(options, field.Option{Label: displayName, Value: i})
+			if key == currentPreset {
+				currentIndex = i
+			}
+		}
+
+		lightID := ""
+		if light.Id != nil {
+			lightID = *light.Id
+		}
+
+		selectComp := field.NewSelectComponent(
+			"powerup-preset:"+lightID, "Preset", currentIndex, options,
+			&m.styles, m.zones,
+		)
+		rows = append(rows, gridlayout.GridRow{
+			Type: gridlayout.RowTypeNormal,
+			Cells: []gridlayout.GridCell{
+				{Component: gridlayout.NewLabelWithWidth("Preset", infoLabelWidth)},
+				{Component: selectComp},
+			},
+		})
+	}
+
+	return rows
+}
+
+// buildDeviceServicesRows builds rows for the device services section.
+func (m *Model) buildDeviceServicesRows(light hueclient.LightGet, device *hueclient.DeviceGet) []gridlayout.GridRow {
+	if device == nil || device.Services == nil || len(*device.Services) == 0 {
+		return nil
+	}
+
+	var rows []gridlayout.GridRow
+
+	// Section header
+	header := field.NewHeaderComponent("services-header", "Device Services", &m.styles, m.zones)
+	rows = append(rows, gridlayout.GridRow{
+		Type:    gridlayout.RowTypeSection,
+		Section: header,
+	})
+
+	for _, svc := range *device.Services {
+		rtype := "unknown"
+		if svc.Rtype != nil {
+			rtype = string(*svc.Rtype)
+		}
+		displayName := hue.DeviceServiceDisplayName(rtype)
+		if svc.Rid != nil && light.Id != nil && *svc.Rid == *light.Id {
+			displayName = displayName + " " + m.styles.Dimmed.Render("(this)")
+		}
+		rows = append(rows, gridlayout.NewListItemRow("•", displayName))
+	}
+
+	return rows
 }

@@ -45,7 +45,7 @@ func (h *HeaderComponent) ViewControl() string {
 	return ""
 }
 
-// View renders the header as a styled subtitle.
+// View renders the header as a styled subtitle with a blank line above for spacing.
 func (h *HeaderComponent) View() string {
-	return h.Styles.Subtitle.Render(h.Label)
+	return "\n" + h.Styles.Subtitle.Render(h.Label)
 }
