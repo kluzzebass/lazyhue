@@ -1,13 +1,10 @@
 package app2
 
 import (
-	"encoding/json"
 	"fmt"
 	"math"
-	"os"
 	"sort"
 	"strings"
-	"time"
 
 	"image/color"
 
@@ -19,26 +16,6 @@ import (
 	gridlayout "github.com/kluzzebass/lazyhue/internal/ui2/component/layout"
 	"github.com/kluzzebass/lazyhue/internal/ui2/panels"
 )
-
-// #region agent log
-func debugLog(location, message string, data map[string]interface{}) {
-	logData := map[string]interface{}{
-		"sessionId": "debug-session",
-		"runId":     "run1",
-		"location":  location,
-		"message":   message,
-		"data":      data,
-		"timestamp": time.Now().UnixMilli(),
-	}
-	if jsonData, err := json.Marshal(logData); err == nil {
-		if f, err := os.OpenFile("/Users/kluzz/Code/lazyhue/.cursor/debug.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644); err == nil {
-			f.WriteString(string(jsonData) + "\n")
-			f.Close()
-		}
-	}
-}
-
-// #endregion
 
 // getSortedProductArchetypes returns a sorted list of product archetype keys from the display names map.
 // This ensures the dropdown and value handling use the same order.
