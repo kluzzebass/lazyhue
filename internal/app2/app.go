@@ -22,7 +22,6 @@ import (
 	"github.com/kluzzebass/lazyhue/internal/ui2"
 	"github.com/kluzzebass/lazyhue/internal/ui2/component"
 	"github.com/kluzzebass/lazyhue/internal/ui2/component/field"
-	"github.com/kluzzebass/lazyhue/internal/ui2/components"
 	"github.com/kluzzebass/lazyhue/internal/ui2/layout"
 	"github.com/kluzzebass/lazyhue/internal/ui2/panels"
 )
@@ -78,8 +77,7 @@ type Model struct {
 	errorChan        chan errorMsg
 	eventCancelFuncs map[string]context.CancelFunc
 	bridgeBlinkUntil map[string]time.Time // Track when bridge blink indicators should stop
-	lightForm        *components.Form     // Form for light controls in detail panel (legacy)
-	lightFormComponent *field.FormComponent // New component-based form for light controls
+	lightFormComponent *field.FormComponent // Component-based form for light controls
 	selectedLightID   string               // ID of currently selected light (for form updates)
 	lastTreeClick     time.Time            // Track last tree item click for double-click detection
 	lastTreeClickID   string               // Track which tree item was last clicked
@@ -206,8 +204,7 @@ func New(creds *config.CredentialStore) Model {
 		requestChan:      make(chan requestMsg, 100),
 		errorChan:        make(chan errorMsg, 100),
 		eventCancelFuncs: make(map[string]context.CancelFunc),
-		bridgeBlinkUntil: make(map[string]time.Time),
-		lightForm:          components.NewForm(&styles, zones),
+		bridgeBlinkUntil:   make(map[string]time.Time),
 		lightFormComponent: field.NewFormComponent(&styles, zones),
 		selectedLightID:    "",
 		historyIndex:     -1, // No history initially
@@ -271,21 +268,7 @@ func (m Model) Init() tea.Cmd {
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmds []tea.Cmd
 
-	// Handle blink tick messages from form first (before switch)
-	if _, ok := msg.(components.BlinkTickMsg); ok {
-		if m.lightForm != nil && len(m.lightForm.Fields) > 0 {
-			var cmd tea.Cmd
-			m.lightForm, cmd = m.lightForm.Update(msg)
-			if cmd != nil {
-				cmds = append(cmds, cmd)
-			}
-			// Update detail content to reflect blink state change
-			m.updateDetailContent()
-			return m, tea.Batch(cmds...)
-		}
-	}
-
-	// Handle blink tick messages from new form component
+	// Handle blink tick messages from form component
 	if blinkMsg, ok := msg.(field.BlinkTickMsg); ok {
 		if m.lightFormComponent != nil {
 			_, cmd := m.lightFormComponent.Update(blinkMsg)
@@ -602,47 +585,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if bridge := m.manager.GetBridge(msg.bridgeID); bridge != nil {
 			m.rebuildTreeForActiveTab()
 			// Update form if the event is for the currently selected light
-			// BUT only if the form is not currently being edited (to prevent interrupting user input)
-			// AND not when dropdown is open (to prevent interrupting dropdown interaction)
-			if msg.resourceType == "light" && msg.resourceID == m.selectedLightID && state != nil && !m.lightForm.Editing && !m.lightForm.DropdownOpen {
-				if light, ok := state.GetLight(msg.resourceID); ok {
-					// Build ALL fields (control + detail), not just control fields
-					// This prevents cursor reset due to field count change
-					oldCursor := m.lightForm.Cursor
-
-					// Build control fields
-					controlFields := m.buildLightFormFields(light)
-
-					// Add Controls header
-					allFields := []components.FormField{
-						{
-							Type:  components.FormFieldHeader,
-							Label: "Controls",
-						},
-					}
-					allFields = append(allFields, controlFields...)
-
-					// Build and append detail fields
-					detailFields := m.buildLightDetailFormFields(light, state)
-					allFields = append(allFields, detailFields...)
-
-					// Calculate max label width across all fields
-					maxLabelWidth := 0
-					for _, field := range allFields {
-						if len(field.Label) > maxLabelWidth {
-							maxLabelWidth = len(field.Label)
-						}
-					}
-					m.lightForm.MaxLabelWidth = maxLabelWidth
-
-					m.lightForm.SetFields(allFields)
-
-					// Restore cursor position (SetFields preserves it if field count unchanged)
-					// But just to be safe, restore it explicitly
-					if oldCursor < len(allFields) {
-						m.lightForm.Cursor = oldCursor
-					}
-				}
+			if msg.resourceType == "light" && msg.resourceID == m.selectedLightID {
+				m.updateDetailContent()
 			}
 		}
 
@@ -778,10 +722,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.updateDetailContent()
 			return m, nil
 
-		case key.Matches(msg, m.keys.TestForm):
-			m.showTestForm()
-			return m, nil
-
 		case key.Matches(msg, m.keys.Rename):
 			// Start rename mode for the selected entity
 			if cmd := m.startRenameMode(); cmd != nil {
@@ -851,9 +791,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.renaming {
 				break
 			}
-			// Don't handle escape globally if form has dropdown open or is editing - let panel handle it
-			if m.lightForm != nil && (m.lightForm.Editing || m.lightForm.DropdownOpen) {
-				break
+			// Route to focused component first - it may want to handle escape
+			if m.focusedPane == PanelDetail {
+				if handled, cmd := m.lightFormComponent.RouteEvent(msg); handled {
+					return m, cmd
+				}
 			}
 			// Close help if showing
 			if m.showHelp {
@@ -885,56 +827,54 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 	case tea.MouseWheelMsg:
-		// If dropdown is open, skip this handler and let focused panel handle it
-		if m.lightForm != nil && m.lightForm.DropdownOpen {
-			// Don't consume - will be handled in focused panel section below
-		} else {
-			// Handle scroll wheel - route to panel under mouse cursor, not focused panel
-			// Account for help bar at bottom
-			helpHeight := 1
-			mouseY := msg.Y
-			mouseX := msg.X
+		// Handle scroll wheel - route to panel under mouse cursor
+		helpHeight := 1
+		mouseY := msg.Y
+		mouseX := msg.X
 
-			// Check which panel the mouse is over
-			if mouseY < m.height-helpHeight {
-				if leaf := m.layout.At(mouseX, mouseY); leaf != nil {
-					// Route scroll event to the panel under the mouse
-					switch leaf.ID {
-					case PanelTree:
-						var cmd tea.Cmd
-						m.tree, cmd = m.tree.Update(msg)
-						if cmd != nil {
-							cmds = append(cmds, cmd)
-						}
-						// Update detail content if selection changed
-						if node := m.tree.SelectedNode(); node != nil {
-							m.updateDetailContent()
-							// Auto-focus detail panel when selecting a light (for easier mouse interaction)
-							if node.Item != nil && node.Item.Type == panels.EntityLight {
-								m.previousPane = m.focusedPane
-								m.focusedPane = PanelDetail
-							}
-						}
-						return m, tea.Batch(cmds...)
-
-					case PanelDetail:
-						// Pass to detail viewport
-						var cmd tea.Cmd
-						m.detailViewport, cmd = m.detailViewport.Update(msg)
-						if cmd != nil {
-							cmds = append(cmds, cmd)
-						}
-						return m, tea.Batch(cmds...)
-
-					case PanelLog:
-						// Pass to log viewport
-						var cmd tea.Cmd
-						m.logViewport, cmd = m.logViewport.Update(msg)
-						if cmd != nil {
-							cmds = append(cmds, cmd)
-						}
-						return m, tea.Batch(cmds...)
+		// Check which panel the mouse is over
+		if mouseY < m.height-helpHeight {
+			if leaf := m.layout.At(mouseX, mouseY); leaf != nil {
+				// Route scroll event to the panel under the mouse
+				switch leaf.ID {
+				case PanelTree:
+					var cmd tea.Cmd
+					m.tree, cmd = m.tree.Update(msg)
+					if cmd != nil {
+						cmds = append(cmds, cmd)
 					}
+					// Update detail content if selection changed
+					if node := m.tree.SelectedNode(); node != nil {
+						m.updateDetailContent()
+						// Auto-focus detail panel when selecting a light (for easier mouse interaction)
+						if node.Item != nil && node.Item.Type == panels.EntityLight {
+							m.previousPane = m.focusedPane
+							m.focusedPane = PanelDetail
+						}
+					}
+					return m, tea.Batch(cmds...)
+
+				case PanelDetail:
+					// Route to form component first
+					if handled, cmd := m.lightFormComponent.RouteEvent(msg); handled {
+						return m, cmd
+					}
+					// Fall back to viewport scroll
+					var cmd tea.Cmd
+					m.detailViewport, cmd = m.detailViewport.Update(msg)
+					if cmd != nil {
+						cmds = append(cmds, cmd)
+					}
+					return m, tea.Batch(cmds...)
+
+				case PanelLog:
+					// Pass to log viewport
+					var cmd tea.Cmd
+					m.logViewport, cmd = m.logViewport.Update(msg)
+					if cmd != nil {
+						cmds = append(cmds, cmd)
+					}
+					return m, tea.Batch(cmds...)
 				}
 			}
 		}
@@ -1136,20 +1076,19 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// When renaming, events are routed through componentRoot.RouteEvent() which
 		// sends TextInputConfirmedMsg/TextInputCancelledMsg that we handle above.
 
-		// Handle Escape key to return to previous panel
+		// Route all events through the component-based form first
+		// The form handles its own keyboard navigation, mouse clicks, and editing
+		if handled, cmd := m.lightFormComponent.RouteEvent(msg); handled {
+			if cmd != nil {
+				cmds = append(cmds, cmd)
+			}
+			m.updateDetailContent()
+			return m, tea.Batch(cmds...)
+		}
+
+		// Handle Escape key to return to previous panel (form didn't consume it)
 		if keyMsg, ok := msg.(tea.KeyMsg); ok {
 			if keyMsg.String() == "esc" {
-				// Check if form is editing or dropdown is open - if so, cancel edit first
-				if m.lightForm != nil && (m.lightForm.Editing || m.lightForm.DropdownOpen) {
-					var cmd tea.Cmd
-					m.lightForm, cmd = m.lightForm.Update(msg)
-					if cmd != nil {
-						cmds = append(cmds, cmd)
-					}
-					m.updateDetailContent()
-					return m, tea.Batch(cmds...)
-				}
-				// Otherwise, return to previous panel
 				m.focusedPane = m.previousPane
 				if m.focusedPane == PanelDetail || m.focusedPane == PanelLog {
 					m.focusedPane = PanelTree
@@ -1159,172 +1098,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 
-		// Pass mouse messages to form
-		// Zones are scanned from FINAL output (after viewport, borders, etc.), so they're in SCREEN coordinates
-		// We should pass screen coordinates directly to form
-		formHandledMouse := false
-		if m.lightForm != nil && len(m.lightForm.Fields) > 0 && m.focusedPane == PanelDetail {
-			detailBounds := m.layout.Bounds(PanelDetail)
-
-			// Handle mouse wheel for dropdown scrolling
-			if mouseWheel, ok := msg.(tea.MouseWheelMsg); ok {
-				if m.lightForm.DropdownOpen {
-					var cmd tea.Cmd
-					m.lightForm, cmd = m.lightForm.Update(mouseWheel)
-					if cmd != nil {
-						cmds = append(cmds, cmd)
-					}
-					m.updateDetailContent()
-					return m, tea.Batch(cmds...)
-				}
-			}
-
-			// Handle mouse motion for dragging
-			if mouseMotion, ok := msg.(tea.MouseMotionMsg); ok {
-				// If form has active capture, pass motion events to it
-				if m.lightForm.MouseCaptureIdx >= 0 {
-					var cmd tea.Cmd
-					m.lightForm, cmd = m.lightForm.Update(mouseMotion)
-					if cmd != nil {
-						cmds = append(cmds, cmd)
-					}
-					m.updateDetailContent()
-					return m, tea.Batch(cmds...)
-				}
-			}
-
-			// Handle mouse release to end drag
-			if mouseRelease, ok := msg.(tea.MouseReleaseMsg); ok {
-				if m.lightForm.MouseCaptureIdx >= 0 {
-					var cmd tea.Cmd
-					m.lightForm, cmd = m.lightForm.Update(mouseRelease)
-					if cmd != nil {
-						cmds = append(cmds, cmd)
-					}
-					return m, tea.Batch(cmds...)
-				}
-			}
-
-			// Handle mouse clicks
-			if mouseClick, ok := msg.(tea.MouseClickMsg); ok {
-				// Check if click is within detail panel bounds
-				if mouseClick.X >= detailBounds.X && mouseClick.X < detailBounds.X+detailBounds.Width &&
-					mouseClick.Y >= detailBounds.Y && mouseClick.Y < detailBounds.Y+detailBounds.Height {
-
-					// Pass screen coordinates directly - zones are in screen space after final scan
-					// The form's handleMouseClick will check zones using the same zone manager
-					var cmd tea.Cmd
-					// Store old field values to detect changes (for toggles, etc.)
-					oldFieldValues := make(map[int]int)
-					for i, field := range m.lightForm.Fields {
-						oldFieldValues[i] = field.Value
-					}
-					oldCursor := m.lightForm.Cursor
-					oldCapture := m.lightForm.MouseCaptureIdx
-					oldDropdownOpen := m.lightForm.DropdownOpen
-
-					// Update form with mouse click - it will check zones internally
-					// If there's an active capture, this will handle dragging
-					m.lightForm, cmd = m.lightForm.Update(mouseClick)
-					if cmd != nil {
-						cmds = append(cmds, cmd)
-					}
-
-					// Check if form handled the click by checking:
-					// 1. Cursor changed
-					// 2. Mouse capture started/changed
-					// 3. Field values changed (for toggles, etc.)
-					// 4. Dropdown state changed
-					// 5. Active capture exists (user is dragging - always update during drag)
-					fieldChanged := false
-					for i, field := range m.lightForm.Fields {
-						if oldVal, ok := oldFieldValues[i]; ok && field.Value != oldVal {
-							fieldChanged = true
-							break
-						}
-					}
-					dropdownChanged := m.lightForm.DropdownOpen != oldDropdownOpen
-					if m.lightForm.Cursor != oldCursor || m.lightForm.MouseCaptureIdx != oldCapture || fieldChanged || dropdownChanged {
-						formHandledMouse = true
-						m.updateDetailContent()
-						// Scroll viewport if cursor changed or dropdown opened/closed
-						if m.lightForm.Cursor != oldCursor || dropdownChanged {
-							m.scrollDetailViewportToCursor()
-						}
-						// If dropdown just opened, add a null command to force another render cycle
-						// This ensures dropdown option zones are scanned before next mouse click
-						if dropdownChanged && m.lightForm.DropdownOpen {
-							cmds = append(cmds, func() tea.Msg { return struct{}{} })
-						}
-						return m, tea.Batch(cmds...)
-					}
-					// If there's an active capture, always update (user is dragging)
-					if m.lightForm.MouseCaptureIdx >= 0 {
-						formHandledMouse = true
-						m.updateDetailContent()
-						return m, tea.Batch(cmds...)
-					}
-				}
-			}
-		}
-
-		// Update light form if it exists and has fields (but skip if we already handled mouse click above)
-		formHandledKey := false
-		if m.lightForm != nil && len(m.lightForm.Fields) > 0 && !formHandledMouse {
-			// Check if this is a key the form handles
-			if keyMsg, ok := msg.(tea.KeyMsg); ok {
-				keyStr := keyMsg.String()
-				// These are keys the form handles for navigation/editing - always consume them
-				formNavigationKeys := map[string]bool{
-					"up": true, "down": true, "k": true, "j": true,
-					"left": true, "right": true, "h": true, "l": true,
-					"enter": true, " ": true,
-				}
-				if formNavigationKeys[keyStr] {
-					// Always let form handle these keys when it has fields
-					formHandledKey = true
-					oldCursor := m.lightForm.Cursor
-					oldDropdownOpen := m.lightForm.DropdownOpen
-					var cmd tea.Cmd
-					m.lightForm, cmd = m.lightForm.Update(msg)
-					if cmd != nil {
-						cmds = append(cmds, cmd)
-					}
-					// Update detail content to reflect form changes
-					// updateDetailContent preserves form state when editing, so this is safe
-					m.updateDetailContent()
-
-					// Scroll viewport to keep cursor visible if cursor moved OR dropdown opened/closed
-					if oldCursor != m.lightForm.Cursor || oldDropdownOpen != m.lightForm.DropdownOpen {
-						m.scrollDetailViewportToCursor()
-					}
-				} else {
-					// Other keys (including typing), let form handle them
-					var cmd tea.Cmd
-					m.lightForm, cmd = m.lightForm.Update(msg)
-					if cmd != nil {
-						cmds = append(cmds, cmd)
-					}
-					// Refresh to show typed characters immediately
-					m.updateDetailContent()
-				}
-			} else if _, ok := msg.(tea.MouseClickMsg); !ok {
-				// Non-key, non-mouse messages, let form handle them
-				// (Mouse clicks are handled above, so skip them here)
-				var cmd tea.Cmd
-				m.lightForm, cmd = m.lightForm.Update(msg)
-				if cmd != nil {
-					cmds = append(cmds, cmd)
-				}
-			}
-		}
-		// Only update viewport if form didn't handle the key
-		if !formHandledKey {
-			var cmd tea.Cmd
-			m.detailViewport, cmd = m.detailViewport.Update(msg)
-			if cmd != nil {
-				cmds = append(cmds, cmd)
-			}
+		// Form didn't handle it - pass to viewport for scrolling
+		var cmd tea.Cmd
+		m.detailViewport, cmd = m.detailViewport.Update(msg)
+		if cmd != nil {
+			cmds = append(cmds, cmd)
 		}
 
 	case PanelLog:
@@ -2091,74 +1869,10 @@ func (m *Model) navigateForward() {
 	m.status = fmt.Sprintf("Forward: %s (%d/%d)", node.Item.Name, m.historyIndex+1, len(m.navigationHistory))
 }
 
-// scrollDetailViewportToCursor scrolls the detail viewport to ensure the current form cursor is visible.
+// scrollDetailViewportToCursor scrolls the detail viewport to ensure the current form field is visible.
+// With the new component-based form, each field tracks its own height.
 func (m *Model) scrollDetailViewportToCursor() {
-	if m.lightForm == nil || len(m.lightForm.Fields) == 0 {
-		return
-	}
-
-	// Calculate line number where cursor field starts
-	// Start at 0 and count all lines before the cursor field
-	cursorLine := 0
-
-	for i := 0; i < m.lightForm.Cursor && i < len(m.lightForm.Fields); i++ {
-		field := &m.lightForm.Fields[i]
-		// Count lines for this field
-		if field.Type == components.FormFieldHeader {
-			// First header (i=0) takes 1 line, subsequent headers take 2 lines (blank + header)
-			if i == 0 {
-				cursorLine += 1
-			} else {
-				cursorLine += 2
-			}
-		} else if field.Type == components.FormFieldColor {
-			cursorLine += m.lightForm.ColorWheel.Height()
-		} else if field.Type == components.FormFieldHSL || field.Type == components.FormFieldRGB {
-			cursorLine += 3 // 3 rows for HSL/RGB
-		} else if field.Type == components.FormFieldRadio && field.Vertical {
-			cursorLine += len(field.Options)
-		} else if field.Type == components.FormFieldSelect && m.lightForm.DropdownOpen && i == m.lightForm.Cursor {
-			cursorLine += 6 // 1 for label + 5 for dropdown
-		} else {
-			cursorLine++ // Standard 1-line field
-		}
-	}
-
-	// Calculate the height of the current field (to ensure entire field is visible)
-	currentFieldHeight := 1 // Default: 1 line
-	if m.lightForm.Cursor < len(m.lightForm.Fields) {
-		currentField := &m.lightForm.Fields[m.lightForm.Cursor]
-		if currentField.Type == components.FormFieldColor {
-			currentFieldHeight = m.lightForm.ColorWheel.Height()
-		} else if currentField.Type == components.FormFieldHSL || currentField.Type == components.FormFieldRGB {
-			currentFieldHeight = 3
-		} else if currentField.Type == components.FormFieldRadio && currentField.Vertical {
-			currentFieldHeight = len(currentField.Options)
-		} else if currentField.Type == components.FormFieldSelect && m.lightForm.DropdownOpen {
-			// Dropdown: label line + dropdown content (up to 6 lines total with border)
-			currentFieldHeight = min(6, len(currentField.Options)+2) // +2 for top/bottom borders
-		}
-	}
-
-	// Get viewport dimensions
-	viewportHeight := m.detailViewport.Height()
-	viewportY := m.detailViewport.YOffset
-
-	// Calculate where the field ends
-	cursorEndLine := cursorLine + currentFieldHeight - 1
-
-	// Check if entire field is visible
-	if cursorLine < viewportY {
-		// Field start is above viewport, scroll up to show start
-		m.detailViewport.SetYOffset(cursorLine)
-	} else if cursorEndLine >= viewportY+viewportHeight {
-		// Field end is below viewport, scroll down to show entire field
-		// Position the field end at the bottom of the viewport
-		newOffset := cursorEndLine - viewportHeight + 1
-		// Make sure we don't scroll past the field start
-		if newOffset > cursorLine {
-			newOffset = cursorLine
-		}
-		m.detailViewport.SetYOffset(newOffset)
-	}
+	// The new FormComponent handles its own cursor tracking
+	// For now, we'll let the viewport handle scrolling naturally
+	// TODO: Add Height() method to field components for precise scrolling
 }

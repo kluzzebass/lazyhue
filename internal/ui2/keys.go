@@ -42,7 +42,6 @@ type KeyMap struct {
 	// UI toggles
 	Help      key.Binding
 	ToggleLog key.Binding
-	TestForm  key.Binding
 
 	// Quit
 	Quit key.Binding
@@ -164,10 +163,6 @@ func DefaultKeyMap() KeyMap {
 			key.WithKeys("a"),
 			key.WithHelp("a", "activity log"),
 		),
-		TestForm: key.NewBinding(
-			key.WithKeys("t"),
-			key.WithHelp("t", "test form"),
-		),
 
 		// Quit
 		Quit: key.NewBinding(
@@ -189,7 +184,7 @@ func (k KeyMap) FullHelp() [][]key.Binding {
 		{k.Enter, k.Space, k.Escape},
 		{k.Edit, k.Delete, k.Create, k.Rename},
 		{k.NextPanel, k.PrevPanel},
-		{k.TestForm, k.ToggleLog},
+		{k.ToggleLog},
 		{k.Help, k.Quit},
 	}
 }

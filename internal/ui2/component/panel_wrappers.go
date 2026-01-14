@@ -6,7 +6,6 @@ import (
 	"github.com/charmbracelet/bubbles/v2/viewport"
 	tea "github.com/charmbracelet/bubbletea/v2"
 
-	"github.com/kluzzebass/lazyhue/internal/ui2/components"
 	"github.com/kluzzebass/lazyhue/internal/ui2/panels"
 )
 
@@ -77,73 +76,6 @@ func (t *TreePanelComponent) View() string {
 // Panel returns the underlying TreePanel.
 func (t *TreePanelComponent) Panel() *panels.TreePanel {
 	return t.panel
-}
-
-// FormComponent wraps a Form to implement the Component interface.
-type FormComponent struct {
-	*BaseComponent
-	form *components.Form
-	id   string
-}
-
-// NewFormComponent creates a new form component.
-func NewFormComponent(id string, form *components.Form) *FormComponent {
-	f := &FormComponent{
-		BaseComponent: NewBaseComponent(),
-		form:          form,
-		id:            id,
-	}
-	f.BaseComponent.SetFocusState(FocusPassive)
-	return f
-}
-
-// Layout sets the bounds (form handles its own sizing).
-func (f *FormComponent) Layout(bounds Rect) {
-	f.BaseComponent.Layout(bounds)
-	slog.Debug("FormComponent.Layout", "id", f.id, "bounds", bounds)
-}
-
-// Update handles events by delegating to the form.
-func (f *FormComponent) Update(msg tea.Msg) (Component, tea.Cmd) {
-	slog.Debug("FormComponent.Update", "id", f.id, "msg_type", slog.Any("%T", msg))
-
-	// Delegate to form
-	var cmd tea.Cmd
-	f.form, cmd = f.form.Update(msg)
-	return f, cmd
-}
-
-// RouteEvent checks if this component can handle the event.
-func (f *FormComponent) RouteEvent(msg tea.Msg) (bool, tea.Cmd) {
-	if !f.IsFocused() {
-		slog.Debug("FormComponent.RouteEvent: not focused, ignoring", "id", f.id)
-		return false, nil
-	}
-
-	slog.Debug("FormComponent.RouteEvent", "id", f.id, "msg_type", slog.Any("%T", msg))
-
-	// For mouse events, check if it's within bounds
-	if mouse, ok := msg.(tea.MouseClickMsg); ok {
-		if !f.bounds.Contains(mouse.X, mouse.Y) {
-			slog.Debug("FormComponent.RouteEvent: mouse outside bounds", "id", f.id)
-			return false, nil
-		}
-	}
-
-	// Update and consume the event
-	updated, cmd := f.Update(msg)
-	*f = *updated.(*FormComponent)
-	return true, cmd
-}
-
-// View renders the form.
-func (f *FormComponent) View() string {
-	return f.form.View()
-}
-
-// Form returns the underlying Form.
-func (f *FormComponent) Form() *components.Form {
-	return f.form
 }
 
 // ViewportComponent wraps a bubbles viewport to implement the Component interface.
