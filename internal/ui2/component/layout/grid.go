@@ -21,7 +21,9 @@ const (
 // GridCell represents a single cell in the grid.
 type GridCell struct {
 	Component component.Component
-	ColSpan   int // Number of columns this cell spans (default 1)
+	ColSpan   int     // Number of columns this cell spans (default 1)
+	Padding   Spacing // Inner spacing (inside cell, around component)
+	Margin    Spacing // Outer spacing (outside cell boundary)
 }
 
 // GridRow represents a row in the grid - either cells or a section header.
@@ -37,12 +39,12 @@ type GridRow struct {
 type Grid struct {
 	*component.BaseComponent
 
-	rows       []GridRow
-	colWidths  []int // Calculated column widths
-	colGap     int   // Gap between columns
-	rowGap     int   // Gap between rows (0 = no extra gap beyond newlines)
-	focusRow   int   // Currently focused row
-	focusCol   int   // Currently focused column (cell index, not grid column)
+	rows      []GridRow
+	colWidths []int // Calculated column widths
+	colGap    int   // Gap between columns
+	rowGap    int   // Gap between rows (0 = no extra gap beyond newlines)
+	focusRow  int   // Currently focused row
+	focusCol  int   // Currently focused column (cell index, not grid column)
 }
 
 // NewGrid creates a new grid layout.
@@ -141,19 +143,26 @@ func (g *Grid) calculateColumnWidths() {
 	}
 }
 
-// getCellWidth returns the display width of a cell's content.
+// getCellWidth returns the display width of a cell's content including padding and margin.
 func (g *Grid) getCellWidth(cell GridCell) int {
-	if cell.Component == nil {
+	var content string
+	if cell.Component != nil {
+		// Use ViewControl() for field components to match what's rendered
+		if cr, ok := cell.Component.(field.ControlRenderer); ok {
+			content = cr.ViewControl()
+		} else {
+			content = cell.Component.View()
+		}
+	}
+
+	// Apply cell padding and margin to match rendering
+	content = ApplySpacing(content, cell.Padding)
+	content = ApplySpacing(content, cell.Margin)
+
+	if content == "" {
 		return 0
 	}
 
-	// Use ViewControl() for field components to match what's rendered
-	var content string
-	if cr, ok := cell.Component.(field.ControlRenderer); ok {
-		content = cr.ViewControl()
-	} else {
-		content = cell.Component.View()
-	}
 	lines := strings.Split(content, "\n")
 
 	maxWidth := 0
@@ -384,18 +393,28 @@ func (g *Grid) renderRow(row GridRow, _ int) []string {
 	maxLines := 1
 
 	for i, cell := range row.Cells {
+		var content string
 		if cell.Component != nil {
 			// Use ViewControl() for field components to avoid rendering the label twice
-			var content string
 			if cr, ok := cell.Component.(field.ControlRenderer); ok {
 				content = cr.ViewControl()
 			} else {
 				content = cell.Component.View()
 			}
-			cellContents[i] = strings.Split(content, "\n")
-		} else {
-			cellContents[i] = []string{""}
 		}
+
+		// Apply cell padding (inner spacing)
+		content = ApplySpacing(content, cell.Padding)
+
+		// Apply cell margin (outer spacing)
+		content = ApplySpacing(content, cell.Margin)
+
+		if content == "" {
+			cellContents[i] = []string{""}
+		} else {
+			cellContents[i] = strings.Split(content, "\n")
+		}
+
 		if len(cellContents[i]) > maxLines {
 			maxLines = len(cellContents[i])
 		}

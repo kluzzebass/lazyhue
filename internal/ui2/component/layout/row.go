@@ -18,7 +18,11 @@ type RowChild struct {
 type Row struct {
 	*component.BaseComponent
 	children []RowChild
-	focused  int // Index of focused child (-1 = none)
+	focused  int     // Index of focused child (-1 = none)
+	Padding  Spacing // Inner spacing
+	Margin   Spacing // Outer spacing
+	VAlign   VAlign  // Vertical alignment of children
+	Gap      int     // Gap between children
 }
 
 // NewRow creates a new row with the given children.
@@ -27,6 +31,7 @@ func NewRow(children ...RowChild) *Row {
 		BaseComponent: component.NewBaseComponent(),
 		children:      children,
 		focused:       -1,
+		VAlign:        VAlignTop,
 	}
 
 	// Set parent references and find first focusable child
@@ -37,6 +42,30 @@ func NewRow(children ...RowChild) *Row {
 		}
 	}
 
+	return r
+}
+
+// SetPadding sets the inner spacing.
+func (r *Row) SetPadding(p Spacing) *Row {
+	r.Padding = p
+	return r
+}
+
+// SetMargin sets the outer spacing.
+func (r *Row) SetMargin(m Spacing) *Row {
+	r.Margin = m
+	return r
+}
+
+// SetVAlign sets vertical alignment of children.
+func (r *Row) SetVAlign(align VAlign) *Row {
+	r.VAlign = align
+	return r
+}
+
+// SetGap sets the gap between children.
+func (r *Row) SetGap(gap int) *Row {
+	r.Gap = gap
 	return r
 }
 
@@ -93,24 +122,77 @@ func (r *Row) View() string {
 		return ""
 	}
 
-	var out strings.Builder
-	for _, child := range r.children {
+	// Get content and max height for each child
+	childViews := make([][]string, len(r.children))
+	maxHeight := 0
+
+	for i, child := range r.children {
 		view := child.Component.View()
-
-		// If fixed width, pad or truncate
-		if child.Width > 0 {
-			viewWidth := runeWidth(view)
-			if viewWidth < child.Width {
-				view += strings.Repeat(" ", child.Width-viewWidth)
-			} else if viewWidth > child.Width {
-				view = truncateToWidth(view, child.Width)
-			}
+		lines := strings.Split(view, "\n")
+		childViews[i] = lines
+		if len(lines) > maxHeight {
+			maxHeight = len(lines)
 		}
-
-		out.WriteString(view)
 	}
 
-	return out.String()
+	// Build output by combining lines from each child
+	var outputLines []string
+	for lineIdx := 0; lineIdx < maxHeight; lineIdx++ {
+		var lineBuilder strings.Builder
+
+		for childIdx, child := range r.children {
+			// Add gap between children
+			if childIdx > 0 && r.Gap > 0 {
+				lineBuilder.WriteString(strings.Repeat(" ", r.Gap))
+			}
+
+			// Get the line for this child (with vertical alignment)
+			lines := childViews[childIdx]
+			childHeight := len(lines)
+			var line string
+
+			switch r.VAlign {
+			case VAlignTop:
+				if lineIdx < childHeight {
+					line = lines[lineIdx]
+				}
+			case VAlignMiddle:
+				offset := (maxHeight - childHeight) / 2
+				adjustedIdx := lineIdx - offset
+				if adjustedIdx >= 0 && adjustedIdx < childHeight {
+					line = lines[adjustedIdx]
+				}
+			case VAlignBottom:
+				offset := maxHeight - childHeight
+				adjustedIdx := lineIdx - offset
+				if adjustedIdx >= 0 && adjustedIdx < childHeight {
+					line = lines[adjustedIdx]
+				}
+			}
+
+			// If fixed width, pad or truncate
+			if child.Width > 0 {
+				lineWidth := len([]rune(line))
+				if lineWidth < child.Width {
+					line += strings.Repeat(" ", child.Width-lineWidth)
+				} else if lineWidth > child.Width {
+					line = truncateToWidth(line, child.Width)
+				}
+			}
+
+			lineBuilder.WriteString(line)
+		}
+
+		outputLines = append(outputLines, lineBuilder.String())
+	}
+
+	content := strings.Join(outputLines, "\n")
+
+	// Apply padding (inner spacing)
+	content = ApplySpacing(content, r.Padding)
+
+	// Apply margin (outer spacing)
+	return ApplySpacing(content, r.Margin)
 }
 
 // CanFocus returns true if any child can focus.
