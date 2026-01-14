@@ -297,14 +297,24 @@ func (b *Bridge) applyResourceUpdate(update ResourceUpdate) bool {
 		return false
 
 	case "room":
-		if update.Metadata != nil && update.Metadata.Name != nil {
-			return b.state.ApplyRoomMetadata(update.ID, update.Metadata.Name)
+		if update.Metadata != nil {
+			var archetype *string
+			if update.Metadata.Archetype != nil {
+				arch := string(*update.Metadata.Archetype)
+				archetype = &arch
+			}
+			return b.state.ApplyRoomMetadata(update.ID, update.Metadata.Name, archetype)
 		}
 		return false
 
 	case "zone":
-		if update.Metadata != nil && update.Metadata.Name != nil {
-			return b.state.ApplyZoneMetadata(update.ID, update.Metadata.Name)
+		if update.Metadata != nil {
+			var archetype *string
+			if update.Metadata.Archetype != nil {
+				arch := string(*update.Metadata.Archetype)
+				archetype = &arch
+			}
+			return b.state.ApplyZoneMetadata(update.ID, update.Metadata.Name, archetype)
 		}
 		return false
 

@@ -678,8 +678,8 @@ func (s *BridgeState) UpdateRooms(rooms map[string]hueclient.RoomGet) {
 	s.Rooms = rooms
 }
 
-// ApplyRoomMetadata applies a metadata update (e.g., rename) to a room.
-func (s *BridgeState) ApplyRoomMetadata(id string, name *string) bool {
+// ApplyRoomMetadata applies a metadata update (e.g., rename, archetype change) to a room.
+func (s *BridgeState) ApplyRoomMetadata(id string, name *string, archetype *string) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -688,12 +688,23 @@ func (s *BridgeState) ApplyRoomMetadata(id string, name *string) bool {
 		return false
 	}
 
-	if name != nil && room.Metadata != nil {
-		room.Metadata.Name = name
-		s.Rooms[id] = room
-		return true
+	updated := false
+	if room.Metadata != nil {
+		if name != nil {
+			room.Metadata.Name = name
+			updated = true
+		}
+		if archetype != nil {
+			arch := hueclient.RoomArchetype(*archetype)
+			room.Metadata.Archetype = &arch
+			updated = true
+		}
 	}
-	return false
+
+	if updated {
+		s.Rooms[id] = room
+	}
+	return updated
 }
 
 // UpdateZones replaces the zones cache.
@@ -703,8 +714,8 @@ func (s *BridgeState) UpdateZones(zones map[string]hueclient.RoomGet) {
 	s.Zones = zones
 }
 
-// ApplyZoneMetadata applies a metadata update (e.g., rename) to a zone.
-func (s *BridgeState) ApplyZoneMetadata(id string, name *string) bool {
+// ApplyZoneMetadata applies a metadata update (e.g., rename, archetype change) to a zone.
+func (s *BridgeState) ApplyZoneMetadata(id string, name *string, archetype *string) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -713,12 +724,23 @@ func (s *BridgeState) ApplyZoneMetadata(id string, name *string) bool {
 		return false
 	}
 
-	if name != nil && zone.Metadata != nil {
-		zone.Metadata.Name = name
-		s.Zones[id] = zone
-		return true
+	updated := false
+	if zone.Metadata != nil {
+		if name != nil {
+			zone.Metadata.Name = name
+			updated = true
+		}
+		if archetype != nil {
+			arch := hueclient.RoomArchetype(*archetype)
+			zone.Metadata.Archetype = &arch
+			updated = true
+		}
 	}
-	return false
+
+	if updated {
+		s.Zones[id] = zone
+	}
+	return updated
 }
 
 // UpdateGroupedLights replaces the grouped lights cache.

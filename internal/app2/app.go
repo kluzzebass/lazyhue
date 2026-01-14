@@ -66,11 +66,11 @@ type Model struct {
 	panelOrder []string // Panel IDs in focus-cycle order
 
 	// State
-	width        int
-	height       int
-	focusedPane  string
-	previousPane string // Track previous panel for Escape key
-	status       string
+	width            int
+	height           int
+	focusedPane      string
+	previousPane     string // Track previous panel for Escape key
+	status           string
 	activities       []Activity
 	quitting         bool
 	eventChan        chan bridgeEventMsg
@@ -78,37 +78,37 @@ type Model struct {
 	errorChan        chan errorMsg
 	eventCancelFuncs map[string]context.CancelFunc
 	bridgeBlinkUntil map[string]time.Time // Track when bridge blink indicators should stop
-	lightGrid *gridlayout.Grid // Grid layout for light controls
-	selectedLightID   string               // ID of currently selected light (for form updates)
-	lastTreeClick     time.Time            // Track last tree item click for double-click detection
-	lastTreeClickID   string               // Track which tree item was last clicked
+	lightGrid        *gridlayout.Grid     // Grid layout for light controls
+	selectedLightID  string               // ID of currently selected light (for form updates)
+	lastTreeClick    time.Time            // Track last tree item click for double-click detection
+	lastTreeClickID  string               // Track which tree item was last clicked
 
 	// Rename mode state
-	renaming           bool                 // Whether we're in rename mode
+	renaming bool // Whether we're in rename mode
 	// renameInput removed - now owned by renameModal (TextInputModal)
-	renameEntityType   panels.EntityType    // Type of entity being renamed
-	renameEntityID     string               // ID of entity being renamed
-	renameBridgeID     string               // Bridge ID the entity belongs to
-	renameOriginalName string               // Original name for cancel
+	renameEntityType   panels.EntityType // Type of entity being renamed
+	renameEntityID     string            // ID of entity being renamed
+	renameBridgeID     string            // Bridge ID the entity belongs to
+	renameOriginalName string            // Original name for cancel
 
 	// Delete confirmation state
-	confirmingDelete     bool              // Whether we're showing delete confirmation
-	deleteBridgeID       string            // ID of bridge to delete
-	deleteBridgeName     string            // Name of bridge to delete (for display)
-	confirmingDeleteEntity bool            // Whether we're showing entity delete confirmation
-	deleteEntityID       string            // ID of entity to delete
-	deleteEntityName     string            // Name of entity to delete (for display)
-	deleteEntityType     panels.EntityType // Type of entity to delete
-	deleteEntityBridgeID string            // Bridge ID the entity belongs to
+	confirmingDelete       bool              // Whether we're showing delete confirmation
+	deleteBridgeID         string            // ID of bridge to delete
+	deleteBridgeName       string            // Name of bridge to delete (for display)
+	confirmingDeleteEntity bool              // Whether we're showing entity delete confirmation
+	deleteEntityID         string            // ID of entity to delete
+	deleteEntityName       string            // Name of entity to delete (for display)
+	deleteEntityType       panels.EntityType // Type of entity to delete
+	deleteEntityBridgeID   string            // Bridge ID the entity belongs to
 
 	// Pairing state
-	pairing           bool                    // Whether we're in pairing mode
-	pairingFor        *hue.BridgeInfo         // Bridge being paired
-	pairingCancel     context.CancelFunc      // Function to cancel pairing
-	pairingStartTime  time.Time               // When pairing started
-	discoveredBridges []hue.BridgeInfo        // Discovered bridges available for pairing
-	pairingRemaining  int                     // Seconds remaining in pairing countdown
-	pairingRequested  bool                    // Whether user explicitly requested pairing via 'p' key
+	pairing           bool               // Whether we're in pairing mode
+	pairingFor        *hue.BridgeInfo    // Bridge being paired
+	pairingCancel     context.CancelFunc // Function to cancel pairing
+	pairingStartTime  time.Time          // When pairing started
+	discoveredBridges []hue.BridgeInfo   // Discovered bridges available for pairing
+	pairingRemaining  int                // Seconds remaining in pairing countdown
+	pairingRequested  bool               // Whether user explicitly requested pairing via 'p' key
 
 	// Create mode state
 	creatingRoom   bool   // Whether we're creating a room
@@ -153,10 +153,10 @@ func New(creds *config.CredentialStore) Model {
 	}
 
 	// Define panel order for automatic key assignment
-	// Detail (0), Tree (1), Log (2)
+	// Tree (1), Detail (2), Log (3)
 	panelOrder := []string{
-		PanelDetail,
 		PanelTree,
+		PanelDetail,
 		PanelLog,
 	}
 
@@ -164,9 +164,9 @@ func New(creds *config.CredentialStore) Model {
 	tree := panels.NewTreePanel(styles, zones, "Home", "")
 
 	// Assign keys automatically based on position in panelOrder
-	// Keys are 0-based: first panel gets "0", second gets "1", etc.
+	// Keys are 1-based: first panel gets "1", second gets "2", etc.
 	for i, panelID := range panelOrder {
-		key := fmt.Sprintf("%d", i)
+		key := fmt.Sprintf("%d", i+1)
 		switch panelID {
 		case PanelTree:
 			tree.SetKey(key)
@@ -209,9 +209,9 @@ func New(creds *config.CredentialStore) Model {
 		requestChan:      make(chan requestMsg, 100),
 		errorChan:        make(chan errorMsg, 100),
 		eventCancelFuncs: make(map[string]context.CancelFunc),
-		bridgeBlinkUntil:   make(map[string]time.Time),
-		lightGrid: gridlayout.NewGrid().SetGaps(2, 0).SetFocusIndicator(true, "> ", "  "),
-		selectedLightID:    "",
+		bridgeBlinkUntil: make(map[string]time.Time),
+		lightGrid:        gridlayout.NewGrid().SetGaps(2, 0).SetFocusIndicator(true, "> ", "  "),
+		selectedLightID:  "",
 		historyIndex:     -1, // No history initially
 		inputStack:       NewInputStack(),
 	}
@@ -599,9 +599,20 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		if bridge := m.manager.GetBridge(msg.bridgeID); bridge != nil {
 			m.rebuildTreeForActiveTab()
-			// Update form if the event is for the currently selected light
-			if msg.resourceType == "light" && msg.resourceID == m.selectedLightID {
-				m.updateDetailContent()
+			// Update detail panel if the event is for the currently selected entity
+			if node := m.tree.SelectedNode(); node != nil && node.Item != nil {
+				selectedID := node.Item.ID
+				// Check if event matches selected entity
+				shouldUpdate := false
+				switch msg.resourceType {
+				case "light":
+					shouldUpdate = msg.resourceID == m.selectedLightID || msg.resourceID == selectedID
+				case "room", "zone", "scene", "device", "grouped_light":
+					shouldUpdate = msg.resourceID == selectedID
+				}
+				if shouldUpdate {
+					m.updateDetailContent()
+				}
 			}
 		}
 
@@ -864,9 +875,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					return m, tea.Batch(cmds...)
 
 				case PanelDetail:
-					// Route to grid component first
+					// Route to grid component first (for dropdowns, sliders, etc.)
 					if handled, cmd := m.lightGrid.RouteEvent(msg); handled {
-						m.updateDetailContent() // Re-render to show cursor changes
+						// Don't rebuild grid - just re-render to preserve dropdown state
+						var content strings.Builder
+						if m.lightGrid.RowCount() > 0 {
+							content.WriteString(m.lightGrid.View())
+						}
+						m.detailViewport.SetContent(content.String())
 						return m, cmd
 					}
 					// Fall back to viewport scroll
@@ -918,6 +934,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 
 	// Pass events to focused panel
+	if keyMsg, ok := msg.(tea.KeyMsg); ok {
+		m.status = fmt.Sprintf("Key: %s, Panel: %s", keyMsg.String(), m.focusedPane)
+	}
 	switch m.focusedPane {
 	case PanelTree:
 		// Handle tree-specific keys
@@ -1092,7 +1111,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if cmd != nil {
 				cmds = append(cmds, cmd)
 			}
-			m.updateDetailContent()
+			// Don't call updateDetailContent here - it would rebuild the grid and reset focus
+			// Instead, just re-render the existing grid to show focus changes
+			var content strings.Builder
+			if m.lightGrid.RowCount() > 0 {
+				content.WriteString(m.lightGrid.View())
+			}
+			m.detailViewport.SetContent(content.String())
+			// Scroll viewport to keep focused row visible
+			m.scrollDetailViewportToFocusedRow()
 			return m, tea.Batch(cmds...)
 		}
 
@@ -1186,10 +1213,11 @@ func (m Model) View() string {
 }
 
 // getPanelKey returns the hotkey for a panel based on its position in panelOrder.
+// Keys are 1-based: Tree=1, Detail=2, Log=3
 func (m *Model) getPanelKey(panelID string) string {
 	for i, id := range m.panelOrder {
 		if id == panelID {
-			return fmt.Sprintf("%d", i)
+			return fmt.Sprintf("%d", i+1)
 		}
 	}
 	return ""
@@ -1222,6 +1250,7 @@ func (m *Model) rebuildTreeForActiveTab() {
 }
 
 // startRenameMode initiates rename mode for the selected entity.
+// This focuses the name field in the detail panel and starts editing it.
 func (m *Model) startRenameMode() tea.Cmd {
 	// Close help if showing
 	m.showHelp = false
@@ -1240,17 +1269,20 @@ func (m *Model) startRenameMode() tea.Cmd {
 		return nil
 	}
 
-	// Determine what to rename based on entity type
-	renameType := item.Type
-	renameID := item.ID
-	renameName := item.Name
+	// Determine the name field ID based on entity type
+	var nameFieldID string
 
 	switch item.Type {
-	case panels.EntityDevice, panels.EntityRoom, panels.EntityZone, panels.EntityScene:
-		// These are directly renameable
+	case panels.EntityRoom:
+		nameFieldID = "room-name:" + item.ID
+	case panels.EntityZone:
+		nameFieldID = "zone-name:" + item.ID
+	case panels.EntityScene:
+		nameFieldID = "scene-name:" + item.ID
+	case panels.EntityDevice:
+		nameFieldID = "device-name:" + item.ID
 	case panels.EntityLight:
-		// Lights are renamed via their owning device - find the device
-		// Use RawPtr if available since it has the light data
+		// Lights are renamed via their owning device - find the device ID
 		var light hueclient.LightGet
 		var hasLight bool
 		if item.RawPtr != nil {
@@ -1260,7 +1292,6 @@ func (m *Model) startRenameMode() tea.Cmd {
 			}
 		}
 		if !hasLight {
-			// Fallback to state lookup
 			bridge := m.manager.GetBridge(bridgeID)
 			if bridge != nil {
 				if state := bridge.GetState(); state != nil {
@@ -1276,55 +1307,38 @@ func (m *Model) startRenameMode() tea.Cmd {
 			m.status = "Light has no owning device"
 			return nil
 		}
-		deviceID := *light.Owner.Rid
-		bridge := m.manager.GetBridge(bridgeID)
-		if bridge == nil {
-			m.status = "Bridge not found"
-			return nil
-		}
-		state := bridge.GetState()
-		if state == nil {
-			m.status = "Bridge state not available"
-			return nil
-		}
-		device, ok := state.GetDevice(deviceID)
-		if !ok {
-			m.status = "Owning device not found"
-			return nil
-		}
-		// Rename the device instead
-		renameType = panels.EntityDevice
-		renameID = deviceID
-		if device.Metadata != nil && device.Metadata.Name != nil {
-			renameName = *device.Metadata.Name
-		}
+		// Lights use device name field with format "name:<deviceID>"
+		nameFieldID = "name:" + *light.Owner.Rid
 	default:
 		m.status = fmt.Sprintf("Cannot rename %s", item.Type.String())
 		return nil
 	}
 
-	// Set up rename state
-	m.renaming = true
-	m.renameEntityType = renameType
-	m.renameEntityID = renameID
-	m.renameBridgeID = bridgeID
-	m.renameOriginalName = renameName
-
-	// Blur all components so the modal can capture input exclusively
-	component.BlurAll(m.componentRoot)
-
-	// Set up the rename modal with the current name
-	m.renameModal.SetValue(renameName)
-	m.renameModal.SetActive(true)
-
-	// Switch to detail panel
+	// Switch to detail panel and update content
 	m.previousPane = m.focusedPane
 	m.focusedPane = PanelDetail
-
-	m.status = fmt.Sprintf("Renaming %s...", renameType.String())
-
-	// Update the UI immediately
 	m.updateDetailContent()
+
+	// Focus the name field in the grid and start editing
+	if m.lightGrid.FocusByFieldID(nameFieldID) {
+		// Get the component and start editing if it's a text field
+		if comp := m.lightGrid.GetComponentByID(nameFieldID); comp != nil {
+			if textComp, ok := comp.(*field.TextComponent); ok {
+				textComp.StartEditing()
+			}
+		}
+		// Re-render the grid to show edit mode
+		var content strings.Builder
+		if m.lightGrid.RowCount() > 0 {
+			content.WriteString(m.lightGrid.View())
+		}
+		m.detailViewport.SetContent(content.String())
+		// Scroll viewport to show the focused field
+		m.scrollDetailViewportToFocusedRow()
+		m.status = "Edit name and press Enter to confirm, Esc to cancel"
+	} else {
+		m.status = "Name field not found"
+	}
 
 	return nil
 }
@@ -1886,10 +1900,34 @@ func (m *Model) navigateForward() {
 	m.status = fmt.Sprintf("Forward: %s (%d/%d)", node.Item.Name, m.historyIndex+1, len(m.navigationHistory))
 }
 
-// scrollDetailViewportToCursor scrolls the detail viewport to ensure the current form field is visible.
-// With the new component-based form, each field tracks its own height.
-func (m *Model) scrollDetailViewportToCursor() {
-	// The new FormComponent handles its own cursor tracking
-	// For now, we'll let the viewport handle scrolling naturally
-	// TODO: Add Height() method to field components for precise scrolling
+// scrollDetailViewportToFocusedRow scrolls the detail viewport to ensure the focused grid row is visible.
+func (m *Model) scrollDetailViewportToFocusedRow() {
+	if m.lightGrid.FocusRow() < 0 {
+		return
+	}
+
+	// Get the Y position of the focused row
+	focusY := m.lightGrid.FocusedRowYPosition()
+
+	// Get viewport dimensions
+	viewportHeight := m.detailViewport.Height()
+	currentOffset := m.detailViewport.YOffset
+
+	// Add some padding to keep the row visible with context
+	const padding = 2
+
+	// Check if focused row is above visible area
+	if focusY < currentOffset+padding {
+		newOffset := focusY - padding
+		if newOffset < 0 {
+			newOffset = 0
+		}
+		m.detailViewport.SetYOffset(newOffset)
+	}
+
+	// Check if focused row is below visible area
+	if focusY >= currentOffset+viewportHeight-padding {
+		newOffset := focusY - viewportHeight + padding + 1
+		m.detailViewport.SetYOffset(newOffset)
+	}
 }

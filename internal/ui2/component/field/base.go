@@ -46,6 +46,11 @@ func (b *BaseField) ZoneID() string {
 	return "field-" + b.ID
 }
 
+// GetID returns the field's unique identifier.
+func (b *BaseField) GetID() string {
+	return b.ID
+}
+
 // IsEditing returns whether the field is in edit mode.
 func (b *BaseField) IsEditing() bool {
 	return b.Editing

@@ -144,6 +144,15 @@ func (t *TextComponent) startEditing() (component.Component, tea.Cmd) {
 	return t, nil
 }
 
+// StartEditing puts the text field into edit mode.
+// This is a public version of startEditing for external callers.
+func (t *TextComponent) StartEditing() {
+	t.Editing = true
+	t.OriginalValue = t.Value
+	t.Input.SetValue(t.Value)
+	t.Input.Focus()
+}
+
 // ViewControl renders only the control portion (no label).
 func (t *TextComponent) ViewControl() string {
 	var valueStr string

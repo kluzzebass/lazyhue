@@ -83,6 +83,7 @@ func (g *Grid) SetGaps(colGap, rowGap int) *Grid {
 }
 
 // SetRows sets all rows at once and recalculates column widths.
+// Focus is reset to the first interactive row.
 func (g *Grid) SetRows(rows []GridRow) *Grid {
 	// Normalize ColSpan for all cells (0 means 1)
 	for i := range rows {
@@ -96,7 +97,29 @@ func (g *Grid) SetRows(rows []GridRow) *Grid {
 	}
 	g.rows = rows
 	g.calculateColumnWidths()
+
+	// Reset focus to first interactive row (skip info-only rows with just labels)
+	g.focusRow = -1
+	g.focusCol = 0
+	for i, row := range g.rows {
+		if row.Type == RowTypeNormal && g.rowHasInteractiveComponent(row) {
+			g.focusRow = i
+			g.focusCol = 0
+			break
+		}
+	}
+
 	return g
+}
+
+// rowHasInteractiveComponent checks if a row has any focusable/interactive component.
+func (g *Grid) rowHasInteractiveComponent(row GridRow) bool {
+	for _, cell := range row.Cells {
+		if cell.Component != nil && cell.Component.CanFocus() {
+			return true
+		}
+	}
+	return false
 }
 
 // AddRow adds a normal cell row to the grid.
@@ -261,15 +284,16 @@ func (g *Grid) RouteEvent(msg tea.Msg) (bool, tea.Cmd) {
 		return false, nil
 	}
 
-	// For mouse wheel, route to focused cell (for dropdowns, sliders, etc.)
+	// For mouse wheel, route to all cells in focused row (for dropdowns, sliders, etc.)
 	if _, isMouseWheel := msg.(tea.MouseWheelMsg); isMouseWheel {
 		if g.focusRow >= 0 && g.focusRow < len(g.rows) {
 			row := g.rows[g.focusRow]
-			if row.Type == RowTypeNormal && g.focusCol >= 0 && g.focusCol < len(row.Cells) {
-				cell := row.Cells[g.focusCol]
-				if cell.Component != nil {
-					if handled, cmd := cell.Component.RouteEvent(msg); handled {
-						return true, cmd
+			if row.Type == RowTypeNormal {
+				for _, cell := range row.Cells {
+					if cell.Component != nil {
+						if handled, cmd := cell.Component.RouteEvent(msg); handled {
+							return true, cmd
+						}
 					}
 				}
 			}
@@ -277,14 +301,17 @@ func (g *Grid) RouteEvent(msg tea.Msg) (bool, tea.Cmd) {
 		return false, nil
 	}
 
-	// For other events (keyboard), route to focused cell first
+	// For other events (keyboard), route to all cells in focused row
+	// This allows interactive components (toggles, selects) to receive events
+	// even when the label in column 0 has focus
 	if g.focusRow >= 0 && g.focusRow < len(g.rows) {
 		row := g.rows[g.focusRow]
-		if row.Type == RowTypeNormal && g.focusCol >= 0 && g.focusCol < len(row.Cells) {
-			cell := row.Cells[g.focusCol]
-			if cell.Component != nil {
-				if handled, cmd := cell.Component.RouteEvent(msg); handled {
-					return true, cmd
+		if row.Type == RowTypeNormal {
+			for _, cell := range row.Cells {
+				if cell.Component != nil {
+					if handled, cmd := cell.Component.RouteEvent(msg); handled {
+						return true, cmd
+					}
 				}
 			}
 		}
@@ -621,4 +648,109 @@ func (g *Grid) SetFocus(row, col int) {
 			}
 		}
 	}
+}
+
+// FocusRow returns the currently focused row index.
+func (g *Grid) FocusRow() int {
+	return g.focusRow
+}
+
+// RowCount returns the total number of rows in the grid.
+func (g *Grid) RowCount() int {
+	return len(g.rows)
+}
+
+// identifiable is a local interface for components that have an ID.
+type identifiable interface {
+	GetID() string
+}
+
+// FocusByFieldID finds a field by ID and focuses it.
+// Returns true if the field was found and focused.
+func (g *Grid) FocusByFieldID(id string) bool {
+	for rowIdx, row := range g.rows {
+		if row.Type != RowTypeNormal {
+			continue
+		}
+		for colIdx, cell := range row.Cells {
+			if cell.Component != nil {
+				if ident, ok := cell.Component.(identifiable); ok && ident.GetID() == id {
+					g.SetFocus(rowIdx, colIdx)
+					return true
+				}
+			}
+		}
+	}
+	return false
+}
+
+// GetComponentByID finds and returns a component by its ID.
+// Returns nil if not found.
+func (g *Grid) GetComponentByID(id string) component.Component {
+	for _, row := range g.rows {
+		if row.Type != RowTypeNormal {
+			continue
+		}
+		for _, cell := range row.Cells {
+			if cell.Component != nil {
+				if ident, ok := cell.Component.(identifiable); ok && ident.GetID() == id {
+					return cell.Component
+				}
+			}
+		}
+	}
+	return nil
+}
+
+// FocusedRowYPosition returns the Y position (line number, 0-indexed) of the focused row.
+// This is useful for scrolling viewports to show the focused row.
+func (g *Grid) FocusedRowYPosition() int {
+	if g.focusRow < 0 || g.focusRow >= len(g.rows) {
+		return 0
+	}
+
+	y := 0
+	for rowIdx := 0; rowIdx < g.focusRow; rowIdx++ {
+		// Count lines for this row
+		row := g.rows[rowIdx]
+		rowLines := g.getRowLineCount(row)
+		y += rowLines
+
+		// Add gap lines between rows (except before first row)
+		if rowIdx < len(g.rows)-1 {
+			y += g.rowGap + 1 // +1 for the newline between rows
+		}
+	}
+
+	return y
+}
+
+// getRowLineCount returns how many lines a row takes when rendered.
+func (g *Grid) getRowLineCount(row GridRow) int {
+	switch row.Type {
+	case RowTypeSection:
+		if row.Section != nil {
+			return strings.Count(row.Section.View(), "\n") + 1
+		}
+		return 1
+	case RowTypeNormal:
+		// Calculate based on cell content
+		maxLines := 1
+		for _, cell := range row.Cells {
+			if cell.Component != nil {
+				var content string
+				if cr, ok := cell.Component.(field.ControlRenderer); ok {
+					content = cr.ViewControl()
+				} else {
+					content = cell.Component.View()
+				}
+				lines := strings.Count(content, "\n") + 1
+				if lines > maxLines {
+					maxLines = lines
+				}
+			}
+		}
+		return maxLines
+	}
+	return 1
 }
