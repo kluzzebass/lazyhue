@@ -426,16 +426,44 @@ func (m *Model) buildLightsTree(_ *hue.BridgeState) {
 
 		bridgeName := bridge.Info.Name
 		lights := state.AllLights()
+		rooms := state.AllRooms()
+
+		// Build device -> room name mapping
+		deviceRoomNames := make(map[string]string)
+		for _, room := range rooms {
+			if room.Children == nil {
+				continue
+			}
+			roomName := ""
+			if room.Metadata != nil && room.Metadata.Name != nil {
+				roomName = *room.Metadata.Name
+			}
+			for _, child := range *room.Children {
+				if child.Rtype != nil && *child.Rtype == "device" && child.Rid != nil {
+					deviceRoomNames[*child.Rid] = roomName
+				}
+			}
+		}
+
 		for _, light := range lights {
 			name := state.GetLightName(light)
 			isOn := light.On != nil && light.On.On != nil && *light.On.On
 			brightness, indicatorColor := getLightBrightnessAndColor(light)
+
+			// Get room name via owning device
+			groupSuffix := ""
+			if light.Owner != nil && light.Owner.Rid != nil {
+				if roomName := deviceRoomNames[*light.Owner.Rid]; roomName != "" {
+					groupSuffix = "(" + roomName + ")"
+				}
+			}
 
 			// Store a copy of the light in RawPtr for later access
 			lightCopy := light
 			nodes = append(nodes, &panels.TreeNode{
 				ID:           *light.Id,
 				Label:        name,
+				GroupSuffix:  groupSuffix,
 				BridgeSuffix: "[" + bridgeName + "]",
 				Depth:        0,
 				Item: &panels.EntityItem{
