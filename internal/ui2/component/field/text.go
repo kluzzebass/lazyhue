@@ -144,6 +144,23 @@ func (t *TextComponent) startEditing() (component.Component, tea.Cmd) {
 	return t, nil
 }
 
+// ViewControl renders only the control portion (no label).
+func (t *TextComponent) ViewControl() string {
+	var valueStr string
+	if t.Editing {
+		// Show the textinput with cursor
+		valueStr = t.Input.View()
+	} else {
+		valueStr = t.Value
+	}
+
+	if t.Zones != nil {
+		return t.Zones.Mark(t.ZoneID(), valueStr)
+	}
+
+	return valueStr
+}
+
 // View renders the text field.
 func (t *TextComponent) View() string {
 	labelStr := t.Label

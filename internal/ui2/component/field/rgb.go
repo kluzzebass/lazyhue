@@ -222,9 +222,38 @@ func (c *RGBComponent) startEditing() (component.Component, tea.Cmd) {
 	return c, nil
 }
 
-// Height returns the number of rows this component takes up.
-func (c *RGBComponent) Height() int {
+// FieldHeight returns the number of rows this component takes up.
+func (c *RGBComponent) FieldHeight() int {
 	return 3 // Always 3 rows for R, G, B sliders
+}
+
+// ViewControl renders only the control portion (no label).
+// Returns 3 lines separated by newlines.
+func (c *RGBComponent) ViewControl() string {
+	var out strings.Builder
+
+	for row := 0; row < 3; row++ {
+		if row > 0 {
+			out.WriteString("\n")
+		}
+
+		sliderLine := c.renderSliderRow(row)
+
+		// Highlight focused slider when editing
+		if c.Editing && row == c.SliderFocus {
+			sliderLine = c.Styles.Focused.Render(sliderLine)
+		}
+
+		// Mark row with zone
+		if c.Zones != nil {
+			rowZoneID := fmt.Sprintf("%s-row-%d", c.ZoneID(), row)
+			sliderLine = c.Zones.Mark(rowZoneID, sliderLine)
+		}
+
+		out.WriteString(sliderLine)
+	}
+
+	return out.String()
 }
 
 // View renders the RGB picker.

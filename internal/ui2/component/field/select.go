@@ -229,6 +229,99 @@ func (s *SelectComponent) ensureCursorVisible() {
 	}
 }
 
+// FieldHeight returns the number of rows this component takes up.
+func (s *SelectComponent) FieldHeight() int {
+	if s.Open {
+		// Header line + top border + visible options + bottom border
+		visibleOpts := len(s.Options)
+		if visibleOpts > maxVisibleOptions {
+			visibleOpts = maxVisibleOptions
+		}
+		return 1 + 1 + visibleOpts + 1 // dropdown header + border + options + border
+	}
+	return 1
+}
+
+// ViewControl renders only the control portion (no label).
+func (s *SelectComponent) ViewControl() string {
+	if s.Open {
+		return s.renderDropdownControl()
+	}
+	return s.renderClosedControl()
+}
+
+func (s *SelectComponent) renderClosedControl() string {
+	// Get current option label
+	currentLabel := "---"
+	for _, opt := range s.Options {
+		if opt.Value == s.Value {
+			currentLabel = opt.Label
+			break
+		}
+	}
+
+	control := fmt.Sprintf("[%s] ▼", currentLabel)
+
+	if s.Zones != nil {
+		return s.Zones.Mark(s.ZoneID(), control)
+	}
+
+	return control
+}
+
+func (s *SelectComponent) renderDropdownControl() string {
+	var out strings.Builder
+
+	// First line shows dropdown indicator
+	out.WriteString("[▼]\n")
+
+	// Calculate visible range
+	start := s.Scroll
+	end := start + maxVisibleOptions
+	if end > len(s.Options) {
+		end = len(s.Options)
+	}
+
+	// Find max option label width
+	maxLen := 0
+	for _, opt := range s.Options {
+		if len(opt.Label) > maxLen {
+			maxLen = len(opt.Label)
+		}
+	}
+
+	// Render dropdown box
+	out.WriteString("┌" + strings.Repeat("─", maxLen+2) + "┐\n")
+
+	for i := start; i < end; i++ {
+		opt := s.Options[i]
+		prefix := "  "
+		if i == s.Cursor {
+			prefix = "> "
+		}
+		label := opt.Label + strings.Repeat(" ", maxLen-len(opt.Label))
+		optionLine := fmt.Sprintf("│%s%s│", prefix, label)
+
+		// Mark each option with a zone
+		if s.Zones != nil {
+			optionZoneID := fmt.Sprintf("%s-option-%d", s.ZoneID(), i)
+			optionLine = s.Zones.Mark(optionZoneID, optionLine)
+		}
+
+		out.WriteString(optionLine + "\n")
+	}
+
+	out.WriteString("└" + strings.Repeat("─", maxLen+2) + "┘")
+
+	// Wrap entire dropdown area in main zone
+	result := out.String()
+	if s.Zones != nil {
+		result = s.Zones.Mark(s.ZoneID(), result)
+	}
+
+	return result
+}
+
 // View renders the select field.
 func (s *SelectComponent) View() string {
 	// Build the label

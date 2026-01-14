@@ -61,6 +61,27 @@ func (b *BaseField) SetMaxLabelWidth(width int) {
 	b.MaxLabelWidth = width
 }
 
+// FieldLabel returns the field's label text.
+func (b *BaseField) FieldLabel() string {
+	return b.Label
+}
+
+// FieldHeight returns how many rows this field takes up.
+// Override in multi-row fields like HSL, RGB, ColorWheel.
+func (b *BaseField) FieldHeight() int {
+	return 1
+}
+
+// ControlRenderer is an interface for fields that support separate control rendering.
+type ControlRenderer interface {
+	// ViewControl renders only the control portion (no label).
+	ViewControl() string
+	// FieldLabel returns the field's label text.
+	FieldLabel() string
+	// FieldHeight returns how many rows this field takes up.
+	FieldHeight() int
+}
+
 // Option represents a selectable option for dropdowns and radio buttons.
 type Option struct {
 	Label string

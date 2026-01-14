@@ -214,6 +214,77 @@ func (r *RadioComponent) selectOption(index int) (component.Component, tea.Cmd) 
 	}
 }
 
+// FieldHeight returns the number of rows this component takes up.
+func (r *RadioComponent) FieldHeight() int {
+	if r.Vertical {
+		return len(r.Options)
+	}
+	return 1
+}
+
+// ViewControl renders only the control portion (no label).
+func (r *RadioComponent) ViewControl() string {
+	if r.Vertical {
+		return r.renderVerticalControl()
+	}
+	return r.renderHorizontalControl()
+}
+
+func (r *RadioComponent) renderVerticalControl() string {
+	var out strings.Builder
+
+	for i, opt := range r.Options {
+		if i > 0 {
+			out.WriteString("\n")
+		}
+
+		indicator := "○"
+		if opt.Value == r.Value {
+			indicator = "●"
+		}
+
+		line := fmt.Sprintf("%s %s", indicator, opt.Label)
+
+		// Mark each option with a zone
+		if r.Zones != nil {
+			optionZoneID := fmt.Sprintf("%s-option-%d", r.ZoneID(), i)
+			line = r.Zones.Mark(optionZoneID, line)
+		}
+
+		out.WriteString(line)
+	}
+
+	return out.String()
+}
+
+func (r *RadioComponent) renderHorizontalControl() string {
+	var parts []string
+	for i, opt := range r.Options {
+		indicator := "○"
+		if opt.Value == r.Value {
+			indicator = "●"
+		}
+		optStr := fmt.Sprintf("%s %s", indicator, opt.Label)
+
+		// Mark each option with a zone
+		if r.Zones != nil {
+			optionZoneID := fmt.Sprintf("%s-option-%d", r.ZoneID(), i)
+			optStr = r.Zones.Mark(optionZoneID, optStr)
+		}
+
+		parts = append(parts, optStr)
+	}
+
+	control := strings.Join(parts, "  ")
+
+	// Also mark the whole control
+	if r.Zones != nil {
+		return r.Zones.Mark(r.ZoneID(), control)
+	}
+
+	return control
+}
+
 // View renders the radio field.
 func (r *RadioComponent) View() string {
 	if r.Vertical {

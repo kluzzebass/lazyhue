@@ -1,6 +1,7 @@
 package field
 
 import (
+	"fmt"
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea/v2"
@@ -278,31 +279,99 @@ func (f *FormComponent) View() string {
 		out.WriteString("\n")
 	}
 
+	// Calculate max label width for alignment
+	maxLabelWidth := 0
+	for _, fld := range f.fields {
+		if cr, ok := fld.(ControlRenderer); ok {
+			labelLen := len(cr.FieldLabel())
+			if labelLen > maxLabelWidth {
+				maxLabelWidth = labelLen
+			}
+		}
+	}
+
 	for i, fld := range f.fields {
 		if i > 0 {
 			out.WriteString("\n")
 		}
 
-		// Get field view
-		fieldView := fld.View()
+		// Check if field implements ControlRenderer for separated label/control
+		if cr, ok := fld.(ControlRenderer); ok {
+			fieldView := f.renderWithControlRenderer(cr, i == f.cursor && fld.CanFocus(), maxLabelWidth)
+			out.WriteString(fieldView)
+		} else {
+			// Fallback to View() for components without ControlRenderer
+			fieldView := fld.View()
 
-		// Add focus indicator for focused field
-		if i == f.cursor && fld.CanFocus() {
-			// Prepend focus indicator to first line
-			lines := strings.Split(fieldView, "\n")
-			if len(lines) > 0 {
-				// Replace leading spaces with focus indicator
-				firstLine := lines[0]
-				if len(firstLine) >= 2 && firstLine[:2] == "  " {
-					lines[0] = "> " + firstLine[2:]
-				} else {
-					lines[0] = "> " + firstLine
+			// Add focus indicator for focused field
+			if i == f.cursor && fld.CanFocus() {
+				lines := strings.Split(fieldView, "\n")
+				if len(lines) > 0 {
+					firstLine := lines[0]
+					if len(firstLine) >= 2 && firstLine[:2] == "  " {
+						lines[0] = "> " + firstLine[2:]
+					} else {
+						lines[0] = "> " + firstLine
+					}
+					fieldView = strings.Join(lines, "\n")
 				}
-				fieldView = strings.Join(lines, "\n")
 			}
+
+			out.WriteString(fieldView)
+		}
+	}
+
+	return out.String()
+}
+
+// renderWithControlRenderer renders a field using its ControlRenderer interface
+// for proper label/control separation.
+func (f *FormComponent) renderWithControlRenderer(cr ControlRenderer, focused bool, maxLabelWidth int) string {
+	label := cr.FieldLabel()
+	control := cr.ViewControl()
+	height := cr.FieldHeight()
+
+	// Handle header case (empty control)
+	if control == "" {
+		// Headers just render their label with style (they handle their own rendering)
+		if header, ok := cr.(*HeaderComponent); ok {
+			return header.View()
+		}
+		return label
+	}
+
+	var out strings.Builder
+
+	// Focus indicator prefix
+	focusPrefix := "  "
+	if focused {
+		focusPrefix = "> "
+	}
+
+	// Pad label to max width
+	paddedLabel := fmt.Sprintf("%-*s", maxLabelWidth, label)
+
+	// Split control into lines for multi-row handling
+	controlLines := strings.Split(control, "\n")
+
+	for row := 0; row < height && row < len(controlLines); row++ {
+		if row > 0 {
+			out.WriteString("\n")
 		}
 
-		out.WriteString(fieldView)
+		if row == 0 {
+			// First row: focus indicator + label + gap + control
+			out.WriteString(focusPrefix)
+			out.WriteString(paddedLabel)
+			out.WriteString("  ")
+			out.WriteString(controlLines[row])
+		} else {
+			// Subsequent rows: indent + spacer + gap + control
+			out.WriteString("  ")
+			out.WriteString(strings.Repeat(" ", maxLabelWidth))
+			out.WriteString("  ")
+			out.WriteString(controlLines[row])
+		}
 	}
 
 	return out.String()

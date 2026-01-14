@@ -221,32 +221,19 @@ func (h *HSLComponent) startEditing() (component.Component, tea.Cmd) {
 	return h, nil
 }
 
-// Height returns the number of rows this component takes up.
-func (h *HSLComponent) Height() int {
+// FieldHeight returns the number of rows this component takes up.
+func (h *HSLComponent) FieldHeight() int {
 	return 3 // Always 3 rows for H, S, L sliders
 }
 
-// View renders the HSL picker.
-func (h *HSLComponent) View() string {
-	labelStr := h.Label
-	if h.MaxLabelWidth > 0 {
-		labelStr = fmt.Sprintf("%-*s", h.MaxLabelWidth, h.Label)
-	}
-
+// ViewControl renders only the control portion (no label).
+// Returns 3 lines separated by newlines.
+func (h *HSLComponent) ViewControl() string {
 	var out strings.Builder
 
-	// Render 3 rows
 	for row := 0; row < 3; row++ {
 		if row > 0 {
 			out.WriteString("\n")
-		}
-
-		var rowLabel string
-		if row == 0 {
-			rowLabel = fmt.Sprintf("  %s  ", labelStr)
-		} else {
-			// Indent subsequent rows
-			rowLabel = strings.Repeat(" ", 2+h.MaxLabelWidth+2)
 		}
 
 		sliderLine := h.renderSliderRow(row)
@@ -256,15 +243,44 @@ func (h *HSLComponent) View() string {
 			sliderLine = h.Styles.Focused.Render(sliderLine)
 		}
 
-		line := rowLabel + sliderLine
-
 		// Mark row with zone
 		if h.Zones != nil {
 			rowZoneID := fmt.Sprintf("%s-row-%d", h.ZoneID(), row)
-			line = h.Zones.Mark(rowZoneID, line)
+			sliderLine = h.Zones.Mark(rowZoneID, sliderLine)
 		}
 
-		out.WriteString(line)
+		out.WriteString(sliderLine)
+	}
+
+	return out.String()
+}
+
+// View renders the HSL picker (label + control for backwards compatibility).
+func (h *HSLComponent) View() string {
+	labelStr := h.Label
+	if h.MaxLabelWidth > 0 {
+		labelStr = fmt.Sprintf("%-*s", h.MaxLabelWidth, h.Label)
+	}
+
+	control := h.ViewControl()
+	controlLines := strings.Split(control, "\n")
+
+	var out strings.Builder
+
+	for i, controlLine := range controlLines {
+		if i > 0 {
+			out.WriteString("\n")
+		}
+
+		var rowLabel string
+		if i == 0 {
+			rowLabel = fmt.Sprintf("  %s  ", labelStr)
+		} else {
+			// Indent subsequent rows
+			rowLabel = strings.Repeat(" ", 2+h.MaxLabelWidth+2)
+		}
+
+		out.WriteString(rowLabel + controlLine)
 	}
 
 	return out.String()

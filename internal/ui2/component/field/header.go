@@ -39,6 +39,12 @@ func (h *HeaderComponent) RouteEvent(msg tea.Msg) (bool, tea.Cmd) {
 	return false, nil
 }
 
+// ViewControl renders only the control portion (which is empty for headers).
+// Headers are label-only, so this returns an empty string.
+func (h *HeaderComponent) ViewControl() string {
+	return ""
+}
+
 // View renders the header as a styled subtitle.
 func (h *HeaderComponent) View() string {
 	return h.Styles.Subtitle.Render(h.Label)

@@ -22,6 +22,7 @@ import (
 	"github.com/kluzzebass/lazyhue/internal/ui2"
 	"github.com/kluzzebass/lazyhue/internal/ui2/component"
 	"github.com/kluzzebass/lazyhue/internal/ui2/component/field"
+	gridlayout "github.com/kluzzebass/lazyhue/internal/ui2/component/layout"
 	"github.com/kluzzebass/lazyhue/internal/ui2/layout"
 	"github.com/kluzzebass/lazyhue/internal/ui2/panels"
 )
@@ -77,7 +78,7 @@ type Model struct {
 	errorChan        chan errorMsg
 	eventCancelFuncs map[string]context.CancelFunc
 	bridgeBlinkUntil map[string]time.Time // Track when bridge blink indicators should stop
-	lightFormComponent *field.FormComponent // Component-based form for light controls
+	lightGrid *gridlayout.Grid // Grid layout for light controls
 	selectedLightID   string               // ID of currently selected light (for form updates)
 	lastTreeClick     time.Time            // Track last tree item click for double-click detection
 	lastTreeClickID   string               // Track which tree item was last clicked
@@ -205,7 +206,7 @@ func New(creds *config.CredentialStore) Model {
 		errorChan:        make(chan errorMsg, 100),
 		eventCancelFuncs: make(map[string]context.CancelFunc),
 		bridgeBlinkUntil:   make(map[string]time.Time),
-		lightFormComponent: field.NewFormComponent(&styles, zones),
+		lightGrid: gridlayout.NewGrid().SetGaps(2, 0),
 		selectedLightID:    "",
 		historyIndex:     -1, // No history initially
 		inputStack:       NewInputStack(),
@@ -268,10 +269,10 @@ func (m Model) Init() tea.Cmd {
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmds []tea.Cmd
 
-	// Handle blink tick messages from form component
+	// Handle blink tick messages from grid component
 	if blinkMsg, ok := msg.(field.BlinkTickMsg); ok {
-		if m.lightFormComponent != nil {
-			_, cmd := m.lightFormComponent.Update(blinkMsg)
+		if m.lightGrid != nil {
+			_, cmd := m.lightGrid.Update(blinkMsg)
 			if cmd != nil {
 				cmds = append(cmds, cmd)
 			}
@@ -793,7 +794,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			// Route to focused component first - it may want to handle escape
 			if m.focusedPane == PanelDetail {
-				if handled, cmd := m.lightFormComponent.RouteEvent(msg); handled {
+				if handled, cmd := m.lightGrid.RouteEvent(msg); handled {
 					return m, cmd
 				}
 			}
@@ -855,8 +856,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					return m, tea.Batch(cmds...)
 
 				case PanelDetail:
-					// Route to form component first
-					if handled, cmd := m.lightFormComponent.RouteEvent(msg); handled {
+					// Route to grid component first
+					if handled, cmd := m.lightGrid.RouteEvent(msg); handled {
 						return m, cmd
 					}
 					// Fall back to viewport scroll
@@ -1076,9 +1077,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// When renaming, events are routed through componentRoot.RouteEvent() which
 		// sends TextInputConfirmedMsg/TextInputCancelledMsg that we handle above.
 
-		// Route all events through the component-based form first
-		// The form handles its own keyboard navigation, mouse clicks, and editing
-		if handled, cmd := m.lightFormComponent.RouteEvent(msg); handled {
+		// Route all events through the grid component first
+		// The grid handles its own keyboard navigation, mouse clicks, and editing
+		if handled, cmd := m.lightGrid.RouteEvent(msg); handled {
 			if cmd != nil {
 				cmds = append(cmds, cmd)
 			}

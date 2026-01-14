@@ -6,7 +6,6 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea/v2"
-	"github.com/charmbracelet/lipgloss/v2"
 	"github.com/kluzzebass/lazyhue/internal/ui2"
 	"github.com/kluzzebass/lazyhue/internal/ui2/component"
 	"github.com/kluzzebass/lazyhue/internal/ui2/components"
@@ -31,6 +30,10 @@ type ColorWheelComponent struct {
 	// Blink timer state
 	blinkTimerActive    bool
 	blinkTimerScheduled bool
+
+	// Mouse drag state
+	Dragging     bool
+	DragZoneInfo map[int]*zone.ZoneInfo // Cached zone info for each row during drag
 }
 
 // NewColorWheelComponent creates a new color wheel component.
@@ -77,6 +80,27 @@ func (c *ColorWheelComponent) Update(msg tea.Msg) (component.Component, tea.Cmd)
 
 	case tea.MouseClickMsg:
 		return c.handleMouseClick(msg)
+
+	case tea.MouseMotionMsg:
+		if c.Dragging {
+			return c.handleMouseDrag(msg)
+		}
+
+	case tea.MouseReleaseMsg:
+		if c.Dragging {
+			c.Dragging = false
+			c.DragZoneInfo = nil
+			// Send both end capture and field changed
+			return c, tea.Batch(
+				func() tea.Msg { return EndCaptureMsg{FieldID: c.ID} },
+				func() tea.Msg {
+					return FieldChangedMsg{
+						FieldID: c.ID,
+						Value:   ColorValue{X: c.ColorX, Y: c.ColorY},
+					}
+				},
+			)
+		}
 	}
 
 	return c, nil
@@ -107,8 +131,8 @@ func (c *ColorWheelComponent) RouteEvent(msg tea.Msg) (bool, tea.Cmd) {
 		}
 
 	case tea.MouseClickMsg:
-		if msg.Button == tea.MouseLeft && c.Editing {
-			// Check wheel row zones
+		if msg.Button == tea.MouseLeft {
+			// Check wheel row zones - always respond to clicks
 			for row := 0; row < c.Wheel.Height(); row++ {
 				rowZoneID := fmt.Sprintf("%s-row-%d", c.ZoneID(), row)
 				if c.Zones != nil {
@@ -118,6 +142,28 @@ func (c *ColorWheelComponent) RouteEvent(msg tea.Msg) (bool, tea.Cmd) {
 					}
 				}
 			}
+		}
+
+	case tea.MouseMotionMsg:
+		if c.Dragging {
+			_, cmd := c.handleMouseDrag(msg)
+			return true, cmd
+		}
+
+	case tea.MouseReleaseMsg:
+		if c.Dragging {
+			c.Dragging = false
+			c.DragZoneInfo = nil
+			// Send both end capture and field changed
+			return true, tea.Batch(
+				func() tea.Msg { return EndCaptureMsg{FieldID: c.ID} },
+				func() tea.Msg {
+					return FieldChangedMsg{
+						FieldID: c.ID,
+						Value:   ColorValue{X: c.ColorX, Y: c.ColorY},
+					}
+				},
+			)
 		}
 	}
 
@@ -204,6 +250,67 @@ func (c *ColorWheelComponent) handleWheelClick(msg tea.MouseClickMsg, row int, z
 		c.ColorX = c.Wheel.ColorX
 		c.ColorY = c.Wheel.ColorY
 	}
+
+	// Activate editing mode so cursor is visible
+	if !c.Editing {
+		c.Editing = true
+		c.OriginalX = c.ColorX
+		c.OriginalY = c.ColorY
+		c.Wheel.SetOriginal(c.ColorX, c.ColorY)
+		c.Wheel.BlinkOn = true
+		c.blinkTimerActive = true
+	}
+
+	// Start drag mode and cache zone info
+	c.Dragging = true
+	c.DragZoneInfo = make(map[int]*zone.ZoneInfo)
+	for r := 0; r < c.Wheel.Height(); r++ {
+		rowZoneID := fmt.Sprintf("%s-row-%d", c.ZoneID(), r)
+		if c.Zones != nil {
+			if zInfo := c.Zones.Get(rowZoneID); zInfo != nil {
+				c.DragZoneInfo[r] = zInfo
+			}
+		}
+	}
+
+	// Start capture, blink timer, and send initial change
+	return c, tea.Batch(
+		func() tea.Msg { return StartCaptureMsg{FieldID: c.ID} },
+		func() tea.Msg {
+			return FieldChangedMsg{
+				FieldID: c.ID,
+				Value:   ColorValue{X: c.ColorX, Y: c.ColorY},
+			}
+		},
+		c.scheduleBlinkTick(),
+	)
+}
+
+func (c *ColorWheelComponent) handleMouseDrag(msg tea.MouseMotionMsg) (component.Component, tea.Cmd) {
+	if c.DragZoneInfo == nil {
+		return c, nil
+	}
+
+	// Find which row the mouse is in based on Y coordinate
+	for row, zInfo := range c.DragZoneInfo {
+		if msg.Y >= zInfo.StartY && msg.Y <= zInfo.EndY {
+			// Calculate column from mouse X relative to zone
+			col := msg.X - zInfo.StartX
+			if c.Wheel.HandleClick(row, col) {
+				c.ColorX = c.Wheel.ColorX
+				c.ColorY = c.Wheel.ColorY
+				// Send change on every drag movement
+				return c, func() tea.Msg {
+					return FieldChangedMsg{
+						FieldID: c.ID,
+						Value:   ColorValue{X: c.ColorX, Y: c.ColorY},
+					}
+				}
+			}
+			return c, nil
+		}
+	}
+
 	return c, nil
 }
 
@@ -232,65 +339,68 @@ func (c *ColorWheelComponent) scheduleBlinkTick() tea.Cmd {
 	})
 }
 
-// Height returns the number of rows this component takes up.
-func (c *ColorWheelComponent) Height() int {
-	if c.Editing {
-		return 1 + c.Wheel.Height() // Label row + wheel rows
-	}
-	return 1 // Just the preview row
+// FieldHeight returns the number of rows this component takes up.
+func (c *ColorWheelComponent) FieldHeight() int {
+	return c.Wheel.Height() // Always show the full wheel
 }
 
-// View renders the color wheel field.
+// ViewControl renders only the control portion (no label).
+func (c *ColorWheelComponent) ViewControl() string {
+	return c.renderWheelControl() // Always show the wheel
+}
+
+func (c *ColorWheelComponent) renderWheelControl() string {
+	var out strings.Builder
+
+	wheelLines := strings.Split(c.Wheel.Render(), "\n")
+	for row, line := range wheelLines {
+		if line == "" {
+			continue
+		}
+		rowLine := line
+		if c.Zones != nil {
+			rowZoneID := fmt.Sprintf("%s-row-%d", c.ZoneID(), row)
+			rowLine = c.Zones.Mark(rowZoneID, rowLine)
+		}
+		if row > 0 {
+			out.WriteString("\n")
+		}
+		out.WriteString(rowLine)
+	}
+
+	result := out.String()
+
+	// Also wrap entire wheel with main zone so FormComponent can detect clicks
+	if c.Zones != nil {
+		result = c.Zones.Mark(c.ZoneID(), result)
+	}
+
+	return result
+}
+
+// View renders the color wheel field (label + control for backwards compatibility).
 func (c *ColorWheelComponent) View() string {
 	labelStr := c.Label
 	if c.MaxLabelWidth > 0 {
 		labelStr = fmt.Sprintf("%-*s", c.MaxLabelWidth, c.Label)
 	}
 
+	control := c.ViewControl()
+
 	if c.Editing {
-		return c.renderEditing(labelStr)
+		// Multi-row: label on first line, control rows indented
+		var out strings.Builder
+		out.WriteString(fmt.Sprintf("  %s\n", labelStr))
+		controlLines := strings.Split(control, "\n")
+		for i, line := range controlLines {
+			out.WriteString("    " + line)
+			if i < len(controlLines)-1 {
+				out.WriteString("\n")
+			}
+		}
+		return out.String()
 	}
 
-	return c.renderPreview(labelStr)
-}
-
-func (c *ColorWheelComponent) renderPreview(labelStr string) string {
-	// Show color preview
-	r, g, b := ui2.XyToRGB(c.ColorX, c.ColorY, 1.0)
-	style := lipgloss.NewStyle().Foreground(lipgloss.Color(fmt.Sprintf("#%02x%02x%02x", r, g, b)))
-	preview := style.Render("███") + " (Enter to edit)"
-
-	line := fmt.Sprintf("  %s  %s", labelStr, preview)
-
-	if c.Zones != nil {
-		return c.Zones.Mark(c.ZoneID(), line)
-	}
-
-	return line
-}
-
-func (c *ColorWheelComponent) renderEditing(labelStr string) string {
-	var out strings.Builder
-
-	// First row: label
-	out.WriteString(fmt.Sprintf("  %s\n", labelStr))
-
-	// Render the wheel with row zones
-	wheelLines := strings.Split(c.Wheel.Render(), "\n")
-	for row, line := range wheelLines {
-		if line == "" {
-			continue
-		}
-		rowLine := "    " + line
-		if c.Zones != nil {
-			rowZoneID := fmt.Sprintf("%s-row-%d", c.ZoneID(), row)
-			rowLine = c.Zones.Mark(rowZoneID, rowLine)
-		}
-		out.WriteString(rowLine)
-		if row < len(wheelLines)-1 {
-			out.WriteString("\n")
-		}
-	}
-
-	return out.String()
+	// Single row: label + control
+	return fmt.Sprintf("  %s  %s", labelStr, control)
 }

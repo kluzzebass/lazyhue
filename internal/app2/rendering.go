@@ -13,8 +13,8 @@ import (
 	"github.com/charmbracelet/lipgloss/v2"
 	"github.com/kluzzebass/lazyhue/internal/hue"
 	"github.com/kluzzebass/lazyhue/internal/hueclient"
-	"github.com/kluzzebass/lazyhue/internal/ui2/component"
 	"github.com/kluzzebass/lazyhue/internal/ui2/component/field"
+	gridlayout "github.com/kluzzebass/lazyhue/internal/ui2/component/layout"
 	"github.com/kluzzebass/lazyhue/internal/ui2/panels"
 )
 
@@ -563,30 +563,22 @@ func (m *Model) updateDetailContent() {
 				actualLightID = node.Item.ID
 			}
 
-			// Build form fields if light changed or form is empty
-			if m.selectedLightID != actualLightID || len(m.lightFormComponent.Children()) == 0 {
-				// Build control fields using new component system
-				fields := m.buildLightFieldComponents(light)
-
-				// Add a Controls header
-				header := field.NewHeaderComponent("controls-header", "Controls", &m.styles, m.zones)
-				allFields := []component.Component{header}
-				allFields = append(allFields, fields...)
-
-				// Set fields on the form component
-				m.lightFormComponent.SetFields(allFields)
+			// Build grid rows if light changed or grid is empty
+			if m.selectedLightID != actualLightID || len(m.lightGrid.Children()) == 0 {
+				// Build grid rows for the light controls
+				m.buildLightGridRows(light)
 				m.selectedLightID = actualLightID
 			}
 
-			// Render the form
-			if len(m.lightFormComponent.Children()) > 0 {
-				formContent := m.lightFormComponent.View()
-				content.WriteString(formContent)
+			// Render the grid
+			if len(m.lightGrid.Children()) > 0 {
+				gridContent := m.lightGrid.View()
+				content.WriteString(gridContent)
 			}
 		}
 	default:
-		// Clear form for non-light entities
-		m.lightFormComponent.SetFields(nil)
+		// Clear grid for non-light entities
+		m.lightGrid.SetRows(nil)
 		m.selectedLightID = ""
 		content.WriteString(fmt.Sprintf("Type: %s\n", node.Item.Type))
 		content.WriteString(fmt.Sprintf("ID: %s\n", node.Item.ID))
@@ -779,10 +771,26 @@ func (m *Model) renderPanelHeader(width int, keyStr, title string, focused bool,
 		borderStyle.Render(border.TopRight)
 }
 
-// buildLightFieldComponents builds field components for controlling a light.
-// This is the new component-based version of buildLightFormFields.
-func (m *Model) buildLightFieldComponents(light hueclient.LightGet) []component.Component {
-	var fields []component.Component
+// buildLightGridRows builds grid rows for controlling a light.
+// This uses the Grid layout with Label + Control cells.
+func (m *Model) buildLightGridRows(light hueclient.LightGet) {
+	var rows []gridlayout.GridRow
+
+	// Calculate the maximum label width for alignment
+	labels := []string{"Power", "Brightness", "Color Temp", "Color", "Effect"}
+	maxLabelWidth := 0
+	for _, label := range labels {
+		if len(label) > maxLabelWidth {
+			maxLabelWidth = len(label)
+		}
+	}
+
+	// Add Controls section header
+	header := field.NewHeaderComponent("controls-header", "Controls", &m.styles, m.zones)
+	rows = append(rows, gridlayout.GridRow{
+		Type:    gridlayout.RowTypeSection,
+		Section: header,
+	})
 
 	// On/Off toggle
 	onValue := false
@@ -791,15 +799,28 @@ func (m *Model) buildLightFieldComponents(light hueclient.LightGet) []component.
 	}
 	toggle := field.NewToggleComponent("on", "Power", onValue, &m.styles, m.zones)
 	toggle.SetLabels("On", "Off")
-	fields = append(fields, toggle)
+	rows = append(rows, gridlayout.GridRow{
+		Type: gridlayout.RowTypeNormal,
+		Cells: []gridlayout.GridCell{
+			{Component: gridlayout.NewLabelWithWidth("Power", maxLabelWidth)},
+			{Component: toggle},
+		},
+	})
 
 	// Brightness (if dimmable)
 	if light.Dimming != nil && light.Dimming.Brightness != nil {
 		brightness := int(*light.Dimming.Brightness)
-		fields = append(fields, field.NewBrightnessSliderComponent(
+		slider := field.NewBrightnessSliderComponent(
 			"brightness", "Brightness", brightness,
 			&m.styles, m.zones,
-		))
+		)
+		rows = append(rows, gridlayout.GridRow{
+			Type: gridlayout.RowTypeNormal,
+			Cells: []gridlayout.GridCell{
+				{Component: gridlayout.NewLabelWithWidth("Brightness", maxLabelWidth)},
+				{Component: slider},
+			},
+		})
 	}
 
 	// Color temperature (if supported)
@@ -816,10 +837,17 @@ func (m *Model) buildLightFieldComponents(light hueclient.LightGet) []component.
 		if light.ColorTemperature.MirekSchema.MirekMaximum != nil {
 			maxMirek = *light.ColorTemperature.MirekSchema.MirekMaximum
 		}
-		fields = append(fields, field.NewColorTempSliderComponent(
+		slider := field.NewColorTempSliderComponent(
 			"colortemp", "Color Temp", mirek, minMirek, maxMirek,
 			&m.styles, m.zones,
-		))
+		)
+		rows = append(rows, gridlayout.GridRow{
+			Type: gridlayout.RowTypeNormal,
+			Cells: []gridlayout.GridCell{
+				{Component: gridlayout.NewLabelWithWidth("Color Temp", maxLabelWidth)},
+				{Component: slider},
+			},
+		})
 	}
 
 	// Color (if supported)
@@ -831,10 +859,17 @@ func (m *Model) buildLightFieldComponents(light hueclient.LightGet) []component.
 		if light.Color.Xy.Y != nil {
 			y = float64(*light.Color.Xy.Y)
 		}
-		fields = append(fields, field.NewColorWheelComponent(
+		colorWheel := field.NewColorWheelComponent(
 			"color", "Color", x, y,
 			&m.styles, m.zones,
-		))
+		)
+		rows = append(rows, gridlayout.GridRow{
+			Type: gridlayout.RowTypeNormal,
+			Cells: []gridlayout.GridCell{
+				{Component: gridlayout.NewLabelWithWidth("Color", maxLabelWidth)},
+				{Component: colorWheel},
+			},
+		})
 	}
 
 	// Effect (if supported)
@@ -858,14 +893,21 @@ func (m *Model) buildLightFieldComponents(light hueclient.LightGet) []component.
 			if currentEffect == -1 {
 				currentEffect = 0
 			}
-			fields = append(fields, field.NewSelectComponent(
+			selectComp := field.NewSelectComponent(
 				"effect", "Effect", currentEffect, options,
 				&m.styles, m.zones,
-			))
+			)
+			rows = append(rows, gridlayout.GridRow{
+				Type: gridlayout.RowTypeNormal,
+				Cells: []gridlayout.GridCell{
+					{Component: gridlayout.NewLabelWithWidth("Effect", maxLabelWidth)},
+					{Component: selectComp},
+				},
+			})
 		}
 	}
 
-	return fields
+	m.lightGrid.SetRows(rows)
 }
 
 // handleNewFieldChange handles field change messages from the new form component.

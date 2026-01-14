@@ -233,8 +233,8 @@ func (s *SliderComponent) calculateValueFromX(mouseX, zoneStartX int) int {
 	return clamp(newValue, s.Min, s.Max)
 }
 
-// View renders the slider field.
-func (s *SliderComponent) View() string {
+// ViewControl renders only the control portion (no label).
+func (s *SliderComponent) ViewControl() string {
 	barWidth := 20
 
 	// Build the bar
@@ -242,7 +242,6 @@ func (s *SliderComponent) View() string {
 	if s.RenderBar != nil {
 		barStr = s.RenderBar(s.Value, s.Min, s.Max, barWidth, s.Styles)
 	} else {
-		// Default rendering
 		barStr = s.defaultRenderBar(barWidth)
 	}
 
@@ -254,20 +253,24 @@ func (s *SliderComponent) View() string {
 		valueStr = fmt.Sprintf("%d", s.Value)
 	}
 
-	// Build the full line with label
+	control := barStr + " " + valueStr
+
+	// Wrap with zone for mouse detection
+	if s.Zones != nil {
+		return s.Zones.Mark(s.ZoneID(), control)
+	}
+
+	return control
+}
+
+// View renders the slider field (label + control for backwards compatibility).
+func (s *SliderComponent) View() string {
 	labelStr := s.Label
 	if s.MaxLabelWidth > 0 {
 		labelStr = fmt.Sprintf("%-*s", s.MaxLabelWidth, s.Label)
 	}
 
-	line := fmt.Sprintf("  %s  %s %s", labelStr, barStr, valueStr)
-
-	// Wrap with zone for mouse detection
-	if s.Zones != nil {
-		return s.Zones.Mark(s.ZoneID(), line)
-	}
-
-	return line
+	return fmt.Sprintf("  %s  %s", labelStr, s.ViewControl())
 }
 
 func (s *SliderComponent) defaultRenderBar(width int) string {

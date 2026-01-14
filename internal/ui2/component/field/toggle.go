@@ -110,9 +110,8 @@ func (t *ToggleComponent) toggle() (component.Component, tea.Cmd) {
 	}
 }
 
-// View renders the toggle field.
-func (t *ToggleComponent) View() string {
-	// Build the value display
+// ViewControl renders only the control portion (no label).
+func (t *ToggleComponent) ViewControl() string {
 	var valueStr string
 	if t.Value {
 		valueStr = "[●] " + t.OnLabel
@@ -120,19 +119,21 @@ func (t *ToggleComponent) View() string {
 		valueStr = "[ ] " + t.OffLabel
 	}
 
-	// Build the full line with label
+	// Wrap with zone for mouse detection
+	if t.Zones != nil {
+		return t.Zones.Mark(t.ZoneID(), valueStr)
+	}
+
+	return valueStr
+}
+
+// View renders the toggle field (label + control for backwards compatibility).
+func (t *ToggleComponent) View() string {
 	labelStr := t.Label
 	if t.MaxLabelWidth > 0 {
 		labelStr = fmt.Sprintf("%-*s", t.MaxLabelWidth, t.Label)
 	}
 
-	// Combine label and value
-	line := fmt.Sprintf("  %s  %s", labelStr, valueStr)
-
-	// Wrap with zone for mouse detection
-	if t.Zones != nil {
-		return t.Zones.Mark(t.ZoneID(), line)
-	}
-
-	return line
+	// Combine label and control
+	return fmt.Sprintf("  %s  %s", labelStr, t.ViewControl())
 }
