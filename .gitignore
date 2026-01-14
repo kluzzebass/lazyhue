@@ -8,6 +8,7 @@
 *.so
 *.dylib
 lazyhue
+lazyhue2
 
 # Test binary, built with `go test -c`
 *.test
