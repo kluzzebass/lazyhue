@@ -1,6 +1,7 @@
 package layout
 
 import (
+	"log/slog"
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea/v2"
@@ -39,21 +40,39 @@ type GridRow struct {
 type Grid struct {
 	*component.BaseComponent
 
-	rows      []GridRow
-	colWidths []int // Calculated column widths
-	colGap    int   // Gap between columns
-	rowGap    int   // Gap between rows (0 = no extra gap beyond newlines)
-	focusRow  int   // Currently focused row
-	focusCol  int   // Currently focused column (cell index, not grid column)
+	rows               []GridRow
+	colWidths          []int  // Calculated column widths
+	colGap             int    // Gap between columns
+	rowGap             int    // Gap between rows (0 = no extra gap beyond newlines)
+	focusRow           int    // Currently focused row
+	focusCol           int    // Currently focused column (cell index, not grid column)
+	ShowFocusIndicator bool   // Whether to show "> " prefix on focused row
+	FocusIndicator     string // The focus indicator string (default "> ")
+	BlurIndicator      string // The blur indicator string (default "  ")
 }
 
 // NewGrid creates a new grid layout.
 func NewGrid() *Grid {
 	return &Grid{
-		BaseComponent: component.NewBaseComponent(),
-		colGap:        2,
-		rowGap:        0,
+		BaseComponent:      component.NewBaseComponent(),
+		colGap:             2,
+		rowGap:             0,
+		ShowFocusIndicator: false,
+		FocusIndicator:     "> ",
+		BlurIndicator:      "  ",
 	}
+}
+
+// SetFocusIndicator enables focus indicators and optionally sets custom strings.
+func (g *Grid) SetFocusIndicator(show bool, focus, blur string) *Grid {
+	g.ShowFocusIndicator = show
+	if focus != "" {
+		g.FocusIndicator = focus
+	}
+	if blur != "" {
+		g.BlurIndicator = blur
+	}
+	return g
 }
 
 // SetGaps sets the column and row gaps.
@@ -222,7 +241,47 @@ func (g *Grid) Update(msg tea.Msg) (component.Component, tea.Cmd) {
 
 // RouteEvent routes events to the appropriate cell.
 func (g *Grid) RouteEvent(msg tea.Msg) (bool, tea.Cmd) {
-	// Route to focused cell first
+	// For mouse clicks, try ALL cells - the clicked one should handle it and get focus
+	if _, isMouseClick := msg.(tea.MouseClickMsg); isMouseClick {
+		for rowIdx, row := range g.rows {
+			if row.Type != RowTypeNormal {
+				continue
+			}
+			for colIdx, cell := range row.Cells {
+				if cell.Component == nil {
+					continue
+				}
+				if handled, cmd := cell.Component.RouteEvent(msg); handled {
+					// Move focus to the clicked cell
+					g.SetFocus(rowIdx, colIdx)
+					return true, cmd
+				}
+			}
+		}
+		return false, nil
+	}
+
+	// For mouse wheel, route to focused cell (for dropdowns, sliders, etc.)
+	if _, isMouseWheel := msg.(tea.MouseWheelMsg); isMouseWheel {
+		slog.Debug("Grid.RouteEvent: MouseWheelMsg", "focusRow", g.focusRow, "focusCol", g.focusCol)
+		if g.focusRow >= 0 && g.focusRow < len(g.rows) {
+			row := g.rows[g.focusRow]
+			if row.Type == RowTypeNormal && g.focusCol >= 0 && g.focusCol < len(row.Cells) {
+				cell := row.Cells[g.focusCol]
+				if cell.Component != nil {
+					slog.Debug("Grid.RouteEvent: routing wheel to focused cell")
+					if handled, cmd := cell.Component.RouteEvent(msg); handled {
+						slog.Debug("Grid.RouteEvent: wheel handled by cell")
+						return true, cmd
+					}
+					slog.Debug("Grid.RouteEvent: wheel NOT handled by cell")
+				}
+			}
+		}
+		return false, nil
+	}
+
+	// For other events (keyboard), route to focused cell first
 	if g.focusRow >= 0 && g.focusRow < len(g.rows) {
 		row := g.rows[g.focusRow]
 		if row.Type == RowTypeNormal && g.focusCol >= 0 && g.focusCol < len(row.Cells) {
@@ -374,11 +433,17 @@ func (g *Grid) View() string {
 		case RowTypeSection:
 			// Section rows render their component directly (full width)
 			if row.Section != nil {
-				out.WriteString(row.Section.View())
+				sectionContent := row.Section.View()
+				// Add blank focus indicator space for alignment if enabled
+				if g.ShowFocusIndicator {
+					sectionContent = g.BlurIndicator + sectionContent
+				}
+				out.WriteString(sectionContent)
 			}
 		case RowTypeNormal:
 			// Normal rows render cells in columns
-			rowLines := g.renderRow(row, rowIdx)
+			isFocused := rowIdx == g.focusRow
+			rowLines := g.renderRow(row, isFocused)
 			out.WriteString(strings.Join(rowLines, "\n"))
 		}
 	}
@@ -387,7 +452,7 @@ func (g *Grid) View() string {
 }
 
 // renderRow renders a single row, returning lines (for multi-line cell support).
-func (g *Grid) renderRow(row GridRow, _ int) []string {
+func (g *Grid) renderRow(row GridRow, isFocused bool) []string {
 	// Get rendered content for each cell
 	cellContents := make([][]string, len(row.Cells))
 	maxLines := 1
@@ -420,11 +485,31 @@ func (g *Grid) renderRow(row GridRow, _ int) []string {
 		}
 	}
 
+	// Determine focus indicator for this row
+	var indicator string
+	if g.ShowFocusIndicator {
+		if isFocused {
+			indicator = g.FocusIndicator
+		} else {
+			indicator = g.BlurIndicator
+		}
+	}
+
 	// Build output lines
 	lines := make([]string, maxLines)
 
 	for lineIdx := 0; lineIdx < maxLines; lineIdx++ {
 		var lineBuilder strings.Builder
+
+		// Add focus indicator (only on first line, spaces on subsequent lines)
+		if indicator != "" {
+			if lineIdx == 0 {
+				lineBuilder.WriteString(indicator)
+			} else {
+				lineBuilder.WriteString(strings.Repeat(" ", len(indicator)))
+			}
+		}
+
 		gridCol := 0
 
 		for cellIdx, cell := range row.Cells {

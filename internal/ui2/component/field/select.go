@@ -2,6 +2,7 @@ package field
 
 import (
 	"fmt"
+	"log/slog"
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea/v2"
@@ -116,6 +117,7 @@ func (s *SelectComponent) RouteEvent(msg tea.Msg) (bool, tea.Cmd) {
 		}
 
 	case tea.MouseWheelMsg:
+		slog.Debug("SelectComponent.RouteEvent: MouseWheelMsg", "id", s.ID, "open", s.Open, "button", msg.Button)
 		if s.Open {
 			_, cmd := s.handleMouseWheel(msg)
 			return true, cmd
@@ -178,25 +180,23 @@ func (s *SelectComponent) handleMouseClick(msg tea.MouseClickMsg) (component.Com
 }
 
 func (s *SelectComponent) handleMouseWheel(msg tea.MouseWheelMsg) (component.Component, tea.Cmd) {
-	if msg.Y < 0 {
-		// Scroll up
-		if s.Scroll > 0 {
-			s.Scroll--
+	switch msg.Button {
+	case tea.MouseWheelUp:
+		if s.Cursor > 0 {
+			s.Cursor--
+			s.ensureCursorVisible()
 		}
-	} else if msg.Y > 0 {
-		// Scroll down
-		maxScroll := len(s.Options) - maxVisibleOptions
-		if maxScroll < 0 {
-			maxScroll = 0
-		}
-		if s.Scroll < maxScroll {
-			s.Scroll++
+	case tea.MouseWheelDown:
+		if s.Cursor < len(s.Options)-1 {
+			s.Cursor++
+			s.ensureCursorVisible()
 		}
 	}
 	return s, nil
 }
 
 func (s *SelectComponent) openDropdown() (component.Component, tea.Cmd) {
+	slog.Debug("SelectComponent.openDropdown", "id", s.ID)
 	s.Open = true
 	s.Cursor = s.Value
 	s.ensureCursorVisible()
@@ -290,8 +290,17 @@ func (s *SelectComponent) renderDropdownControl() string {
 		}
 	}
 
-	// Render dropdown box
-	out.WriteString("┌" + strings.Repeat("─", maxLen+2) + "┐\n")
+	// Render dropdown box with scroll indicators
+	hasMore := end < len(s.Options)
+	hasLess := start > 0
+	boxWidth := maxLen + 2
+
+	// Top border with optional scroll-up indicator (on right side)
+	if hasLess {
+		out.WriteString("┌" + strings.Repeat("─", boxWidth-1) + "▲┐\n")
+	} else {
+		out.WriteString("┌" + strings.Repeat("─", boxWidth) + "┐\n")
+	}
 
 	for i := start; i < end; i++ {
 		opt := s.Options[i]
@@ -311,7 +320,12 @@ func (s *SelectComponent) renderDropdownControl() string {
 		out.WriteString(optionLine + "\n")
 	}
 
-	out.WriteString("└" + strings.Repeat("─", maxLen+2) + "┘")
+	// Bottom border with optional scroll-down indicator (on right side)
+	if hasMore {
+		out.WriteString("└" + strings.Repeat("─", boxWidth-1) + "▼┘")
+	} else {
+		out.WriteString("└" + strings.Repeat("─", boxWidth) + "┘")
+	}
 
 	// Wrap entire dropdown area in main zone
 	result := out.String()
@@ -377,9 +391,18 @@ func (s *SelectComponent) renderDropdown(labelStr string) string {
 		}
 	}
 
-	// Render dropdown box
+	// Render dropdown box with scroll indicators
+	hasMore := end < len(s.Options)
+	hasLess := start > 0
+	boxWidth := maxLen + 2
 	boxIndent := "    "
-	out.WriteString(boxIndent + "┌" + strings.Repeat("─", maxLen+2) + "┐\n")
+
+	// Top border with optional scroll-up indicator (on right side)
+	if hasLess {
+		out.WriteString(boxIndent + "┌" + strings.Repeat("─", boxWidth-1) + "▲┐\n")
+	} else {
+		out.WriteString(boxIndent + "┌" + strings.Repeat("─", boxWidth) + "┐\n")
+	}
 
 	for i := start; i < end; i++ {
 		opt := s.Options[i]
@@ -399,7 +422,12 @@ func (s *SelectComponent) renderDropdown(labelStr string) string {
 		out.WriteString(optionLine + "\n")
 	}
 
-	out.WriteString(boxIndent + "└" + strings.Repeat("─", maxLen+2) + "┘")
+	// Bottom border with optional scroll-down indicator (on right side)
+	if hasMore {
+		out.WriteString(boxIndent + "└" + strings.Repeat("─", boxWidth-1) + "▼┘")
+	} else {
+		out.WriteString(boxIndent + "└" + strings.Repeat("─", boxWidth) + "┘")
+	}
 
 	// Wrap entire dropdown area in main zone
 	result := out.String()

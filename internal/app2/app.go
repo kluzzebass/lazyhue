@@ -4,6 +4,7 @@ package app2
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -206,7 +207,7 @@ func New(creds *config.CredentialStore) Model {
 		errorChan:        make(chan errorMsg, 100),
 		eventCancelFuncs: make(map[string]context.CancelFunc),
 		bridgeBlinkUntil:   make(map[string]time.Time),
-		lightGrid: gridlayout.NewGrid().SetGaps(2, 0),
+		lightGrid: gridlayout.NewGrid().SetGaps(2, 0).SetFocusIndicator(true, "> ", "  "),
 		selectedLightID:    "",
 		historyIndex:     -1, // No history initially
 		inputStack:       NewInputStack(),
@@ -833,9 +834,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		mouseY := msg.Y
 		mouseX := msg.X
 
+		slog.Debug("app.Update: MouseWheelMsg", "x", mouseX, "y", mouseY, "button", msg.Button)
+
 		// Check which panel the mouse is over
 		if mouseY < m.height-helpHeight {
 			if leaf := m.layout.At(mouseX, mouseY); leaf != nil {
+				slog.Debug("app.Update: routing wheel to panel", "panel", leaf.ID)
 				// Route scroll event to the panel under the mouse
 				switch leaf.ID {
 				case PanelTree:
@@ -858,6 +862,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				case PanelDetail:
 					// Route to grid component first
 					if handled, cmd := m.lightGrid.RouteEvent(msg); handled {
+						m.updateDetailContent() // Re-render to show cursor changes
 						return m, cmd
 					}
 					// Fall back to viewport scroll
