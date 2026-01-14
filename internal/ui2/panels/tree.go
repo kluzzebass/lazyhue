@@ -10,6 +10,7 @@ import (
 	"github.com/charmbracelet/bubbles/v2/list"
 	tea "github.com/charmbracelet/bubbletea/v2"
 	"github.com/charmbracelet/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
 	zone "github.com/lrstanley/bubblezone/v2"
 
 	"github.com/kluzzebass/lazyhue/internal/ui2"
@@ -17,12 +18,14 @@ import (
 
 // TreeNode represents a node in the hierarchical tree.
 type TreeNode struct {
-	ID       string      // Unique identifier for the node
-	Label    string      // Display label
-	Item     *EntityItem // nil for group headers/folders
-	Children []*TreeNode // Child nodes
-	Expanded bool        // Whether this node's children are visible
-	Depth    int         // Nesting depth (0 = root)
+	ID          string      // Unique identifier for the node
+	Label       string      // Display label
+	GroupSuffix string      // Optional group suffix like "(Room)" - rendered in secondary color
+	BridgeSuffix string     // Optional bridge suffix like "[Bridge]" - rendered dimmed
+	Item        *EntityItem // nil for group headers/folders
+	Children    []*TreeNode // Child nodes
+	Expanded    bool        // Whether this node's children are visible
+	Depth       int         // Nesting depth (0 = root)
 }
 
 // FilterValue implements list.Item for TreeNode.
@@ -43,6 +46,7 @@ func (f FlatNode) FilterValue() string { return f.Node.Label }
 type TreeDelegate struct {
 	Styles ui2.Styles
 	Zones  *zone.Manager
+	Width  int // Available width for truncation
 }
 
 // Height returns the height of a single item.
@@ -118,6 +122,16 @@ func (d TreeDelegate) Render(w io.Writer, m list.Model, index int, item list.Ite
 
 	// Build the label
 	label := node.Label
+	suffix := ""
+	if node.GroupSuffix != "" {
+		// Group (room/zone) suffix in secondary color
+		groupStyle := lipgloss.NewStyle().Foreground(d.Styles.Theme.Secondary)
+		suffix += " " + groupStyle.Render(node.GroupSuffix)
+	}
+	if node.BridgeSuffix != "" {
+		// Bridge suffix dimmed
+		suffix += " " + d.Styles.Dimmed.Render(node.BridgeSuffix)
+	}
 	if isSelected {
 		label = d.Styles.Selected.Render(label)
 	} else if node.Item == nil {
@@ -126,7 +140,12 @@ func (d TreeDelegate) Render(w io.Writer, m list.Model, index int, item list.Ite
 	}
 
 	// Compose the line
-	line := indent + prefix + indicator + label
+	line := indent + prefix + indicator + label + suffix
+
+	// Truncate if line exceeds available width
+	if d.Width > 0 && lipgloss.Width(line) > d.Width {
+		line = ansi.Truncate(line, d.Width, "…")
+	}
 
 	// Wrap in a clickable zone if we have a zone manager
 	if d.Zones != nil {
@@ -139,11 +158,12 @@ func (d TreeDelegate) Render(w io.Writer, m list.Model, index int, item list.Ite
 
 // TreePanel displays a hierarchical tree of items using list.Model.
 type TreePanel struct {
-	list   list.Model
-	styles ui2.Styles
-	zones  *zone.Manager
-	title  string
-	key    string
+	list     list.Model
+	delegate TreeDelegate
+	styles   ui2.Styles
+	zones    *zone.Manager
+	title    string
+	key      string
 
 	// Tabs
 	tabs      []string
@@ -174,12 +194,13 @@ func NewTreePanel(styles ui2.Styles, zones *zone.Manager, title, panelKey string
 	l.DisableQuitKeybindings()
 
 	return &TreePanel{
-		list:   l,
-		styles: styles,
-		zones:  zones,
-		title:  title,
-		key:    panelKey,
-		tabs:   []string{"Home", "Lights", "Devices", "Scenes"},
+		list:     l,
+		delegate: delegate,
+		styles:   styles,
+		zones:    zones,
+		title:    title,
+		key:      panelKey,
+		tabs:     []string{"Home", "Lights", "Devices", "Scenes"},
 	}
 }
 
@@ -346,6 +367,10 @@ func (p *TreePanel) SetSize(width, height int) {
 		innerHeight = 1
 	}
 	p.list.SetSize(innerWidth, innerHeight)
+
+	// Update delegate width for truncation
+	p.delegate.Width = innerWidth
+	p.list.SetDelegate(p.delegate)
 }
 
 // Update handles messages.
@@ -386,6 +411,16 @@ func (p *TreePanel) Update(msg tea.Msg) (*TreePanel, tea.Cmd) {
 			// If node has an item, let app layer handle it (will navigate to details)
 			// Pass through to list so app can catch it
 		}
+
+	case tea.MouseWheelMsg:
+		// Bubbles v2 list doesn't handle mouse wheel, so we convert to cursor movement
+		switch msg.Button {
+		case tea.MouseWheelUp:
+			p.list.CursorUp()
+		case tea.MouseWheelDown:
+			p.list.CursorDown()
+		}
+		return p, nil
 
 	case tea.MouseClickMsg:
 		// Check for tab clicks first
@@ -471,30 +506,59 @@ func (p *TreePanel) View(focused bool) string {
 
 	// Build sides and bottom
 	leftBorder := borderStyleColor.Render(border.Left)
-	rightBorder := borderStyleColor.Render(border.Right)
 	bottomBorder := borderStyleColor.Render(border.BottomLeft) +
 		borderStyleColor.Render(strings.Repeat(border.Bottom, innerWidth)) +
 		borderStyleColor.Render(border.BottomRight)
+
+	// Calculate scrollbar - estimate scroll position from cursor
+	totalItems := len(p.flatList)
+	visibleItems := innerHeight
+	scrollPos := 0
+	if totalItems > visibleItems {
+		// Estimate scroll position: cursor tends to be in the middle of the view
+		// The list keeps selection visible, so scroll offset is roughly cursor - half visible
+		cursorPos := p.list.Index()
+		halfVisible := visibleItems / 2
+		scrollPos = cursorPos - halfVisible
+		if scrollPos < 0 {
+			scrollPos = 0
+		}
+		maxScroll := totalItems - visibleItems
+		if scrollPos > maxScroll {
+			scrollPos = maxScroll
+		}
+	}
+	rightBorders := ui2.BuildRightBorderWithScrollbar(border, innerHeight, borderColor, scrollPos, totalItems, visibleItems)
 
 	// Build panel
 	var lines []string
 	lines = append(lines, topBorder)
 
 	// Content lines with side borders
-	for _, line := range contentLines {
+	for i, line := range contentLines {
 		// Truncate line if too long
 		if lipgloss.Width(line) > innerWidth {
 			line = lipgloss.Place(innerWidth, 1, lipgloss.Left, lipgloss.Top, line)
 		}
 		paddedLine := lipgloss.Place(innerWidth, 1, lipgloss.Left, lipgloss.Top, line)
+		rightBorder := borderStyleColor.Render(border.Right)
+		if i < len(rightBorders) {
+			rightBorder = rightBorders[i]
+		}
 		lines = append(lines, leftBorder+paddedLine+rightBorder)
 	}
 
 	// Fill to exact height (1 for top border + content + 1 for bottom border)
 	targetHeight := p.height
+	contentIdx := len(contentLines)
 	for len(lines) < targetHeight-1 {
 		paddedLine := strings.Repeat(" ", innerWidth)
+		rightBorder := borderStyleColor.Render(border.Right)
+		if contentIdx < len(rightBorders) {
+			rightBorder = rightBorders[contentIdx]
+		}
 		lines = append(lines, leftBorder+paddedLine+rightBorder)
+		contentIdx++
 	}
 
 	lines = append(lines, bottomBorder)

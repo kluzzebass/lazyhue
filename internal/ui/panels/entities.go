@@ -206,7 +206,7 @@ func BuildRoomItems(state *hue.BridgeState) []list.Item {
 }
 
 // BuildLightItems converts lights to list items.
-// Note: Light names come from the owning device, not the light's deprecated Metadata.Name
+// Note: Light names come from the owning device, not the light's alternate Metadata.Name
 func BuildLightItems(state *hue.BridgeState) []list.Item {
 	lights := state.AllLights()
 	items := make([]list.Item, 0, len(lights))
@@ -720,7 +720,7 @@ func BuildHierarchyTree(state *hue.BridgeState) []*TreeNode {
 			}
 		}
 
-		// Sort lights by name (from owning device, not deprecated light metadata)
+		// Sort lights by name (from owning device, not alternate light name)
 		sort.Slice(groupLights, func(i, j int) bool {
 			nameI, nameJ := "", ""
 			// Get name from owning device
@@ -916,7 +916,7 @@ func BuildHierarchyTree(state *hue.BridgeState) []*TreeNode {
 		}
 
 		if len(ungroupedLights) > 0 {
-			// Sort by name (from owning device, not deprecated light metadata)
+			// Sort by name (from owning device, not alternate light name)
 			sort.Slice(ungroupedLights, func(i, j int) bool {
 				nameI, nameJ := "", ""
 				if ungroupedLights[i].Owner != nil && ungroupedLights[i].Owner.Rid != nil {

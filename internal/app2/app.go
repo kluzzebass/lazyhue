@@ -858,15 +858,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					if cmd != nil {
 						cmds = append(cmds, cmd)
 					}
-					// Update detail content if selection changed
-					if node := m.tree.SelectedNode(); node != nil {
-						m.updateDetailContent()
-						// Auto-focus detail panel when selecting a light (for easier mouse interaction)
-						if node.Item != nil && node.Item.Type == panels.EntityLight {
-							m.previousPane = m.focusedPane
-							m.focusedPane = PanelDetail
-						}
-					}
+					// Update detail content to reflect scroll position
+					// Note: Selection doesn't change on scroll (TreePanel preserves selection)
+					m.updateDetailContent()
 					return m, tea.Batch(cmds...)
 
 				case PanelDetail:

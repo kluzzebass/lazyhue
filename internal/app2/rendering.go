@@ -608,7 +608,7 @@ func (m *Model) renderDetailPanel(width, height int, focused bool, key string) s
 		}
 	}
 
-	topBorder := m.renderPanelHeader(width, key, title, focused, borderColor)
+	topBorder := m.renderPanelHeader(width, key, title, borderColor)
 
 	innerWidth := width - 2
 	if innerWidth < 1 {
@@ -634,27 +634,42 @@ func (m *Model) renderDetailPanel(width, height int, focused bool, key string) s
 	borderStyleColor := lipgloss.NewStyle().Foreground(borderColor)
 
 	leftBorder := borderStyleColor.Render(border.Left)
-	rightBorder := borderStyleColor.Render(border.Right)
 	bottomBorder := borderStyleColor.Render(border.BottomLeft) +
 		borderStyleColor.Render(strings.Repeat(border.Bottom, innerWidth)) +
 		borderStyleColor.Render(border.BottomRight)
 
+	// Calculate scrollbar
+	scrollPos := m.detailViewport.YOffset
+	totalHeight := m.detailViewport.TotalLineCount()
+	viewHeight := m.detailViewport.VisibleLineCount()
+	rightBorders := ui2.BuildRightBorderWithScrollbar(border, innerHeight, borderColor, scrollPos, totalHeight, viewHeight)
+
 	var lines []string
 	lines = append(lines, topBorder)
 
-	for _, line := range contentLines {
+	for i, line := range contentLines {
 		if lipgloss.Width(line) > innerWidth {
 			line = lipgloss.Place(innerWidth, 1, lipgloss.Left, lipgloss.Top, line)
 		}
 		paddedLine := lipgloss.Place(innerWidth, 1, lipgloss.Left, lipgloss.Top, line)
+		rightBorder := borderStyleColor.Render(border.Right)
+		if i < len(rightBorders) {
+			rightBorder = rightBorders[i]
+		}
 		lines = append(lines, leftBorder+paddedLine+rightBorder)
 	}
 
 	// Fill to exact height (1 for top border + content + 1 for bottom border)
 	targetHeight := height
+	contentIdx := len(contentLines)
 	for len(lines) < targetHeight-1 {
 		paddedLine := strings.Repeat(" ", innerWidth)
+		rightBorder := borderStyleColor.Render(border.Right)
+		if contentIdx < len(rightBorders) {
+			rightBorder = rightBorders[contentIdx]
+		}
 		lines = append(lines, leftBorder+paddedLine+rightBorder)
+		contentIdx++
 	}
 
 	lines = append(lines, bottomBorder)
@@ -669,7 +684,7 @@ func (m *Model) renderLogPanel(width, height int, focused bool, key string) stri
 		borderColor = m.styles.Theme.Accent
 	}
 
-	topBorder := m.renderPanelHeader(width, key, "Activity", focused, borderColor)
+	topBorder := m.renderPanelHeader(width, key, "Activity", borderColor)
 
 	innerWidth := width - 2
 	if innerWidth < 1 {
@@ -696,10 +711,15 @@ func (m *Model) renderLogPanel(width, height int, focused bool, key string) stri
 	borderStyleColor := lipgloss.NewStyle().Foreground(borderColor)
 
 	leftBorder := borderStyleColor.Render(border.Left)
-	rightBorder := borderStyleColor.Render(border.Right)
 	bottomBorder := borderStyleColor.Render(border.BottomLeft) +
 		borderStyleColor.Render(strings.Repeat(border.Bottom, innerWidth)) +
 		borderStyleColor.Render(border.BottomRight)
+
+	// Calculate scrollbar
+	scrollPos := m.logViewport.YOffset
+	totalHeight := m.logViewport.TotalLineCount()
+	viewHeight := m.logViewport.VisibleLineCount()
+	rightBorders := ui2.BuildRightBorderWithScrollbar(border, innerHeight, borderColor, scrollPos, totalHeight, viewHeight)
 
 	var lines []string
 	lines = append(lines, topBorder)
@@ -710,14 +730,24 @@ func (m *Model) renderLogPanel(width, height int, focused bool, key string) stri
 	for i := 0; i < len(contentLines) && i < innerHeight; i++ {
 		line := contentLines[i]
 		paddedLine := lipgloss.Place(innerWidth, 1, lipgloss.Left, lipgloss.Top, line)
+		rightBorder := borderStyleColor.Render(border.Right)
+		if i < len(rightBorders) {
+			rightBorder = rightBorders[i]
+		}
 		lines = append(lines, leftBorder+paddedLine+rightBorder)
 	}
 
 	// Fill to exact height (1 for top border + content + 1 for bottom border)
 	targetHeight := height
+	contentIdx := len(contentLines)
 	for len(lines) < targetHeight-1 {
 		paddedLine := strings.Repeat(" ", innerWidth)
+		rightBorder := borderStyleColor.Render(border.Right)
+		if contentIdx < len(rightBorders) {
+			rightBorder = rightBorders[contentIdx]
+		}
 		lines = append(lines, leftBorder+paddedLine+rightBorder)
+		contentIdx++
 	}
 
 	lines = append(lines, bottomBorder)
@@ -726,7 +756,7 @@ func (m *Model) renderLogPanel(width, height int, focused bool, key string) stri
 }
 
 // renderPanelHeader renders a panel header with hotkey and title.
-func (m *Model) renderPanelHeader(width int, keyStr, title string, focused bool, borderColor color.Color) string {
+func (m *Model) renderPanelHeader(width int, keyStr, title string, borderColor color.Color) string {
 	border := lipgloss.RoundedBorder()
 
 	keyRendered := ""
@@ -1081,16 +1111,16 @@ func (m *Model) buildNameRows(light hueclient.LightGet, device *hueclient.Device
 		})
 	}
 
-	// Show deprecated light name if different from device name
+	// Show alternate light name if different from device name
 	if light.Metadata != nil && light.Metadata.Name != nil {
-		deprecatedName := *light.Metadata.Name
+		altName := *light.Metadata.Name
 		currentName := ""
 		if device != nil && device.Metadata != nil && device.Metadata.Name != nil {
 			currentName = *device.Metadata.Name
 		}
-		if deprecatedName != currentName {
+		if altName != currentName {
 			dimStyle := m.styles.Dimmed
-			rows = append(rows, gridlayout.NewStyledInfoRow("Deprecated", deprecatedName, infoLabelWidth, dimStyle))
+			rows = append(rows, gridlayout.NewStyledInfoRow("Alternate", altName, infoLabelWidth, dimStyle))
 		}
 	}
 

@@ -363,7 +363,7 @@ func (s *BridgeState) GetAllDevices() []hueclient.DeviceGet {
 }
 
 // GetLightName returns the user-assigned name for a light.
-// The name comes from the owning device, not the light's deprecated Metadata.Name.
+// The name comes from the owning device, not the light's alternate Metadata.Name.
 // Caller must hold the lock or call this on data that won't change.
 func (s *BridgeState) GetLightName(light hueclient.LightGet) string {
 	// Get name from owning device (this is where user-assigned names are stored)
@@ -374,7 +374,7 @@ func (s *BridgeState) GetLightName(light hueclient.LightGet) string {
 			}
 		}
 	}
-	// Fallback to light's own metadata (deprecated, but better than nothing)
+	// Fallback to light's own metadata (alternate name)
 	if light.Metadata != nil && light.Metadata.Name != nil {
 		return *light.Metadata.Name
 	}
@@ -389,10 +389,10 @@ func (s *BridgeState) GetDeviceName(device hueclient.DeviceGet) string {
 	return "Unknown"
 }
 
-// GetDeviceDeprecatedName returns the deprecated name from the device's lights, or empty string if not available.
-// The deprecated name is stored in the light's Metadata.Name field (which is deprecated in favor of device.Metadata.Name).
-// If the device has multiple lights, returns the deprecated name from the first light that has one.
-func (s *BridgeState) GetDeviceDeprecatedName(device hueclient.DeviceGet) string {
+// GetDeviceAlternateName returns the alternate name from the device's lights, or empty string if not available.
+// The alternate name is stored in the light's Metadata.Name field.
+// If the device has multiple lights, returns the alternate name from the first light that has one.
+func (s *BridgeState) GetDeviceAlternateName(device hueclient.DeviceGet) string {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
@@ -407,7 +407,7 @@ func (s *BridgeState) GetDeviceDeprecatedName(device hueclient.DeviceGet) string
 	// Find lights owned by this device
 	for _, light := range s.Lights {
 		if light.Owner != nil && light.Owner.Rid != nil && *light.Owner.Rid == deviceID {
-			// Return the first deprecated name we find
+			// Return the first alternate name we find
 			if light.Metadata != nil && light.Metadata.Name != nil {
 				return *light.Metadata.Name
 			}
@@ -457,7 +457,7 @@ func (s *BridgeState) RoomLights(room hueclient.RoomGet) []hueclient.LightGet {
 		}
 	}
 
-	// Sort by name for stable ordering (using device name, not deprecated light metadata)
+	// Sort by name for stable ordering (using device name, not alternate light name)
 	sort.Slice(lights, func(i, j int) bool {
 		return s.GetLightName(lights[i]) < s.GetLightName(lights[j])
 	})
@@ -592,7 +592,7 @@ func (s *BridgeState) AllLights() []hueclient.LightGet {
 		lights = append(lights, l)
 	}
 
-	// Sort by name for stable ordering (using device name, not deprecated light metadata)
+	// Sort by name for stable ordering (using device name, not alternate light name)
 	sort.Slice(lights, func(i, j int) bool {
 		return s.GetLightName(lights[i]) < s.GetLightName(lights[j])
 	})
@@ -1694,6 +1694,24 @@ func (s *BridgeState) GetTemperature(id string) (hueclient.TemperatureGet, bool)
 	defer s.mu.RUnlock()
 	t, ok := s.Temperatures[id]
 	return t, ok
+}
+
+// GetDeviceRoom returns the room that contains a device, if any.
+func (s *BridgeState) GetDeviceRoom(deviceID string) (hueclient.RoomGet, bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	for _, room := range s.Rooms {
+		if room.Children == nil {
+			continue
+		}
+		for _, child := range *room.Children {
+			if child.Rtype != nil && *child.Rtype == "device" && child.Rid != nil && *child.Rid == deviceID {
+				return room, true
+			}
+		}
+	}
+	return hueclient.RoomGet{}, false
 }
 
 // GetGroupedLightName returns the room or zone name for a grouped light.
