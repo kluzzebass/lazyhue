@@ -21,6 +21,7 @@ import (
 	"github.com/kluzzebass/lazyhue/internal/hueclient"
 	"github.com/kluzzebass/lazyhue/internal/ui2"
 	"github.com/kluzzebass/lazyhue/internal/ui2/component"
+	"github.com/kluzzebass/lazyhue/internal/ui2/component/field"
 	"github.com/kluzzebass/lazyhue/internal/ui2/components"
 	"github.com/kluzzebass/lazyhue/internal/ui2/layout"
 	"github.com/kluzzebass/lazyhue/internal/ui2/panels"
@@ -77,7 +78,8 @@ type Model struct {
 	errorChan        chan errorMsg
 	eventCancelFuncs map[string]context.CancelFunc
 	bridgeBlinkUntil map[string]time.Time // Track when bridge blink indicators should stop
-	lightForm        *components.Form     // Form for light controls in detail panel
+	lightForm        *components.Form     // Form for light controls in detail panel (legacy)
+	lightFormComponent *field.FormComponent // New component-based form for light controls
 	selectedLightID   string               // ID of currently selected light (for form updates)
 	lastTreeClick     time.Time            // Track last tree item click for double-click detection
 	lastTreeClickID   string               // Track which tree item was last clicked
@@ -205,8 +207,9 @@ func New(creds *config.CredentialStore) Model {
 		errorChan:        make(chan errorMsg, 100),
 		eventCancelFuncs: make(map[string]context.CancelFunc),
 		bridgeBlinkUntil: make(map[string]time.Time),
-		lightForm:        components.NewForm(&styles, zones),
-		selectedLightID:  "",
+		lightForm:          components.NewForm(&styles, zones),
+		lightFormComponent: field.NewFormComponent(&styles, zones),
+		selectedLightID:    "",
 		historyIndex:     -1, // No history initially
 		inputStack:       NewInputStack(),
 	}
@@ -280,6 +283,24 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.updateDetailContent()
 			return m, tea.Batch(cmds...)
 		}
+	}
+
+	// Handle blink tick messages from new form component
+	if blinkMsg, ok := msg.(field.BlinkTickMsg); ok {
+		if m.lightFormComponent != nil {
+			_, cmd := m.lightFormComponent.Update(blinkMsg)
+			if cmd != nil {
+				cmds = append(cmds, cmd)
+			}
+			m.updateDetailContent()
+			return m, tea.Batch(cmds...)
+		}
+	}
+
+	// Handle field changed messages from new form component
+	if fieldMsg, ok := msg.(field.FieldChangedMsg); ok {
+		m.handleNewFieldChange(fieldMsg)
+		return m, nil
 	}
 
 	switch msg := msg.(type) {

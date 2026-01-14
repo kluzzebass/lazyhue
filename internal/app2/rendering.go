@@ -13,6 +13,8 @@ import (
 	"github.com/charmbracelet/lipgloss/v2"
 	"github.com/kluzzebass/lazyhue/internal/hue"
 	"github.com/kluzzebass/lazyhue/internal/hueclient"
+	"github.com/kluzzebass/lazyhue/internal/ui2/component"
+	"github.com/kluzzebass/lazyhue/internal/ui2/component/field"
 	"github.com/kluzzebass/lazyhue/internal/ui2/components"
 	"github.com/kluzzebass/lazyhue/internal/ui2/panels"
 )
@@ -981,6 +983,95 @@ func (m *Model) buildLightFormFields(light hueclient.LightGet) []components.Form
 	return fields
 }
 
+// buildLightFieldComponents builds field components for controlling a light.
+// This is the new component-based version of buildLightFormFields.
+func (m *Model) buildLightFieldComponents(light hueclient.LightGet) []component.Component {
+	var fields []component.Component
+
+	// On/Off toggle
+	onValue := false
+	if light.On != nil && light.On.On != nil && *light.On.On {
+		onValue = true
+	}
+	toggle := field.NewToggleComponent("on", "Power", onValue, &m.styles, m.zones)
+	toggle.SetLabels("On", "Off")
+	fields = append(fields, toggle)
+
+	// Brightness (if dimmable)
+	if light.Dimming != nil && light.Dimming.Brightness != nil {
+		brightness := int(*light.Dimming.Brightness)
+		fields = append(fields, field.NewBrightnessSliderComponent(
+			"brightness", "Brightness", brightness,
+			&m.styles, m.zones,
+		))
+	}
+
+	// Color temperature (if supported)
+	if light.ColorTemperature != nil && light.ColorTemperature.MirekSchema != nil {
+		mirek := 250
+		if light.ColorTemperature.Mirek != nil {
+			mirek = *light.ColorTemperature.Mirek
+		}
+		minMirek := 153
+		maxMirek := 500
+		if light.ColorTemperature.MirekSchema.MirekMinimum != nil {
+			minMirek = *light.ColorTemperature.MirekSchema.MirekMinimum
+		}
+		if light.ColorTemperature.MirekSchema.MirekMaximum != nil {
+			maxMirek = *light.ColorTemperature.MirekSchema.MirekMaximum
+		}
+		fields = append(fields, field.NewColorTempSliderComponent(
+			"colortemp", "Color Temp", mirek, minMirek, maxMirek,
+			&m.styles, m.zones,
+		))
+	}
+
+	// Color (if supported)
+	if light.Color != nil && light.Color.Xy != nil {
+		x, y := 0.3127, 0.329
+		if light.Color.Xy.X != nil {
+			x = float64(*light.Color.Xy.X)
+		}
+		if light.Color.Xy.Y != nil {
+			y = float64(*light.Color.Xy.Y)
+		}
+		fields = append(fields, field.NewColorWheelComponent(
+			"color", "Color", x, y,
+			&m.styles, m.zones,
+		))
+	}
+
+	// Effect (if supported)
+	if light.Effects != nil && light.Effects.EffectValues != nil {
+		var options []field.Option
+		currentEffect := -1
+		if light.Effects.Status != nil {
+			for i, effect := range *light.Effects.EffectValues {
+				effectStr := string(effect)
+				displayName := hue.EffectDisplayName(effectStr)
+				options = append(options, field.Option{
+					Label: displayName,
+					Value: i,
+				})
+				if effect == *light.Effects.Status {
+					currentEffect = i
+				}
+			}
+		}
+		if len(options) > 0 {
+			if currentEffect == -1 {
+				currentEffect = 0
+			}
+			fields = append(fields, field.NewSelectComponent(
+				"effect", "Effect", currentEffect, options,
+				&m.styles, m.zones,
+			))
+		}
+	}
+
+	return fields
+}
+
 // buildLightDetailFormFields builds form fields for all static detail sections.
 // These are read-only fields that display light information (not controls).
 func (m *Model) buildLightDetailFormFields(light hueclient.LightGet, state *hue.BridgeState) []components.FormField {
@@ -1592,6 +1683,100 @@ func (m *Model) handleLightFieldChange(field components.FormField, lightID strin
 						if field.Value >= 0 && field.Value < len(effects) {
 							effect := effects[field.Value]
 							err = bridge.SetLightEffect(lightID, effect)
+						}
+					}
+				}
+			}
+		}
+	}
+
+	if err != nil {
+		m.status = fmt.Sprintf("Error: %v", err)
+	} else {
+		// Update detail content immediately to reflect changes (optimistic update)
+		m.updateDetailContent()
+		// Rebuild tree to update indicators
+		m.rebuildTreeForActiveTab()
+	}
+}
+
+// handleNewFieldChange handles field change messages from the new form component.
+// This is the message-based equivalent of handleLightFieldChange.
+func (m *Model) handleNewFieldChange(msg field.FieldChangedMsg) {
+	// Get the currently selected light and bridge
+	node := m.tree.SelectedNode()
+	if node == nil || node.Item.Type != panels.EntityLight {
+		return
+	}
+
+	bridgeID := node.Item.BridgeID
+	lightID := m.selectedLightID
+	if lightID == "" {
+		return
+	}
+
+	bridge := m.manager.GetBridge(bridgeID)
+	if bridge == nil {
+		m.status = fmt.Sprintf("Bridge not found: %s", bridgeID)
+		return
+	}
+
+	var err error
+
+	// Handle fields with embedded IDs (name:deviceID, archetype:deviceID, powerup-preset:lightID)
+	if strings.HasPrefix(msg.FieldID, "name:") {
+		deviceID := strings.TrimPrefix(msg.FieldID, "name:")
+		if v, ok := msg.Value.(field.TextValue); ok {
+			err = bridge.SetDeviceName(deviceID, v.Text)
+		}
+	} else if strings.HasPrefix(msg.FieldID, "archetype:") {
+		deviceID := strings.TrimPrefix(msg.FieldID, "archetype:")
+		if v, ok := msg.Value.(field.SelectValue); ok {
+			archetypeKeys := getSortedProductArchetypes()
+			if v.Index >= 0 && v.Index < len(archetypeKeys) {
+				archetype := hueclient.ProductArchetype(archetypeKeys[v.Index])
+				err = bridge.SetDeviceArchetype(deviceID, archetype)
+			}
+		}
+	} else if strings.HasPrefix(msg.FieldID, "powerup-preset:") {
+		lightIDFromField := strings.TrimPrefix(msg.FieldID, "powerup-preset:")
+		if v, ok := msg.Value.(field.SelectValue); ok {
+			presetKeys := getSortedPowerupPresets()
+			if v.Index >= 0 && v.Index < len(presetKeys) {
+				preset := hueclient.PowerupPreset(presetKeys[v.Index])
+				err = bridge.SetLightPowerupPreset(lightIDFromField, preset)
+			}
+		}
+	} else {
+		// Handle regular fields
+		switch msg.FieldID {
+		case "on":
+			if v, ok := msg.Value.(field.ToggleValue); ok {
+				err = bridge.SetLightOn(lightID, v.On)
+			}
+		case "brightness":
+			if v, ok := msg.Value.(field.SliderValue); ok {
+				err = bridge.SetLightBrightness(lightID, float64(v.Value))
+			}
+		case "colortemp":
+			if v, ok := msg.Value.(field.SliderValue); ok {
+				err = bridge.SetLightColorTemperature(lightID, v.Value)
+			}
+		case "color":
+			if v, ok := msg.Value.(field.ColorValue); ok {
+				err = bridge.SetLightColor(lightID, v.X, v.Y)
+			}
+		case "effect":
+			if v, ok := msg.Value.(field.SelectValue); ok {
+				// Get the effect from the light's effect values
+				if state := bridge.GetState(); state != nil {
+					if light, ok := state.GetLight(lightID); ok {
+						if light.Effects != nil && light.Effects.EffectValues != nil {
+							effects := *light.Effects.EffectValues
+							if v.Index >= 0 && v.Index < len(effects) {
+								effect := effects[v.Index]
+								err = bridge.SetLightEffect(lightID, effect)
+							}
 						}
 					}
 				}
