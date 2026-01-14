@@ -6,36 +6,31 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 LazyHue is a terminal user interface (TUI) for managing Philips Hue bridges and lights. Built with Go and the Charm ecosystem (Bubble Tea, Lipgloss, Bubbles), it follows the lazygit/lazydocker UX philosophy with keyboard-driven navigation and mouse support.
 
-**Current State:** Active migration from Bubble Tea v1 to v2 on the `bubbletea-v2-migration` branch. The v2 code lives in `app2/` and `ui2/` directories.
-
 ## Build & Run Commands
 
 ```bash
-# Build v2 (current development target)
-go build -o lazyhue2 ./cmd/lazyhue2
-
-# Build v1 (legacy)
+# Build
 go build -o lazyhue ./cmd/lazyhue
 
-# Run v2
-./lazyhue2
+# Run
+./lazyhue
 
 # Development: auto-restart on binary change (requires fswatch)
-./watch.sh ./lazyhue2
+./watch.sh ./lazyhue
 ```
 
 ## Architecture
 
 ```
 ┌─────────────────────────────────────┐
-│  UI Layer (ui2/)                    │
+│  UI Layer (ui/)                    │
 │  - Panels (tree, bridges, etc.)     │
 │  - Components (form, colorwheel)    │
 │  - Layout system, themes, zones     │
 └──────────────┬──────────────────────┘
                │ tea.Cmd / tea.Msg
 ┌──────────────▼──────────────────────┐
-│  Application Layer (app2/)          │
+│  Application Layer (app/)          │
 │  - Main tea.Model                   │
 │  - Event handling & rendering       │
 └──────────────┬──────────────────────┘
@@ -54,15 +49,15 @@ go build -o lazyhue ./cmd/lazyhue
 ```
 
 **Key Directories:**
-- `cmd/lazyhue2/` - v2 entry point
-- `internal/app2/` - v2 Bubble Tea application model
-- `internal/ui2/` - v2 UI components and panels
+- `cmd/lazyhue/` - Entry point
+- `internal/app/` - Bubble Tea application model
+- `internal/ui/` - UI components and panels
 - `internal/hue/` - Service layer (bridge management, state, actions)
 - `internal/hueclient/` - Generated OpenAPI client (do not edit directly)
 - `internal/config/` - Configuration and credential persistence
-- `plans/` - Technical documentation and migration plans
+- `plans/` - Technical documentation
 
-**Service Layer Independence:** The `hue/`, `hueclient/`, `config/`, and `debug/` packages have no Charm dependencies and require no changes during UI migrations.
+**Service Layer Independence:** The `hue/`, `hueclient/`, `config/`, and `debug/` packages have no Charm dependencies.
 
 ## Key Patterns
 
@@ -74,14 +69,14 @@ type stateSyncedMsg struct { bridgeID string }
 ```
 
 ### Bubblezone for Mouse Handling
-v2 uses bubblezone for click detection instead of manual coordinate math:
+Uses bubblezone for click detection:
 ```go
 zone.Mark("field-id", fieldView)  // Mark zones
 zone.Get("field-id").InBounds(msg) // Detect clicks
 ```
 
 ### Layout System
-Flex-box style layout in `ui2/layout/layout.go`:
+Flex-box style layout in `ui/layout/layout.go`:
 ```go
 layout.HSplit(
     layout.Child{Size: layout.Flex(0.4), Node: treePanel},
@@ -127,7 +122,7 @@ func (f *FormComponent) RouteEvent(msg tea.Msg) (bool, tea.Cmd) {
 }
 ```
 
-### Field Components (internal/ui2/component/field/)
+### Field Components (internal/ui/component/field/)
 
 **USE THESE for all form fields:**
 - `ToggleComponent` - boolean on/off
@@ -199,28 +194,9 @@ fields := []component.Component{
 m.lightFormComponent.SetFields(fields)
 ```
 
-### Legacy Code to DELETE
-
-The following are OLD patterns that should be replaced and eventually removed:
-- `internal/ui2/components/form.go` - Old monolithic Form
-- `internal/ui2/components/formfield.go` - Old FormField struct
-- `internal/ui2/components/form_handlers.go` - Old event handlers
-- `m.lightForm *components.Form` in app.go - Replace with `m.lightFormComponent`
-- All the conditional Form handling in app.go Update() switch/case
-
-## v2 Migration Context
-
-The migration follows the plan in `plans/charm_v2_migration.md`:
-- Use native bubbles components (list, viewport, help, textinput) over homebrew
-- Use bubblezone for mouse tracking instead of manual coordinate calculations
-- Keep custom components minimal (color wheel, sliders, layout)
-- **Use component architecture for ALL interactive UI elements**
-
-Both v1 (`ui/`, `app/`) and v2 (`ui2/`, `app2/`) coexist during migration for comparison.
-
 ## Dependencies
 
-Framework (v2 - active development):
+Framework:
 - `github.com/charmbracelet/bubbletea/v2`
 - `github.com/charmbracelet/bubbles/v2`
 - `github.com/charmbracelet/lipgloss/v2`

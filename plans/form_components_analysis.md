@@ -22,7 +22,7 @@
 
 1. ✅ Create form field types and structures (`formfield.go`)
 2. Create reusable rendering functions for form components
-3. Implement test form handler in `internal/app2/`
+3. Implement test form handler in `internal/app/`
 4. Wire up key binding for test form
 
 ## Component Structure
@@ -31,7 +31,7 @@ Components to create:
 - ✅ `formfield.go` - Form field types and structures
 - Render functions for each component type (can be in a single file or separate files)
 - Color wheel component (lift from v1 `colorwheel.go`)
-- Form test handler in `internal/app2/`
+- Form test handler in `internal/app/`
 
 ## Scale
 

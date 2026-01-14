@@ -4,7 +4,7 @@ import (
 	"fmt"
 
 	"github.com/kluzzebass/lazyhue/internal/hueclient"
-	"github.com/kluzzebass/lazyhue/internal/ui2"
+	"github.com/kluzzebass/lazyhue/internal/ui"
 )
 
 // CalculateRoomAggregate calculates the average brightness and color from a list of lights.
@@ -28,7 +28,7 @@ func CalculateRoomAggregate(lights []hueclient.LightGet) (float64, string) {
 			}
 
 			// Get color for this light
-			colorHex := ui2.GetLightColor(light)
+			colorHex := ui.GetLightColor(light)
 			if colorHex != "" && len(colorHex) == 7 && colorHex[0] == '#' {
 				var r, g, b int
 				fmt.Sscanf(colorHex, "#%02x%02x%02x", &r, &g, &b)

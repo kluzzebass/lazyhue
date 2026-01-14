@@ -6,7 +6,7 @@
 
 ## Overview
 
-This document compares the V1 UI implementation (`internal/app/`, `internal/ui/`) with the V2 UI implementation (`internal/app2/`, `internal/ui2/`) to identify functionality gaps that need to be addressed during the migration.
+This document compares the V1 UI implementation (`internal/app/`, `internal/ui/`) with the V2 UI implementation (`internal/app/`, `internal/ui/`) to identify functionality gaps that need to be addressed during the migration.
 
 ---
 
@@ -40,8 +40,8 @@ This document compares the V1 UI implementation (`internal/app/`, `internal/ui/`
 - Validation and error handling
 
 **V2 Files to Modify:**
-- `internal/app2/app.go` - Add key handler for 'n'
-- `internal/app2/rendering.go` - Build create room form
+- `internal/app/app.go` - Add key handler for 'n'
+- `internal/app/rendering.go` - Build create room form
 - Need to call `hue.Bridge.CreateRoom()` API
 
 **Required Form Fields:**
@@ -61,8 +61,8 @@ This document compares the V1 UI implementation (`internal/app/`, `internal/ui/`
 - Validation and error handling
 
 **V2 Files to Modify:**
-- `internal/app2/app.go` - Add key handler for 'N'
-- `internal/app2/rendering.go` - Build create zone form
+- `internal/app/app.go` - Add key handler for 'N'
+- `internal/app/rendering.go` - Build create zone form
 - Need to call `hue.Bridge.CreateZone()` API
 
 **Required Form Fields:**
@@ -82,7 +82,7 @@ This document compares the V1 UI implementation (`internal/app/`, `internal/ui/`
 - Shows entity name and type in confirmation
 
 **V2 Files to Modify:**
-- `internal/app2/app.go` - Add key handler for 'd' or Delete key
+- `internal/app/app.go` - Add key handler for 'd' or Delete key
 - Need confirmation popup/dialog
 - Call appropriate delete API based on entity type
 
@@ -103,7 +103,7 @@ This document compares the V1 UI implementation (`internal/app/`, `internal/ui/`
 - Missing: Form submission and API call integration
 
 **V2 Files to Modify:**
-- `internal/app2/app.go` - Complete rename handler
+- `internal/app/app.go` - Complete rename handler
 - Connect rename form submission to API calls
 - Handle different entity types (lights, rooms, zones, devices, scenes)
 
@@ -126,8 +126,8 @@ This document compares the V1 UI implementation (`internal/app/`, `internal/ui/`
 - Product archetype editing
 
 **V2 Files to Modify:**
-- `internal/app2/app.go` - Add handler for 'e' key on device selection
-- `internal/app2/rendering.go` - Build device edit form
+- `internal/app/app.go` - Add handler for 'e' key on device selection
+- `internal/app/rendering.go` - Build device edit form
 
 **Required Features:**
 - Motion sensor sensitivity slider
@@ -148,7 +148,7 @@ This document compares the V1 UI implementation (`internal/app/`, `internal/ui/`
 - Visual indication of current members
 
 **V2 Files to Modify:**
-- `internal/app2/rendering.go` - Add room/zone edit forms
+- `internal/app/rendering.go` - Add room/zone edit forms
 - Need multi-select or checkbox list for device membership
 
 **Required Features:**
@@ -187,8 +187,8 @@ This document compares the V1 UI implementation (`internal/app/`, `internal/ui/`
 - V2 only has the hierarchical tree view
 
 **V2 Files to Modify:**
-- `internal/ui2/panels/tree.go` - Add tab support
-- `internal/app2/app.go` - Handle tab switching
+- `internal/ui/panels/tree.go` - Add tab support
+- `internal/app/app.go` - Handle tab switching
 
 **Benefits:**
 - Easier to find specific lights without navigating tree
@@ -215,8 +215,8 @@ This document compares the V1 UI implementation (`internal/app/`, `internal/ui/`
 - Missing: Toggle key, filtering, enhanced formatting
 
 **V2 Files to Modify:**
-- `internal/app2/app.go` - Add 'a' key handler for toggle
-- `internal/app2/activity.go` - Enhanced rendering options
+- `internal/app/app.go` - Add 'a' key handler for toggle
+- `internal/app/activity.go` - Enhanced rendering options
 - Add filtering/search capability
 
 ---
@@ -275,7 +275,7 @@ This document compares the V1 UI implementation (`internal/app/`, `internal/ui/`
 **V1 Reference:** `internal/app/bindings.go`
 
 **V2 Files to Modify:**
-- `internal/app2/app.go` - Add key handlers in Update function
+- `internal/app/app.go` - Add key handlers in Update function
 - Follow existing pattern for handling keys
 
 ---
@@ -367,14 +367,14 @@ This document compares the V1 UI implementation (`internal/app/`, `internal/ui/`
 ### V2 Files to Modify
 
 **Main Application:**
-- `internal/app2/app.go` - Main Update handler, key bindings
-- `internal/app2/rendering.go` - Detail rendering, form building
-- `internal/app2/activity.go` - Event handling and logging
+- `internal/app/app.go` - Main Update handler, key bindings
+- `internal/app/rendering.go` - Detail rendering, form building
+- `internal/app/activity.go` - Event handling and logging
 
 **UI Components:**
-- `internal/ui2/components/form.go` - Form implementation
-- `internal/ui2/panels/tree.go` - Tree panel (could add tabs)
-- `internal/ui2/layout/layout.go` - Layout system
+- `internal/ui/components/form.go` - Form implementation
+- `internal/ui/panels/tree.go` - Tree panel (could add tabs)
+- `internal/ui/layout/layout.go` - Layout system
 
 **Service Layer (No changes needed):**
 - `internal/hue/actions.go` - Already has all CRUD APIs
@@ -387,7 +387,7 @@ This document compares the V1 UI implementation (`internal/app/`, `internal/ui/`
 
 - The service layer (`internal/hue/`) is complete and unchanged between V1 and V2
 - All APIs needed for missing features already exist
-- Focus is on UI/UX implementation in app2/ and ui2/
+- Focus is on UI/UX implementation in app/ and ui/
 - Many features are partially implemented (rename, edit) and just need completion
 - The migration to Bubble Tea V2 is nearly complete from an architecture standpoint
 - Most missing features are about exposing existing APIs through the UI

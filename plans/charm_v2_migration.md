@@ -134,12 +134,12 @@ Issues we've debugged extensively that native components would solve:
 
 ### Phase 1: Parallel UI Development
 
-Create a new `internal/ui2/` package alongside the existing `internal/ui/`:
+Create a new `internal/ui/` package alongside the existing `internal/ui/`:
 
 ```
 internal/
 ├── ui/           # OLD - v1 implementation (keep for reference)
-└── ui2/          # NEW - v2 implementation
+└── ui/          # NEW - v2 implementation
     ├── binding.go
     ├── border.go
     ├── color.go
@@ -156,12 +156,12 @@ This allows:
 
 ### Phase 2: Application Layer Migration
 
-Create `internal/app2/` alongside existing `internal/app/`:
+Create `internal/app/` alongside existing `internal/app/`:
 
 ```
 internal/
 ├── app/          # OLD - v1 app layer
-└── app2/         # NEW - v2 app layer
+└── app/         # NEW - v2 app layer
     ├── app.go
     ├── handlers.go
     ├── messages.go
@@ -170,14 +170,14 @@ internal/
 
 ### Phase 3: Integration & Testing
 
-1. Create a new `cmd/lazyhue2/main.go` entry point
+1. Create a new `cmd/lazyhue/main.go` entry point
 2. Run both versions in parallel for comparison
 3. Verify all features work correctly
 
 ### Phase 4: Cleanup
 
 1. Remove old `internal/ui/` and `internal/app/`
-2. Rename `ui2` → `ui` and `app2` → `app`
+2. Rename `ui` → `ui` and `app` → `app`
 3. Update `cmd/lazyhue/main.go`
 4. Remove v1 dependencies from `go.mod`
 
@@ -262,7 +262,7 @@ Based on [v2.0.0-rc.1 release notes](https://github.com/charmbracelet/bubbles/re
 
 ## Component Migration Checklist
 
-### Core Infrastructure (`internal/ui2/`)
+### Core Infrastructure (`internal/ui/`)
 
 - [ ] `theme.go` - Styles using lipgloss v2
 - [ ] `color.go` - Color utilities (mostly pure Go, keep as-is)
@@ -288,7 +288,7 @@ Based on [v2.0.0-rc.1 release notes](https://github.com/charmbracelet/bubbles/re
 | `status.go` | Simplify | Pure lipgloss render |
 | `scroll.go` | Remove | Native viewport handles scrolling |
 
-### Details View Builders (`internal/ui2/panels/details/`)
+### Details View Builders (`internal/ui/panels/details/`)
 
 These are mostly pure rendering, keep with minimal changes:
 - [ ] `view.go` - View builder interface
@@ -297,7 +297,7 @@ These are mostly pure rendering, keep with minimal changes:
 - [ ] `text.go` - Text rendering
 - [ ] `details_*.go` - Entity-specific views
 
-### Application Layer (`internal/app2/`)
+### Application Layer (`internal/app/`)
 
 - [ ] `messages.go` - Message types
 - [ ] `app.go` - Main model, Init, Update, View
@@ -319,7 +319,7 @@ These are mostly pure rendering, keep with minimal changes:
 
 ### Integration Tests
 
-1. Build both `lazyhue` (v1) and `lazyhue2` (v2) binaries
+1. Build both `lazyhue` (v1) and `lazyhue` (v2) binaries
 2. Run side-by-side with same bridge
 3. Verify:
    - All panels render correctly
