@@ -558,6 +558,35 @@ func (b *Bridge) RenameDevice(deviceID, newName string) error {
 	return err
 }
 
+// IdentifyDevice triggers a visual identification sequence on a device.
+// The bridge performs Zigbee LED identification cycles for 5 seconds.
+// Lights perform one breathe cycle. Sensors perform LED identification cycles for 15 seconds.
+func (b *Bridge) IdentifyDevice(deviceID string) error {
+	b.mu.RLock()
+	client := b.client
+	b.mu.RUnlock()
+
+	if client == nil {
+		return ErrAuthFailed
+	}
+
+	deviceName := "Unknown"
+	if device, ok := b.state.GetDevice(deviceID); ok {
+		deviceName = b.state.GetDeviceName(device)
+	}
+	b.logRequest(fmt.Sprintf("%s: identify", deviceName))
+
+	action := hueclient.DevicePutIdentifyAction("identify")
+	_, err := client.UpdateDevice(context.Background(), deviceID, hueclient.UpdateDeviceJSONRequestBody{
+		Identify: &struct {
+			Action *hueclient.DevicePutIdentifyAction `json:"action,omitempty"`
+		}{
+			Action: &action,
+		},
+	})
+	return err
+}
+
 // RenameRoom renames a room.
 func (b *Bridge) RenameRoom(roomID, newName string) error {
 	b.mu.RLock()

@@ -1055,6 +1055,31 @@ func (m *Model) handleNewFieldChange(msg field.FieldChangedMsg) {
 			}
 			return
 		}
+	} else if strings.HasPrefix(msg.FieldID, "bridge-name:") {
+		deviceID := strings.TrimPrefix(msg.FieldID, "bridge-name:")
+		if v, ok := msg.Value.(field.TextValue); ok {
+			m.status = fmt.Sprintf("Renaming bridge to \"%s\"", v.Text)
+			err = bridge.RenameDevice(deviceID, v.Text)
+			// Don't call updateDetailContent - SSE event will refresh UI
+			if err != nil {
+				m.status = fmt.Sprintf("Error: %v", err)
+			}
+			return
+		}
+	} else if strings.HasPrefix(msg.FieldID, "bridge-identify:") {
+		deviceID := strings.TrimPrefix(msg.FieldID, "bridge-identify:")
+		if v, ok := msg.Value.(field.ToggleValue); ok && v.On {
+			m.status = "Identifying bridge..."
+			err = bridge.IdentifyDevice(deviceID)
+			if err != nil {
+				m.status = fmt.Sprintf("Error: %v", err)
+			} else {
+				m.status = "Bridge identification triggered"
+			}
+			// Refresh to reset the toggle to off
+			m.updateDetailContent()
+			return
+		}
 	} else if strings.HasPrefix(msg.FieldID, "device-name:") {
 		deviceID := strings.TrimPrefix(msg.FieldID, "device-name:")
 		if v, ok := msg.Value.(field.TextValue); ok {
@@ -2245,6 +2270,52 @@ func (m *Model) buildBridgeGridRows(bridgeID string) []gridlayout.GridRow {
 	}
 
 	state := bridge.GetState()
+
+	// Controls section - editable fields
+	if state != nil {
+		if bridgeDevice, ok := state.GetBridgeDevice(); ok {
+			deviceID := ""
+			if bridgeDevice.Id != nil {
+				deviceID = *bridgeDevice.Id
+			}
+
+			controlsHeader := field.NewHeaderComponent("controls-header", "Controls", &m.styles, m.zones)
+			rows = append(rows, gridlayout.GridRow{
+				Type:    gridlayout.RowTypeSection,
+				Section: controlsHeader,
+			})
+
+			// Name field
+			if bridgeDevice.Metadata != nil && bridgeDevice.Metadata.Name != nil && deviceID != "" {
+				textInput := field.NewTextComponent(
+					"bridge-name:"+deviceID, "Name", *bridgeDevice.Metadata.Name,
+					&m.styles, m.zones,
+				)
+				rows = append(rows, gridlayout.GridRow{
+					Type: gridlayout.RowTypeNormal,
+					Cells: []gridlayout.GridCell{
+						{Component: gridlayout.NewLabelWithWidth("Name", infoLabelWidth)},
+						{Component: textInput},
+					},
+				})
+			}
+
+			// Identify toggle
+			if deviceID != "" {
+				identifyToggle := field.NewToggleComponent(
+					"bridge-identify:"+deviceID, "Identify", false,
+					&m.styles, m.zones,
+				)
+				rows = append(rows, gridlayout.GridRow{
+					Type: gridlayout.RowTypeNormal,
+					Cells: []gridlayout.GridCell{
+						{Component: gridlayout.NewLabelWithWidth("Identify", infoLabelWidth)},
+						{Component: identifyToggle},
+					},
+				})
+			}
+		}
+	}
 
 	// Connection section
 	connHeader := field.NewHeaderComponent("conn-header", "Connection", &m.styles, m.zones)
