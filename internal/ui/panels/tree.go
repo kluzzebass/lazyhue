@@ -32,14 +32,15 @@ func splitLabelCount(label string) (base, count string) {
 
 // TreeNode represents a node in the hierarchical tree.
 type TreeNode struct {
-	ID          string      // Unique identifier for the node
-	Label       string      // Display label
-	GroupSuffix string      // Optional group suffix like "(Room)" - rendered in secondary color
-	BridgeSuffix string     // Optional bridge suffix like "[Bridge]" - rendered dimmed
-	Item        *EntityItem // nil for group headers/folders
-	Children    []*TreeNode // Child nodes
-	Expanded    bool        // Whether this node's children are visible
-	Depth       int         // Nesting depth (0 = root)
+	ID           string      // Unique identifier for the node
+	Label        string      // Display label
+	GroupSuffix  string      // Optional group suffix like "(Room)" - rendered in secondary color
+	GroupType    EntityType  // Type of group (EntityRoom or EntityZone) for suffix coloring
+	BridgeSuffix string      // Optional bridge suffix like "[Bridge]" - rendered dimmed
+	Item         *EntityItem // nil for group headers/folders
+	Children     []*TreeNode // Child nodes
+	Expanded     bool        // Whether this node's children are visible
+	Depth        int         // Nesting depth (0 = root)
 }
 
 // FilterValue implements list.Item for TreeNode.
@@ -87,6 +88,8 @@ func (d TreeDelegate) getEntityColor(entityType EntityType) color.Color {
 		return d.Styles.Theme.EntityDevice
 	case EntityScene, EntitySmartScene:
 		return d.Styles.Theme.EntityScene
+	case EntityZoneScene, EntityZoneSmartScene:
+		return d.Styles.Theme.EntityZoneScene
 	case EntityEntertainment:
 		return d.Styles.Theme.EntityEntertainment
 	// Category folders use neutral white
@@ -178,7 +181,12 @@ func (d TreeDelegate) Render(w io.Writer, m list.Model, index int, item list.Ite
 		// Group (room/zone) suffix - dimmed brackets, entity color content
 		// GroupSuffix is "(RoomName)" so strip the parens and re-add as brackets with styling
 		content := strings.TrimPrefix(strings.TrimSuffix(node.GroupSuffix, ")"), "(")
-		groupStyle := lipgloss.NewStyle().Foreground(d.Styles.Theme.EntityRoom)
+		// Use GroupType to determine color (default to room if not set)
+		groupColor := d.Styles.Theme.EntityRoom
+		if node.GroupType == EntityZone {
+			groupColor = d.Styles.Theme.EntityZone
+		}
+		groupStyle := lipgloss.NewStyle().Foreground(groupColor)
 		suffix += " " + d.Styles.Dimmed.Render("[") + groupStyle.Render(content) + d.Styles.Dimmed.Render("]")
 	}
 	if node.BridgeSuffix != "" {

@@ -14,6 +14,8 @@ const (
 	EntityLight
 	EntityScene
 	EntitySmartScene
+	EntityZoneScene      // Scene belonging to a zone
+	EntityZoneSmartScene // Smart scene belonging to a zone
 	EntityDevice
 	EntityEntertainment
 	EntityBridge
@@ -39,6 +41,10 @@ func (t EntityType) String() string {
 		return "Scene"
 	case EntitySmartScene:
 		return "Smart Scene"
+	case EntityZoneScene:
+		return "Zone Scene"
+	case EntityZoneSmartScene:
+		return "Zone Smart Scene"
 	case EntityDevice:
 		return "Device"
 	case EntityEntertainment:

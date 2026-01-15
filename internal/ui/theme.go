@@ -41,6 +41,7 @@ type Theme struct {
 	EntityZone          color.Color
 	EntityDevice        color.Color
 	EntityScene         color.Color
+	EntityZoneScene     color.Color
 	EntityEntertainment color.Color
 }
 
@@ -79,6 +80,7 @@ func DefaultTheme() Theme {
 		EntityZone:          lipgloss.Color("#C8A8E8"), // Soft lavender
 		EntityDevice:        lipgloss.Color("#A8E8E8"), // Soft cyan/teal
 		EntityScene:         lipgloss.Color("#E8A8C8"), // Soft rose/pink
+		EntityZoneScene:     lipgloss.Color("#D8A8E8"), // Soft orchid/purple-pink (zone scenes)
 		EntityEntertainment: lipgloss.Color("#E8D8A8"), // Soft warm sand
 	}
 }

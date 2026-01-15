@@ -507,7 +507,7 @@ func (m *Model) buildBridgeChildren(bridgeNode *panels.TreeNode, state *hue.Brid
 						Item: &panels.EntityItem{
 							ID:       sceneID,
 							Name:     sceneName,
-							Type:     panels.EntityScene,
+							Type:     panels.EntityZoneScene,
 							BridgeID: bridgeID,
 						},
 					})
@@ -549,7 +549,7 @@ func (m *Model) buildBridgeChildren(bridgeNode *panels.TreeNode, state *hue.Brid
 						Item: &panels.EntityItem{
 							ID:       sceneID,
 							Name:     sceneName,
-							Type:     panels.EntitySmartScene,
+							Type:     panels.EntityZoneSmartScene,
 							IsOn:     isActive,
 							BridgeID: bridgeID,
 						},
@@ -941,14 +941,17 @@ func (m *Model) buildScenesTree(_ *hue.BridgeState) {
 				id = *scene.Id
 			}
 
-			// Get room/zone name for the scene
+			// Get room/zone name for the scene and track the type
 			groupName := ""
+			groupType := panels.EntityRoom // Default to room
 			if scene.Group != nil && scene.Group.Rid != nil {
 				groupID := *scene.Group.Rid
 				if room, ok := state.GetRoom(groupID); ok {
 					groupName = state.GetRoomName(room)
+					groupType = panels.EntityRoom
 				} else if zone, ok := state.GetZone(groupID); ok {
 					groupName = state.GetRoomName(zone)
+					groupType = panels.EntityZone
 				}
 			}
 
@@ -957,17 +960,24 @@ func (m *Model) buildScenesTree(_ *hue.BridgeState) {
 				groupSuffix = "(" + groupName + ")"
 			}
 
+			// Use zone scene type if it belongs to a zone
+			sceneType := panels.EntityScene
+			if groupType == panels.EntityZone {
+				sceneType = panels.EntityZoneScene
+			}
+
 			sceneNodes = append(sceneNodes, sceneNode{
 				name: name,
 				node: &panels.TreeNode{
 					ID:          nodeID(bridge.Info.ID, id),
 					Label:       name,
 					GroupSuffix: groupSuffix,
+					GroupType:   groupType,
 					Depth:       1,
 					Item: &panels.EntityItem{
 						ID:       id,
 						Name:     name,
-						Type:     panels.EntityScene,
+						Type:     sceneType,
 						BridgeID: bridge.Info.ID,
 					},
 				},
@@ -982,14 +992,17 @@ func (m *Model) buildScenesTree(_ *hue.BridgeState) {
 				id = *scene.Id
 			}
 
-			// Get room/zone name for the smart scene
+			// Get room/zone name for the smart scene and track the type
 			groupName := ""
+			groupType := panels.EntityRoom // Default to room
 			if scene.Group.Rid != nil {
 				groupID := *scene.Group.Rid
 				if room, ok := state.GetRoom(groupID); ok {
 					groupName = state.GetRoomName(room)
+					groupType = panels.EntityRoom
 				} else if zone, ok := state.GetZone(groupID); ok {
 					groupName = state.GetRoomName(zone)
+					groupType = panels.EntityZone
 				}
 			}
 
@@ -1000,17 +1013,24 @@ func (m *Model) buildScenesTree(_ *hue.BridgeState) {
 
 			isActive := scene.State == "active"
 
+			// Use zone smart scene type if it belongs to a zone
+			smartSceneType := panels.EntitySmartScene
+			if groupType == panels.EntityZone {
+				smartSceneType = panels.EntityZoneSmartScene
+			}
+
 			sceneNodes = append(sceneNodes, sceneNode{
 				name: name,
 				node: &panels.TreeNode{
 					ID:          nodeID(bridge.Info.ID, id),
 					Label:       name,
 					GroupSuffix: groupSuffix,
+					GroupType:   groupType,
 					Depth:       1,
 					Item: &panels.EntityItem{
 						ID:       id,
 						Name:     name,
-						Type:     panels.EntitySmartScene,
+						Type:     smartSceneType,
 						IsOn:     isActive,
 						BridgeID: bridge.Info.ID,
 					},
