@@ -1605,10 +1605,9 @@ func renderEvent(styles *ui.Styles, width int, base baseEvent, name, details, in
 		bridgeStr = styles.Dimmed.Render("["+base.bridgeName+"]") + " "
 	}
 
-	// Resource type with entity color
-	resourceTypeColor := getResourceTypeColor(styles, base.resourceType)
-	resourceTypeStyle := lipgloss.NewStyle().Foreground(resourceTypeColor)
-	resourceTypeStr := resourceTypeStyle.Render(base.resourceType)
+	// Entity name with entity color (the actual name like "Office Shelf Corner")
+	entityColor := getResourceTypeColor(styles, base.resourceType)
+	entityStyle := lipgloss.NewStyle().Foreground(entityColor)
 
 	var line string
 	if name != "" {
@@ -1618,8 +1617,8 @@ func renderEvent(styles *ui.Styles, width int, base baseEvent, name, details, in
 				typeIndicator,
 				bridgeStr,
 				indicator,
-				resourceTypeStr,
-				name,
+				base.resourceType,
+				entityStyle.Render(name),
 				details)
 		} else {
 			line = fmt.Sprintf("%s %s %s%s%s %s",
@@ -1627,8 +1626,8 @@ func renderEvent(styles *ui.Styles, width int, base baseEvent, name, details, in
 				typeIndicator,
 				bridgeStr,
 				indicator,
-				resourceTypeStr,
-				name)
+				base.resourceType,
+				entityStyle.Render(name))
 		}
 	} else {
 		if details != "" {
@@ -1637,7 +1636,7 @@ func renderEvent(styles *ui.Styles, width int, base baseEvent, name, details, in
 				typeIndicator,
 				bridgeStr,
 				indicator,
-				resourceTypeStr,
+				base.resourceType,
 				details)
 		} else {
 			line = fmt.Sprintf("%s %s %s%s%s update",
@@ -1645,7 +1644,7 @@ func renderEvent(styles *ui.Styles, width int, base baseEvent, name, details, in
 				typeIndicator,
 				bridgeStr,
 				indicator,
-				resourceTypeStr)
+				base.resourceType)
 		}
 	}
 
