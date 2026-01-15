@@ -955,50 +955,48 @@ func (m *Model) renderPanelHeader(width int, keyStr, title string, borderColor c
 
 // buildLightGridRows builds grid rows for a light's full details panel.
 // This uses the Grid layout with sections for product info, controls, state, etc.
+// Sections are ordered by immediacy: Controls > Settings > Info > Technical
 func (m *Model) buildLightGridRows(light hueclient.LightGet) {
 	var rows []gridlayout.GridRow
 
 	// Get owning device for product info
 	device := m.getDeviceForLight(light)
 
-	// 1. Controls section (editable) - most important, at the top
+	// 1. Controls section - instant adjustments (power, brightness, color, effects, identify)
 	rows = append(rows, m.buildControlsRows(light)...)
 
-	// 2. Power-on Behavior section (editable)
-	rows = append(rows, m.buildPowerupRows(light)...)
+	// 2. Settings section - persistent configuration (name, power-on behavior)
+	rows = append(rows, m.buildLightSettingsRows(light, device)...)
 
-	// 3. State Info section
+	// 3. State Info section - current readings
 	rows = append(rows, m.buildStateRows(light)...)
 
-	// 4. Dynamics section
-	rows = append(rows, m.buildDynamicsRows(light)...)
-
-	// 5. Product Info section
+	// 4. Product Info section
 	rows = append(rows, m.buildProductInfoRows(device)...)
 
-	// 6. Classification section
+	// 5. Classification section
 	rows = append(rows, m.buildClassificationRows(light, device)...)
 
-	// 7. Name section (editable)
-	rows = append(rows, m.buildNameRows(light, device)...)
+	// 6. Dynamics section
+	rows = append(rows, m.buildDynamicsRows(light)...)
 
-	// 8. IDs section
-	rows = append(rows, m.buildIDsRows(light)...)
-
-	// 9. Capabilities section
+	// 7. Capabilities section
 	rows = append(rows, m.buildCapabilitiesRows(light)...)
 
-	// 10. Effects list section
+	// 8. Effects list section
 	rows = append(rows, m.buildEffectsListRows(light)...)
 
-	// 11. Gradient section
+	// 9. Gradient section
 	rows = append(rows, m.buildGradientRows(light)...)
 
-	// 12. Signaling section
+	// 10. Signaling section
 	rows = append(rows, m.buildSignalingRows(light)...)
 
-	// 13. Device Services section
+	// 11. Device Services section
 	rows = append(rows, m.buildDeviceServicesRows(light, device)...)
+
+	// 12. IDs section - least urgent, at the end
+	rows = append(rows, m.buildIDsRows(light)...)
 
 	m.lightGrid.SetRows(rows)
 }
@@ -1162,6 +1160,37 @@ func (m *Model) handleNewFieldChange(msg field.FieldChangedMsg) {
 				m.status = fmt.Sprintf("Error: %v", err)
 			}
 			return
+		}
+	} else if strings.HasPrefix(msg.FieldID, "scene-recall:") {
+		sceneID := strings.TrimPrefix(msg.FieldID, "scene-recall:")
+		if _, ok := msg.Value.(field.ButtonValue); ok {
+			m.status = "Activating scene..."
+			err = bridge.RecallScene(sceneID)
+			if err == nil {
+				m.status = "Scene activated"
+			}
+		}
+	} else if strings.HasPrefix(msg.FieldID, "room-power:") || strings.HasPrefix(msg.FieldID, "zone-power:") {
+		// Room or zone grouped light power control
+		var glID string
+		if strings.HasPrefix(msg.FieldID, "room-power:") {
+			glID = strings.TrimPrefix(msg.FieldID, "room-power:")
+		} else {
+			glID = strings.TrimPrefix(msg.FieldID, "zone-power:")
+		}
+		if v, ok := msg.Value.(field.ToggleValue); ok {
+			err = bridge.SetGroupedLightOn(glID, v.On)
+		}
+	} else if strings.HasPrefix(msg.FieldID, "room-brightness:") || strings.HasPrefix(msg.FieldID, "zone-brightness:") {
+		// Room or zone grouped light brightness control
+		var glID string
+		if strings.HasPrefix(msg.FieldID, "room-brightness:") {
+			glID = strings.TrimPrefix(msg.FieldID, "room-brightness:")
+		} else {
+			glID = strings.TrimPrefix(msg.FieldID, "zone-brightness:")
+		}
+		if v, ok := msg.Value.(field.SliderValue); ok {
+			err = bridge.SetGroupedLightBrightness(glID, float64(v.Value))
 		}
 	} else {
 		// Handle regular fields
@@ -1344,7 +1373,86 @@ func (m *Model) buildClassificationRows(light hueclient.LightGet, device *huecli
 	return rows
 }
 
-// buildNameRows builds rows for the name section.
+// buildLightSettingsRows builds rows for the light settings section (name + power-on behavior).
+func (m *Model) buildLightSettingsRows(light hueclient.LightGet, device *hueclient.DeviceGet) []gridlayout.GridRow {
+	var rows []gridlayout.GridRow
+
+	// Section header
+	header := field.NewHeaderComponent("settings-header", "Settings", &m.styles, m.zones)
+	rows = append(rows, gridlayout.GridRow{
+		Type:    gridlayout.RowTypeSection,
+		Section: header,
+	})
+
+	// Device name (editable)
+	if device != nil && device.Metadata != nil && device.Metadata.Name != nil {
+		deviceID := ""
+		if device.Id != nil {
+			deviceID = *device.Id
+		}
+
+		textInput := field.NewTextComponent(
+			"name:"+deviceID, "Name", *device.Metadata.Name,
+			&m.styles, m.zones,
+		)
+		rows = append(rows, gridlayout.GridRow{
+			Type: gridlayout.RowTypeNormal,
+			Cells: []gridlayout.GridCell{
+				{Component: gridlayout.NewLabelWithWidth("Name", infoLabelWidth)},
+				{Component: textInput},
+			},
+		})
+	}
+
+	// Show alternate light name if different from device name
+	if light.Metadata != nil && light.Metadata.Name != nil {
+		altName := *light.Metadata.Name
+		currentName := ""
+		if device != nil && device.Metadata != nil && device.Metadata.Name != nil {
+			currentName = *device.Metadata.Name
+		}
+		if altName != currentName {
+			dimStyle := m.styles.Dimmed
+			rows = append(rows, gridlayout.NewStyledInfoRow("Alternate", altName, infoLabelWidth, dimStyle))
+		}
+	}
+
+	// Powerup preset (editable) - part of settings, not a separate section
+	if light.Powerup != nil && light.Powerup.Preset != nil {
+		presetKeys := getSortedPowerupPresets()
+		var options []field.Option
+		currentIndex := 0
+		currentPreset := string(*light.Powerup.Preset)
+
+		for i, key := range presetKeys {
+			displayName := hue.PowerupPresetDisplayNames[key]
+			options = append(options, field.Option{Label: displayName, Value: i})
+			if key == currentPreset {
+				currentIndex = i
+			}
+		}
+
+		lightID := ""
+		if light.Id != nil {
+			lightID = *light.Id
+		}
+
+		selectComp := field.NewSelectComponent(
+			"powerup-preset:"+lightID, "Power-on", currentIndex, options,
+			&m.styles, m.zones,
+		)
+		rows = append(rows, gridlayout.GridRow{
+			Type: gridlayout.RowTypeNormal,
+			Cells: []gridlayout.GridCell{
+				{Component: gridlayout.NewLabelWithWidth("Power-on", infoLabelWidth)},
+				{Component: selectComp},
+			},
+		})
+	}
+
+	return rows
+}
+
 func (m *Model) buildNameRows(light hueclient.LightGet, device *hueclient.DeviceGet) []gridlayout.GridRow {
 	var rows []gridlayout.GridRow
 
@@ -1846,6 +1954,7 @@ func (m *Model) buildDeviceServicesRows(light hueclient.LightGet, device *huecli
 }
 
 // buildRoomGridRows builds grid rows for a room or zone details panel.
+// Sections are ordered by immediacy: Controls > Settings > Status > Lists > IDs
 func (m *Model) buildRoomGridRows(room hueclient.RoomGet, isZone bool, state *hue.BridgeState) []gridlayout.GridRow {
 	var rows []gridlayout.GridRow
 
@@ -1858,11 +1967,61 @@ func (m *Model) buildRoomGridRows(room hueclient.RoomGet, isZone bool, state *hu
 		roomID = *room.Id
 	}
 
-	// Name section (editable)
-	nameHeader := field.NewHeaderComponent("name-header", "Name", &m.styles, m.zones)
+	lights := state.RoomLights(room)
+
+	// 1. Controls section - instant adjustments (grouped light power, brightness)
+	if gl, ok := state.RoomGroupedLight(room); ok {
+		controlsHeader := field.NewHeaderComponent("controls-header", "Controls", &m.styles, m.zones)
+		rows = append(rows, gridlayout.GridRow{
+			Type:    gridlayout.RowTypeSection,
+			Section: controlsHeader,
+		})
+
+		// Use different field ID prefix for rooms vs zones
+		fieldPrefix := "room-"
+		if isZone {
+			fieldPrefix = "zone-"
+		}
+
+		glID := ""
+		if gl.Id != nil {
+			glID = *gl.Id
+		}
+
+		// Power toggle
+		onValue := gl.On != nil && gl.On.On != nil && *gl.On.On
+		toggle := field.NewToggleComponent(fieldPrefix+"power:"+glID, "Power", onValue, &m.styles, m.zones)
+		toggle.SetLabels("On", "Off")
+		rows = append(rows, gridlayout.GridRow{
+			Type: gridlayout.RowTypeNormal,
+			Cells: []gridlayout.GridCell{
+				{Component: gridlayout.NewLabelWithWidth("Power", infoLabelWidth)},
+				{Component: toggle},
+			},
+		})
+
+		// Brightness slider
+		if gl.Dimming != nil && gl.Dimming.Brightness != nil {
+			brightness := int(*gl.Dimming.Brightness)
+			slider := field.NewBrightnessSliderComponent(
+				fieldPrefix+"brightness:"+glID, "Brightness", brightness,
+				&m.styles, m.zones,
+			)
+			rows = append(rows, gridlayout.GridRow{
+				Type: gridlayout.RowTypeNormal,
+				Cells: []gridlayout.GridCell{
+					{Component: gridlayout.NewLabelWithWidth("Brightness", infoLabelWidth)},
+					{Component: slider},
+				},
+			})
+		}
+	}
+
+	// 2. Settings section (name, archetype)
+	settingsHeader := field.NewHeaderComponent("settings-header", "Settings", &m.styles, m.zones)
 	rows = append(rows, gridlayout.GridRow{
 		Type:    gridlayout.RowTypeSection,
-		Section: nameHeader,
+		Section: settingsHeader,
 	})
 
 	if room.Metadata != nil && room.Metadata.Name != nil {
@@ -1883,28 +2042,6 @@ func (m *Model) buildRoomGridRows(room hueclient.RoomGet, isZone bool, state *hu
 				{Component: textInput},
 			},
 		})
-	}
-
-	// Status section
-	header := field.NewHeaderComponent("status-header", "Status", &m.styles, m.zones)
-	rows = append(rows, gridlayout.GridRow{
-		Type:    gridlayout.RowTypeSection,
-		Section: header,
-	})
-
-	lights := state.RoomLights(room)
-	onCount := 0
-	for _, l := range lights {
-		if panels.IsLightOn(l) {
-			onCount++
-		}
-	}
-	rows = append(rows, gridlayout.NewInfoRow("Lights", fmt.Sprintf("%d/%d on", onCount, len(lights)), infoLabelWidth))
-
-	if gl, ok := state.RoomGroupedLight(room); ok {
-		if gl.Dimming != nil && gl.Dimming.Brightness != nil {
-			rows = append(rows, gridlayout.NewInfoRow("Brightness", fmt.Sprintf("%.0f%%", *gl.Dimming.Brightness), infoLabelWidth))
-		}
 	}
 
 	// Archetype (editable)
@@ -1940,6 +2077,21 @@ func (m *Model) buildRoomGridRows(room hueclient.RoomGet, isZone bool, state *hu
 			},
 		})
 	}
+
+	// 3. Status section
+	statusHeader := field.NewHeaderComponent("status-header", "Status", &m.styles, m.zones)
+	rows = append(rows, gridlayout.GridRow{
+		Type:    gridlayout.RowTypeSection,
+		Section: statusHeader,
+	})
+
+	onCount := 0
+	for _, l := range lights {
+		if panels.IsLightOn(l) {
+			onCount++
+		}
+	}
+	rows = append(rows, gridlayout.NewInfoRow("Lights", fmt.Sprintf("%d/%d on", onCount, len(lights)), infoLabelWidth))
 
 	// Lights section
 	if len(lights) > 0 {
@@ -2051,6 +2203,7 @@ func (m *Model) buildRoomGridRows(room hueclient.RoomGet, isZone bool, state *hu
 }
 
 // buildSceneGridRows builds grid rows for a scene details panel.
+// Sections are ordered by immediacy: Controls > Settings > Info > Actions > IDs
 func (m *Model) buildSceneGridRows(scene hueclient.SceneGet, state *hue.BridgeState) []gridlayout.GridRow {
 	var rows []gridlayout.GridRow
 
@@ -2059,11 +2212,32 @@ func (m *Model) buildSceneGridRows(scene hueclient.SceneGet, state *hue.BridgeSt
 		sceneID = *scene.Id
 	}
 
-	// Name section (editable)
-	nameHeader := field.NewHeaderComponent("name-header", "Name", &m.styles, m.zones)
+	// 1. Controls section - instant action (recall/activate scene)
+	controlsHeader := field.NewHeaderComponent("controls-header", "Controls", &m.styles, m.zones)
 	rows = append(rows, gridlayout.GridRow{
 		Type:    gridlayout.RowTypeSection,
-		Section: nameHeader,
+		Section: controlsHeader,
+	})
+
+	if sceneID != "" {
+		activateBtn := field.NewButtonComponent(
+			"scene-recall:"+sceneID, "Activate", "Activate",
+			&m.styles, m.zones,
+		)
+		rows = append(rows, gridlayout.GridRow{
+			Type: gridlayout.RowTypeNormal,
+			Cells: []gridlayout.GridCell{
+				{Component: gridlayout.NewLabelWithWidth("Activate", infoLabelWidth)},
+				{Component: activateBtn},
+			},
+		})
+	}
+
+	// 2. Settings section (name)
+	settingsHeader := field.NewHeaderComponent("settings-header", "Settings", &m.styles, m.zones)
+	rows = append(rows, gridlayout.GridRow{
+		Type:    gridlayout.RowTypeSection,
+		Section: settingsHeader,
 	})
 
 	if scene.Metadata != nil && scene.Metadata.Name != nil {
@@ -2080,11 +2254,11 @@ func (m *Model) buildSceneGridRows(scene hueclient.SceneGet, state *hue.BridgeSt
 		})
 	}
 
-	// Status section
-	header := field.NewHeaderComponent("status-header", "Status", &m.styles, m.zones)
+	// 3. Info section (status, group, speed, etc.)
+	infoHeader := field.NewHeaderComponent("info-header", "Info", &m.styles, m.zones)
 	rows = append(rows, gridlayout.GridRow{
 		Type:    gridlayout.RowTypeSection,
-		Section: header,
+		Section: infoHeader,
 	})
 
 	if scene.Status != nil && scene.Status.Active != nil {
@@ -2093,7 +2267,7 @@ func (m *Model) buildSceneGridRows(scene hueclient.SceneGet, state *hue.BridgeSt
 		if status == "active" {
 			statusStyle = m.styles.Success
 		}
-		rows = append(rows, gridlayout.NewStyledInfoRow("Active", status, infoLabelWidth, statusStyle))
+		rows = append(rows, gridlayout.NewStyledInfoRow("Status", status, infoLabelWidth, statusStyle))
 	}
 
 	// Group (room/zone)
@@ -2186,6 +2360,7 @@ func (m *Model) buildSceneGridRows(scene hueclient.SceneGet, state *hue.BridgeSt
 }
 
 // buildDeviceGridRows builds grid rows for a device details panel.
+// Sections are ordered by immediacy: Controls > Settings > Sensors > Product > Zigbee > IDs
 func (m *Model) buildDeviceGridRows(device hueclient.DeviceGet, state *hue.BridgeState) []gridlayout.GridRow {
 	var rows []gridlayout.GridRow
 
@@ -2194,11 +2369,32 @@ func (m *Model) buildDeviceGridRows(device hueclient.DeviceGet, state *hue.Bridg
 		deviceID = *device.Id
 	}
 
-	// Name section (editable)
-	nameHeader := field.NewHeaderComponent("name-header", "Name", &m.styles, m.zones)
+	// 1. Controls section - instant actions (identify)
+	controlsHeader := field.NewHeaderComponent("controls-header", "Controls", &m.styles, m.zones)
 	rows = append(rows, gridlayout.GridRow{
 		Type:    gridlayout.RowTypeSection,
-		Section: nameHeader,
+		Section: controlsHeader,
+	})
+
+	if deviceID != "" {
+		identifyBtn := field.NewButtonComponent(
+			"identify:"+deviceID, "Identify", "Identify",
+			&m.styles, m.zones,
+		)
+		rows = append(rows, gridlayout.GridRow{
+			Type: gridlayout.RowTypeNormal,
+			Cells: []gridlayout.GridCell{
+				{Component: gridlayout.NewLabelWithWidth("Identify", infoLabelWidth)},
+				{Component: identifyBtn},
+			},
+		})
+	}
+
+	// 2. Settings section (name)
+	settingsHeader := field.NewHeaderComponent("settings-header", "Settings", &m.styles, m.zones)
+	rows = append(rows, gridlayout.GridRow{
+		Type:    gridlayout.RowTypeSection,
+		Section: settingsHeader,
 	})
 
 	if device.Metadata != nil && device.Metadata.Name != nil {
@@ -2215,22 +2411,7 @@ func (m *Model) buildDeviceGridRows(device hueclient.DeviceGet, state *hue.Bridg
 		})
 	}
 
-	// Identify button
-	if deviceID != "" {
-		identifyBtn := field.NewButtonComponent(
-			"identify:"+deviceID, "Identify", "Identify",
-			&m.styles, m.zones,
-		)
-		rows = append(rows, gridlayout.GridRow{
-			Type: gridlayout.RowTypeNormal,
-			Cells: []gridlayout.GridCell{
-				{Component: gridlayout.NewLabelWithWidth("Identify", infoLabelWidth)},
-				{Component: identifyBtn},
-			},
-		})
-	}
-
-	// Product section
+	// 3. Product section
 	if device.ProductData != nil {
 		pd := device.ProductData
 		header := field.NewHeaderComponent("product-header", "Product", &m.styles, m.zones)
@@ -2373,7 +2554,7 @@ func (m *Model) buildBridgeGridRows(bridgeID string) []gridlayout.GridRow {
 
 	state := bridge.GetState()
 
-	// Controls section - editable fields
+	// 1. Controls section - instant actions (identify)
 	if state != nil {
 		if bridgeDevice, ok := state.GetBridgeDevice(); ok {
 			deviceID := ""
@@ -2387,21 +2568,6 @@ func (m *Model) buildBridgeGridRows(bridgeID string) []gridlayout.GridRow {
 				Section: controlsHeader,
 			})
 
-			// Name field
-			if bridgeDevice.Metadata != nil && bridgeDevice.Metadata.Name != nil && deviceID != "" {
-				textInput := field.NewTextComponent(
-					"bridge-name:"+deviceID, "Name", *bridgeDevice.Metadata.Name,
-					&m.styles, m.zones,
-				)
-				rows = append(rows, gridlayout.GridRow{
-					Type: gridlayout.RowTypeNormal,
-					Cells: []gridlayout.GridCell{
-						{Component: gridlayout.NewLabelWithWidth("Name", infoLabelWidth)},
-						{Component: textInput},
-					},
-				})
-			}
-
 			// Identify button
 			if deviceID != "" {
 				identifyBtn := field.NewButtonComponent(
@@ -2413,6 +2579,28 @@ func (m *Model) buildBridgeGridRows(bridgeID string) []gridlayout.GridRow {
 					Cells: []gridlayout.GridCell{
 						{Component: gridlayout.NewLabelWithWidth("Identify", infoLabelWidth)},
 						{Component: identifyBtn},
+					},
+				})
+			}
+
+			// 2. Settings section (name)
+			settingsHeader := field.NewHeaderComponent("settings-header", "Settings", &m.styles, m.zones)
+			rows = append(rows, gridlayout.GridRow{
+				Type:    gridlayout.RowTypeSection,
+				Section: settingsHeader,
+			})
+
+			// Name field
+			if bridgeDevice.Metadata != nil && bridgeDevice.Metadata.Name != nil && deviceID != "" {
+				textInput := field.NewTextComponent(
+					"bridge-name:"+deviceID, "Name", *bridgeDevice.Metadata.Name,
+					&m.styles, m.zones,
+				)
+				rows = append(rows, gridlayout.GridRow{
+					Type: gridlayout.RowTypeNormal,
+					Cells: []gridlayout.GridCell{
+						{Component: gridlayout.NewLabelWithWidth("Name", infoLabelWidth)},
+						{Component: textInput},
 					},
 				})
 			}
