@@ -1599,10 +1599,10 @@ func renderEvent(styles *ui.Styles, width int, base baseEvent, name, details, in
 		indicator = styles.Dimmed.Render("○") + " "
 	}
 
-	// Bridge name with dimmed brackets
+	// Bridge name fully dimmed
 	bridgeStr := ""
 	if base.bridgeName != "" {
-		bridgeStr = styles.Dimmed.Render("[") + base.bridgeName + styles.Dimmed.Render("]") + " "
+		bridgeStr = styles.Dimmed.Render("["+base.bridgeName+"]") + " "
 	}
 
 	// Resource type with entity color
