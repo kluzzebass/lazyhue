@@ -656,6 +656,40 @@ func (s *BridgeState) ZoneScenes(zoneID string) []hueclient.SceneGet {
 	return s.RoomScenes(zoneID)
 }
 
+// RoomSmartScenes returns smart scenes belonging to a room, sorted by name.
+func (s *BridgeState) RoomSmartScenes(roomID string) []hueclient.SmartSceneGet {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	var scenes []hueclient.SmartSceneGet
+	for _, scene := range s.SmartScenes {
+		if scene.Group.Rid != nil && *scene.Group.Rid == roomID {
+			scenes = append(scenes, scene)
+		}
+	}
+
+	// Sort by name for stable ordering
+	sort.Slice(scenes, func(i, j int) bool {
+		nameI := ""
+		nameJ := ""
+		if scenes[i].Metadata.Name != nil {
+			nameI = *scenes[i].Metadata.Name
+		}
+		if scenes[j].Metadata.Name != nil {
+			nameJ = *scenes[j].Metadata.Name
+		}
+		return nameI < nameJ
+	})
+
+	return scenes
+}
+
+// ZoneSmartScenes returns smart scenes belonging to a zone, sorted by name.
+func (s *BridgeState) ZoneSmartScenes(zoneID string) []hueclient.SmartSceneGet {
+	// Zones use the same scene grouping as rooms
+	return s.RoomSmartScenes(zoneID)
+}
+
 // ZoneGroupedLight returns the grouped light for a zone.
 func (s *BridgeState) ZoneGroupedLight(zone hueclient.RoomGet) (hueclient.GroupedLightGet, bool) {
 	// Zones use the same services structure as rooms
