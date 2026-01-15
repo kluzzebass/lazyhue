@@ -36,11 +36,19 @@ A terminal UI for Philips Hue bridge management.
   - Scenes
 - [x] Text case transformations (`Ctrl+T` title case, `Ctrl+L` sentence case)
 
+### Room/Zone Management
+- [x] Create new room (`n` key)
+- [x] Create new zone (`N` key)
+- [x] Delete room/zone (`x` key)
+- [x] Room archetype selection
+- [x] Remove devices from room
+
 ### Light Control
 - [x] Toggle lights on/off (space)
 - [x] Turn on/off explicitly (`o`/`O`)
 - [x] Brightness up/down (`+`/`-`)
 - [x] Scene activation (Enter on scene)
+- [x] Gradient control for gradient-capable lights
 
 ### Device Configuration
 - [x] Motion sensor enable/disable
@@ -72,16 +80,6 @@ A terminal UI for Philips Hue bridge management.
 
 ## 📋 Planned Features
 
-### Light Control (Phase 2)
-- [x] Gradient control for gradient-capable lights
-
-### Room/Zone Management
-- [x] Create new room (`n` key)
-- [x] Create new zone (`N` key)
-- [x] Delete room/zone (`d` key)
-- [x] Room archetype selection (in create/edit dialog)
-- [x] Remove devices from room (`e` to edit)
-
 ### Scene Management
 - [ ] Create new scene
 - [ ] Delete scene
@@ -110,7 +108,6 @@ A terminal UI for Philips Hue bridge management.
 - [ ] Configurable keybindings
 - [ ] Column resizing
 - [ ] Export/import configuration
-- [ ] Notification sounds (optional)
 
 ---
 
@@ -123,13 +120,3 @@ A terminal UI for Philips Hue bridge management.
 - [ ] Integration with other smart home systems
 - [ ] Scripting/macro support
 - [ ] REST API mode (headless)
-
----
-
-## Technical Debt
-
-- [ ] Add comprehensive error handling
-- [ ] Add unit tests
-- [ ] Add integration tests
-- [ ] Improve documentation
-- [ ] Performance profiling for large setups
