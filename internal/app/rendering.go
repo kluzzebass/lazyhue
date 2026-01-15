@@ -1630,58 +1630,6 @@ func (m *Model) buildLightSettingsRows(light hueclient.LightGet, device *hueclie
 		})
 	}
 
-	// Room assignment dropdown (lights move with their device)
-	if deviceID != "" {
-		// Get state from the selected bridge
-		node := m.tree.SelectedNode()
-		if node != nil && node.Item != nil {
-			bridge := m.manager.GetBridge(node.Item.BridgeID)
-			if bridge != nil {
-				state := bridge.GetState()
-				if state != nil {
-					currentRoom, hasRoom := state.GetDeviceRoom(deviceID)
-					currentRoomID := ""
-					if hasRoom && currentRoom.Id != nil {
-						currentRoomID = *currentRoom.Id
-					}
-
-					// Build room options: "No Room" + all rooms
-					allRooms := state.AllRooms()
-					options := make([]field.Option, 0, len(allRooms)+1)
-					options = append(options, field.Option{Label: "No Room", Value: 0})
-					selectedIndex := 0
-
-					for i, room := range allRooms {
-						roomName := "Unknown"
-						roomID := ""
-						if room.Metadata != nil && room.Metadata.Name != nil {
-							roomName = *room.Metadata.Name
-						}
-						if room.Id != nil {
-							roomID = *room.Id
-						}
-						options = append(options, field.Option{Label: roomName, Value: i + 1})
-						if roomID == currentRoomID {
-							selectedIndex = i + 1
-						}
-					}
-
-					roomSelect := field.NewSelectComponent(
-						"light-room:"+deviceID, "Room", selectedIndex, options,
-						&m.styles, m.zones,
-					)
-					rows = append(rows, gridlayout.GridRow{
-						Type: gridlayout.RowTypeNormal,
-						Cells: []gridlayout.GridCell{
-							{Component: gridlayout.NewLabelWithWidth("Room", infoLabelWidth)},
-							{Component: roomSelect},
-						},
-					})
-				}
-			}
-		}
-	}
-
 	// Archetype (editable)
 	if device != nil && device.ProductData != nil && device.ProductData.ProductArchetype != nil {
 		deviceID := ""
@@ -1748,6 +1696,58 @@ func (m *Model) buildLightSettingsRows(light hueclient.LightGet, device *hueclie
 		})
 	}
 
+	// Room assignment dropdown (lights move with their device)
+	if deviceID != "" {
+		// Get state from the selected bridge
+		node := m.tree.SelectedNode()
+		if node != nil && node.Item != nil {
+			bridge := m.manager.GetBridge(node.Item.BridgeID)
+			if bridge != nil {
+				state := bridge.GetState()
+				if state != nil {
+					currentRoom, hasRoom := state.GetDeviceRoom(deviceID)
+					currentRoomID := ""
+					if hasRoom && currentRoom.Id != nil {
+						currentRoomID = *currentRoom.Id
+					}
+
+					// Build room options: "No Room" + all rooms
+					allRooms := state.AllRooms()
+					options := make([]field.Option, 0, len(allRooms)+1)
+					options = append(options, field.Option{Label: "No Room", Value: 0})
+					selectedIndex := 0
+
+					for i, room := range allRooms {
+						roomName := "Unknown"
+						roomID := ""
+						if room.Metadata != nil && room.Metadata.Name != nil {
+							roomName = *room.Metadata.Name
+						}
+						if room.Id != nil {
+							roomID = *room.Id
+						}
+						options = append(options, field.Option{Label: roomName, Value: i + 1})
+						if roomID == currentRoomID {
+							selectedIndex = i + 1
+						}
+					}
+
+					roomSelect := field.NewSelectComponent(
+						"light-room:"+deviceID, "Room", selectedIndex, options,
+						&m.styles, m.zones,
+					)
+					rows = append(rows, gridlayout.GridRow{
+						Type: gridlayout.RowTypeNormal,
+						Cells: []gridlayout.GridCell{
+							{Component: gridlayout.NewLabelWithWidth("Room", infoLabelWidth)},
+							{Component: roomSelect},
+						},
+					})
+				}
+			}
+		}
+	}
+
 	// Zone membership (checkboxes)
 	if light.Id != nil {
 		zoneNode := m.tree.SelectedNode()
@@ -1786,13 +1786,6 @@ func (m *Model) buildLightSettingsRows(light hueclient.LightGet, device *hueclie
 							}
 						}
 
-						// Add header for zones section
-						zonesHeader := field.NewHeaderComponent("zones-header", "Zones", &m.styles, m.zones)
-						rows = append(rows, gridlayout.GridRow{
-							Type:    gridlayout.RowTypeSection,
-							Section: zonesHeader,
-						})
-
 						// Add checkbox group for zones
 						zoneCheckbox := field.NewCheckboxComponent(
 							"light-zones:"+lightID, "Zones", selected, options, true,
@@ -1801,6 +1794,7 @@ func (m *Model) buildLightSettingsRows(light hueclient.LightGet, device *hueclie
 						rows = append(rows, gridlayout.GridRow{
 							Type: gridlayout.RowTypeNormal,
 							Cells: []gridlayout.GridCell{
+								{Component: gridlayout.NewLabelWithWidth("Zones", infoLabelWidth)},
 								{Component: zoneCheckbox},
 							},
 						})
@@ -2281,7 +2275,12 @@ func (m *Model) buildRoomGridRows(room hueclient.RoomGet, isZone bool, state *hu
 		roomID = *room.Id
 	}
 
-	lights := state.RoomLights(room)
+	var lights []hueclient.LightGet
+	if isZone {
+		lights = state.ZoneLights(room)
+	} else {
+		lights = state.RoomLights(room)
+	}
 
 	// 1. Controls section - instant adjustments (grouped light power, brightness)
 	if gl, ok := state.RoomGroupedLight(room); ok {
