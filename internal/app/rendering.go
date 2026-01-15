@@ -1179,40 +1179,55 @@ func (m *Model) handleNewFieldChange(msg field.FieldChangedMsg) {
 				return
 			}
 		}
-	} else if strings.HasPrefix(msg.FieldID, "light-zone:") {
-		// Handle zone membership toggle - format is "light-zone:{lightID}:{zoneID}"
-		parts := strings.TrimPrefix(msg.FieldID, "light-zone:")
-		splitParts := strings.SplitN(parts, ":", 2)
-		if len(splitParts) == 2 {
-			lightID := splitParts[0]
-			zoneID := splitParts[1]
-			if v, ok := msg.Value.(field.ToggleValue); ok {
-				bridgeState := bridge.GetState()
-				zoneName := "zone"
-				if bridgeState != nil {
-					if zone, ok := bridgeState.GetZone(zoneID); ok {
-						zoneName = zone.RoomName("")
+	} else if strings.HasPrefix(msg.FieldID, "light-zones:") {
+		// Handle zone membership checkbox - format is "light-zones:{lightID}"
+		lightID := strings.TrimPrefix(msg.FieldID, "light-zones:")
+		if v, ok := msg.Value.(field.CheckboxValue); ok {
+			bridgeState := bridge.GetState()
+			if bridgeState != nil {
+				allZones := bridgeState.AllZones()
+				currentZones := bridgeState.GetLightZones(lightID)
+
+				// Build current zone membership set
+				currentZoneIDs := make(map[string]bool)
+				for _, zone := range currentZones {
+					if zone.Id != nil {
+						currentZoneIDs[*zone.Id] = true
 					}
 				}
 
-				if v.On {
-					m.status = fmt.Sprintf("Adding light to %s...", zoneName)
-					err = bridge.AddLightToZone(lightID, zoneID)
-					if err == nil {
-						m.status = fmt.Sprintf("Light added to %s", zoneName)
+				// Process changes
+				var added, removed int
+				for i, zone := range allZones {
+					if zone.Id == nil {
+						continue
 					}
-				} else {
-					m.status = fmt.Sprintf("Removing light from %s...", zoneName)
-					err = bridge.RemoveLightFromZone(lightID, zoneID)
-					if err == nil {
-						m.status = fmt.Sprintf("Light removed from %s", zoneName)
+					zoneID := *zone.Id
+					wasInZone := currentZoneIDs[zoneID]
+					nowInZone := v.Selected[i]
+
+					if nowInZone && !wasInZone {
+						// Add to zone
+						if err = bridge.AddLightToZone(lightID, zoneID); err != nil {
+							m.status = fmt.Sprintf("Error: %v", err)
+							return
+						}
+						added++
+					} else if !nowInZone && wasInZone {
+						// Remove from zone
+						if err = bridge.RemoveLightFromZone(lightID, zoneID); err != nil {
+							m.status = fmt.Sprintf("Error: %v", err)
+							return
+						}
+						removed++
 					}
 				}
-				if err != nil {
-					m.status = fmt.Sprintf("Error: %v", err)
+
+				if added > 0 || removed > 0 {
+					m.status = fmt.Sprintf("Zone membership updated (+%d/-%d)", added, removed)
 				}
-				return
 			}
+			return
 		}
 	} else if strings.HasPrefix(msg.FieldID, "room-create-scene:") {
 		roomID := strings.TrimPrefix(msg.FieldID, "room-create-scene:")
@@ -1733,7 +1748,7 @@ func (m *Model) buildLightSettingsRows(light hueclient.LightGet, device *hueclie
 		})
 	}
 
-	// Zone membership (toggles for each zone)
+	// Zone membership (checkboxes)
 	if light.Id != nil {
 		zoneNode := m.tree.SelectedNode()
 		if zoneNode != nil && zoneNode.Item != nil {
@@ -1753,15 +1768,10 @@ func (m *Model) buildLightSettingsRows(light hueclient.LightGet, device *hueclie
 							}
 						}
 
-						// Add header for zones section
-						zonesHeader := field.NewHeaderComponent("zones-header", "Zones", &m.styles, m.zones)
-						rows = append(rows, gridlayout.GridRow{
-							Type:    gridlayout.RowTypeSection,
-							Section: zonesHeader,
-						})
-
-						// Add a toggle for each zone
-						for _, zone := range allZones {
+						// Build options and selected map for checkbox component
+						var options []field.Option
+						selected := make(map[int]bool)
+						for i, zone := range allZones {
 							zoneID := ""
 							zoneName := "Unknown"
 							if zone.Id != nil {
@@ -1770,20 +1780,30 @@ func (m *Model) buildLightSettingsRows(light hueclient.LightGet, device *hueclie
 							if zone.Metadata != nil && zone.Metadata.Name != nil {
 								zoneName = *zone.Metadata.Name
 							}
-
-							isInZone := lightZoneIDs[zoneID]
-							zoneToggle := field.NewToggleComponent(
-								"light-zone:"+lightID+":"+zoneID, zoneName, isInZone,
-								&m.styles, m.zones,
-							)
-							rows = append(rows, gridlayout.GridRow{
-								Type: gridlayout.RowTypeNormal,
-								Cells: []gridlayout.GridCell{
-									{Component: gridlayout.NewLabelWithWidth(zoneName, infoLabelWidth)},
-									{Component: zoneToggle},
-								},
-							})
+							options = append(options, field.Option{Label: zoneName, Value: i})
+							if lightZoneIDs[zoneID] {
+								selected[i] = true
+							}
 						}
+
+						// Add header for zones section
+						zonesHeader := field.NewHeaderComponent("zones-header", "Zones", &m.styles, m.zones)
+						rows = append(rows, gridlayout.GridRow{
+							Type:    gridlayout.RowTypeSection,
+							Section: zonesHeader,
+						})
+
+						// Add checkbox group for zones
+						zoneCheckbox := field.NewCheckboxComponent(
+							"light-zones:"+lightID, "Zones", selected, options, true,
+							&m.styles, m.zones,
+						)
+						rows = append(rows, gridlayout.GridRow{
+							Type: gridlayout.RowTypeNormal,
+							Cells: []gridlayout.GridCell{
+								{Component: zoneCheckbox},
+							},
+						})
 					}
 				}
 			}
