@@ -10,13 +10,16 @@ LazyHue is a terminal user interface (TUI) for managing Philips Hue bridges and 
 
 ```bash
 # Build
-go build -o lazyhue ./cmd/lazyhue
+just build
 
 # Run
-./lazyhue
+just run
 
-# Development: auto-restart on binary change (requires fswatch)
-./watch.sh ./lazyhue
+# Build and run
+just dev
+
+# Development: watch for changes and auto-rebuild/restart (requires fswatch)
+just watch
 ```
 
 ## Architecture

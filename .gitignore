@@ -7,7 +7,6 @@
 *.dll
 *.so
 *.dylib
-lazyhue
 
 # Test binary, built with `go test -c`
 *.test
@@ -35,3 +34,6 @@ go.work.sum
 
 # Binaries and logs
 *.log
+
+# Build directory
+build/

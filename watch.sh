@@ -1,24 +1,19 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-if [ "$#" -lt 1 ]; then
-  echo "usage: $0 <binary> [args...]"
-  exit 1
-fi
+# Build and watch for changes, restarting the TUI on rebuild
+# Requires: fswatch (brew install fswatch)
 
-bin="$1"
-shift
-args=("$@")
+bin="build/lazyhue"
 
-if [ ! -x "$bin" ]; then
-  echo "error: '$bin' is not executable"
-  exit 1
-fi
+build() {
+  go build -o "$bin" ./cmd/lazyhue
+}
 
 pid=
 
 start() {
-  "$bin" "${args[@]}" &
+  "$bin" &
   pid=$!
 }
 
@@ -29,10 +24,20 @@ stop() {
   fi
 }
 
-# start immediately
+trap stop EXIT
+
+# Initial build and start
+build
 start
 
-fswatch -o -l 0.2 "$bin" | while read _; do
+# Watch for Go file changes and rebuild
+fswatch -o -l 0.5 --include='\.go$' --exclude='.*' . | while read -r _; do
+  echo "Change detected, rebuilding..."
   stop
-  start
+  if build; then
+    echo "Build succeeded, restarting..."
+    start
+  else
+    echo "Build failed"
+  fi
 done
