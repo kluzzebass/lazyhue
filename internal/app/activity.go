@@ -3,6 +3,7 @@ package app
 import (
 	"encoding/json"
 	"fmt"
+	"image/color"
 	"math"
 	"strings"
 	"time"
@@ -1552,6 +1553,34 @@ func (e *BridgeHomeEvent) Render(styles *ui.Styles, width int) string {
 }
 
 // renderEvent is a helper function to render events with consistent formatting.
+// getResourceTypeColor returns the appropriate entity color for a resource type.
+func getResourceTypeColor(styles *ui.Styles, resourceType string) color.Color {
+	switch resourceType {
+	case "light":
+		return styles.Theme.EntityLight
+	case "grouped_light":
+		return styles.Theme.EntityRoom // grouped lights are room-level
+	case "room":
+		return styles.Theme.EntityRoom
+	case "zone":
+		return styles.Theme.EntityZone
+	case "scene":
+		return styles.Theme.EntityScene
+	case "smart_scene":
+		return styles.Theme.EntityScene // same color as regular scenes
+	case "device", "device_power", "zigbee_connectivity":
+		return styles.Theme.EntityDevice
+	case "bridge", "bridge_home":
+		return styles.Theme.EntityBridge
+	case "entertainment", "entertainment_configuration":
+		return styles.Theme.EntityEntertainment
+	case "motion", "light_level", "temperature":
+		return styles.Theme.EntityDevice // sensors are device-related
+	default:
+		return styles.Theme.TextMuted
+	}
+}
+
 func renderEvent(styles *ui.Styles, width int, base baseEvent, name, details, indicatorColor string, brightness float64, isOn bool) string {
 	timeStr := base.timestamp.Format("15:04:05")
 	typeStyle := lipgloss.NewStyle().Foreground(styles.Theme.Success)
@@ -1570,10 +1599,16 @@ func renderEvent(styles *ui.Styles, width int, base baseEvent, name, details, in
 		indicator = styles.Dimmed.Render("○") + " "
 	}
 
+	// Bridge name with dimmed brackets
 	bridgeStr := ""
 	if base.bridgeName != "" {
-		bridgeStr = styles.Dimmed.Render("["+base.bridgeName+"]") + " "
+		bridgeStr = styles.Dimmed.Render("[") + base.bridgeName + styles.Dimmed.Render("]") + " "
 	}
+
+	// Resource type with entity color
+	resourceTypeColor := getResourceTypeColor(styles, base.resourceType)
+	resourceTypeStyle := lipgloss.NewStyle().Foreground(resourceTypeColor)
+	resourceTypeStr := resourceTypeStyle.Render(base.resourceType)
 
 	nameStyle := lipgloss.NewStyle().Foreground(styles.Theme.TextMuted)
 
@@ -1585,7 +1620,7 @@ func renderEvent(styles *ui.Styles, width int, base baseEvent, name, details, in
 				typeIndicator,
 				bridgeStr,
 				indicator,
-				base.resourceType,
+				resourceTypeStr,
 				nameStyle.Render(name),
 				details)
 		} else {
@@ -1594,7 +1629,7 @@ func renderEvent(styles *ui.Styles, width int, base baseEvent, name, details, in
 				typeIndicator,
 				bridgeStr,
 				indicator,
-				base.resourceType,
+				resourceTypeStr,
 				nameStyle.Render(name))
 		}
 	} else {
@@ -1604,7 +1639,7 @@ func renderEvent(styles *ui.Styles, width int, base baseEvent, name, details, in
 				typeIndicator,
 				bridgeStr,
 				indicator,
-				base.resourceType,
+				resourceTypeStr,
 				details)
 		} else {
 			line = fmt.Sprintf("%s %s %s%s%s update",
@@ -1612,7 +1647,7 @@ func renderEvent(styles *ui.Styles, width int, base baseEvent, name, details, in
 				typeIndicator,
 				bridgeStr,
 				indicator,
-				base.resourceType)
+				resourceTypeStr)
 		}
 	}
 

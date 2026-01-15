@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"image/color"
 	"io"
+	"regexp"
 	"strings"
 
 	"github.com/charmbracelet/bubbles/v2/key"
@@ -15,6 +16,19 @@ import (
 
 	"github.com/kluzzebass/lazyhue/internal/ui"
 )
+
+// countSuffixPattern matches " (n)" at the end of labels where n is a number
+var countSuffixPattern = regexp.MustCompile(`^(.+?) \((\d+)\)$`)
+
+// splitLabelCount separates a label with a count suffix like "Rooms (3)"
+// into the base label "Rooms" and the count "3". Returns empty count if no match.
+func splitLabelCount(label string) (base, count string) {
+	matches := countSuffixPattern.FindStringSubmatch(label)
+	if matches == nil {
+		return label, ""
+	}
+	return matches[1], matches[2]
+}
 
 // TreeNode represents a node in the hierarchical tree.
 type TreeNode struct {
@@ -150,8 +164,15 @@ func (d TreeDelegate) Render(w io.Writer, m list.Model, index int, item list.Ite
 		}
 	}
 
-	// Build the label
-	label := node.Label
+	// Build the label - split off count suffix if present
+	baseLabel, countStr := splitLabelCount(node.Label)
+	label := baseLabel
+	countSuffix := ""
+	if countStr != "" {
+		// Format count with dimmed brackets: [n]
+		countSuffix = " " + d.Styles.Dimmed.Render("[") + countStr + d.Styles.Dimmed.Render("]")
+	}
+
 	suffix := ""
 	if node.GroupSuffix != "" {
 		// Group (room/zone) suffix in secondary color
@@ -163,14 +184,14 @@ func (d TreeDelegate) Render(w io.Writer, m list.Model, index int, item list.Ite
 		suffix += " " + d.Styles.Dimmed.Render(node.BridgeSuffix)
 	}
 	if isSelected {
-		label = d.Styles.Selected.Render(label)
+		label = d.Styles.Selected.Render(label) + countSuffix
 	} else if node.Item == nil {
 		// Group headers get a different style
-		label = d.Styles.Title.Render(label)
+		label = d.Styles.Title.Render(label) + countSuffix
 	} else {
 		// Apply entity type color to label
 		entityColor := d.getEntityColor(node.Item.Type)
-		label = lipgloss.NewStyle().Foreground(entityColor).Render(label)
+		label = lipgloss.NewStyle().Foreground(entityColor).Render(label) + countSuffix
 	}
 
 	// Compose the line
