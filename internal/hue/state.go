@@ -25,10 +25,7 @@ var EffectDisplayNames = map[string]string{
 
 // EffectDisplayName returns the user-friendly display name for an effect, or the raw name if unknown.
 func EffectDisplayName(effect string) string {
-	if name, ok := EffectDisplayNames[effect]; ok {
-		return name
-	}
-	return effect
+	return displayName(EffectDisplayNames, effect)
 }
 
 // SignalingModeDisplayNames maps Hue API signaling mode names to user-friendly display names.
@@ -41,10 +38,7 @@ var SignalingModeDisplayNames = map[string]string{
 
 // SignalingModeDisplayName returns the user-friendly display name for a signaling mode, or the raw name if unknown.
 func SignalingModeDisplayName(mode string) string {
-	if name, ok := SignalingModeDisplayNames[mode]; ok {
-		return name
-	}
-	return mode
+	return displayName(SignalingModeDisplayNames, mode)
 }
 
 // PowerupPresetDisplayNames maps Hue API power-on preset names to user-friendly display names.
@@ -57,10 +51,7 @@ var PowerupPresetDisplayNames = map[string]string{
 
 // PowerupPresetDisplayName returns the user-friendly display name for a power-on preset, or the raw name if unknown.
 func PowerupPresetDisplayName(preset string) string {
-	if name, ok := PowerupPresetDisplayNames[preset]; ok {
-		return name
-	}
-	return preset
+	return displayName(PowerupPresetDisplayNames, preset)
 }
 
 // DeviceServiceDisplayNames maps Hue API device service types to user-friendly display names.
@@ -113,10 +104,7 @@ var DeviceServiceDisplayNames = map[string]string{
 
 // DeviceServiceDisplayName returns the user-friendly display name for a device service type, or the raw name if unknown.
 func DeviceServiceDisplayName(serviceType string) string {
-	if name, ok := DeviceServiceDisplayNames[serviceType]; ok {
-		return name
-	}
-	return serviceType
+	return displayName(DeviceServiceDisplayNames, serviceType)
 }
 
 // ProductArchetypeDisplayNames maps Hue API product archetype names to user-friendly display names.
@@ -189,10 +177,7 @@ var ProductArchetypeDisplayNames = map[string]string{
 
 // ProductArchetypeDisplayName returns the user-friendly display name for a product archetype, or the raw name if unknown.
 func ProductArchetypeDisplayName(archetype string) string {
-	if name, ok := ProductArchetypeDisplayNames[archetype]; ok {
-		return name
-	}
-	return archetype
+	return displayName(ProductArchetypeDisplayNames, archetype)
 }
 
 // RoomArchetypeDisplayNames maps Hue API room archetype names to user-friendly display names.
@@ -241,10 +226,7 @@ var RoomArchetypeDisplayNames = map[string]string{
 
 // RoomArchetypeDisplayName returns the user-friendly display name for a room archetype.
 func RoomArchetypeDisplayName(archetype string) string {
-	if name, ok := RoomArchetypeDisplayNames[archetype]; ok {
-		return name
-	}
-	return archetype
+	return displayName(RoomArchetypeDisplayNames, archetype)
 }
 
 // RoomArchetypeList returns a sorted list of all room archetypes for use in selection UIs.
@@ -308,50 +290,32 @@ func NewBridgeState() *BridgeState {
 
 // GetLight returns a light by ID.
 func (s *BridgeState) GetLight(id string) (hueclient.LightGet, bool) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	l, ok := s.Lights[id]
-	return l, ok
+	return getFromMap(s, s.Lights, id)
 }
 
 // GetRoom returns a room by ID.
 func (s *BridgeState) GetRoom(id string) (hueclient.RoomGet, bool) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	r, ok := s.Rooms[id]
-	return r, ok
+	return getFromMap(s, s.Rooms, id)
 }
 
 // GetZone returns a zone by ID.
 func (s *BridgeState) GetZone(id string) (hueclient.RoomGet, bool) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	z, ok := s.Zones[id]
-	return z, ok
+	return getFromMap(s, s.Zones, id)
 }
 
 // GetGroupedLight returns a grouped light by ID.
 func (s *BridgeState) GetGroupedLight(id string) (hueclient.GroupedLightGet, bool) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	g, ok := s.GroupedLights[id]
-	return g, ok
+	return getFromMap(s, s.GroupedLights, id)
 }
 
 // GetScene returns a scene by ID.
 func (s *BridgeState) GetScene(id string) (hueclient.SceneGet, bool) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	sc, ok := s.Scenes[id]
-	return sc, ok
+	return getFromMap(s, s.Scenes, id)
 }
 
 // GetDevice returns a device by ID.
 func (s *BridgeState) GetDevice(id string) (hueclient.DeviceGet, bool) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	d, ok := s.Devices[id]
-	return d, ok
+	return getFromMap(s, s.Devices, id)
 }
 
 // DeleteScene removes a scene from the state.
@@ -363,10 +327,7 @@ func (s *BridgeState) DeleteScene(id string) {
 
 // GetSmartScene returns a smart scene by ID.
 func (s *BridgeState) GetSmartScene(id string) (hueclient.SmartSceneGet, bool) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	sc, ok := s.SmartScenes[id]
-	return sc, ok
+	return getFromMap(s, s.SmartScenes, id)
 }
 
 // GetSmartSceneName returns the name of a smart scene.
@@ -379,9 +340,7 @@ func (s *BridgeState) GetSmartSceneName(scene hueclient.SmartSceneGet) string {
 
 // UpdateSmartScenes replaces the smart scenes cache.
 func (s *BridgeState) UpdateSmartScenes(scenes map[string]hueclient.SmartSceneGet) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.SmartScenes = scenes
+	updateMap(s, &s.SmartScenes, scenes)
 }
 
 // DeleteSmartScene removes a smart scene from the state.
@@ -393,21 +352,12 @@ func (s *BridgeState) DeleteSmartScene(id string) {
 
 // RemoveSmartScene removes a smart scene and returns whether it existed.
 func (s *BridgeState) RemoveSmartScene(id string) bool {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	if _, ok := s.SmartScenes[id]; ok {
-		delete(s.SmartScenes, id)
-		return true
-	}
-	return false
+	return removeFromMap(s, s.SmartScenes, id)
 }
 
 // AddSmartScene adds a smart scene to the state.
 func (s *BridgeState) AddSmartScene(id string, scene hueclient.SmartSceneGet) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.SmartScenes[id] = scene
+	addToMap(s, &s.SmartScenes, id, scene)
 }
 
 // AllSmartScenes returns all smart scenes, sorted by name.
@@ -844,16 +794,12 @@ func (s *BridgeState) AllScenes() []hueclient.SceneGet {
 
 // UpdateLights replaces the lights cache.
 func (s *BridgeState) UpdateLights(lights map[string]hueclient.LightGet) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.Lights = lights
+	updateMap(s, &s.Lights, lights)
 }
 
 // UpdateRooms replaces the rooms cache.
 func (s *BridgeState) UpdateRooms(rooms map[string]hueclient.RoomGet) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.Rooms = rooms
+	updateMap(s, &s.Rooms, rooms)
 }
 
 // ApplyRoomMetadata applies a metadata update (e.g., rename, archetype change) to a room.
@@ -916,9 +862,7 @@ func (s *BridgeState) ApplyRoomChildren(id string, children []struct {
 
 // UpdateZones replaces the zones cache.
 func (s *BridgeState) UpdateZones(zones map[string]hueclient.RoomGet) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.Zones = zones
+	updateMap(s, &s.Zones, zones)
 }
 
 // ApplyZoneMetadata applies a metadata update (e.g., rename, archetype change) to a zone.
@@ -981,16 +925,12 @@ func (s *BridgeState) ApplyZoneServices(id string, services []struct {
 
 // UpdateGroupedLights replaces the grouped lights cache.
 func (s *BridgeState) UpdateGroupedLights(grouped map[string]hueclient.GroupedLightGet) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.GroupedLights = grouped
+	updateMap(s, &s.GroupedLights, grouped)
 }
 
 // UpdateScenes replaces the scenes cache.
 func (s *BridgeState) UpdateScenes(scenes map[string]hueclient.SceneGet) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.Scenes = scenes
+	updateMap(s, &s.Scenes, scenes)
 }
 
 // ApplySceneMetadata applies a metadata update (e.g., rename) to a scene.
@@ -1013,9 +953,7 @@ func (s *BridgeState) ApplySceneMetadata(id string, name *string) bool {
 
 // UpdateDevices replaces the devices cache.
 func (s *BridgeState) UpdateDevices(devices map[string]hueclient.DeviceGet) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.Devices = devices
+	updateMap(s, &s.Devices, devices)
 }
 
 // ApplyDeviceMetadata applies a metadata update (e.g., rename) to a device.
@@ -1038,149 +976,72 @@ func (s *BridgeState) ApplyDeviceMetadata(id string, name *string) bool {
 
 // RemoveLight removes a light from the cache.
 func (s *BridgeState) RemoveLight(id string) bool {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	if _, ok := s.Lights[id]; ok {
-		delete(s.Lights, id)
-		return true
-	}
-	return false
+	return removeFromMap(s, s.Lights, id)
 }
 
 // RemoveRoom removes a room from the cache.
 func (s *BridgeState) RemoveRoom(id string) bool {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	if _, ok := s.Rooms[id]; ok {
-		delete(s.Rooms, id)
-		return true
-	}
-	return false
+	return removeFromMap(s, s.Rooms, id)
 }
 
 // RemoveZone removes a zone from the cache.
 func (s *BridgeState) RemoveZone(id string) bool {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	if _, ok := s.Zones[id]; ok {
-		delete(s.Zones, id)
-		return true
-	}
-	return false
+	return removeFromMap(s, s.Zones, id)
 }
 
 // RemoveScene removes a scene from the cache.
 func (s *BridgeState) RemoveScene(id string) bool {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	if _, ok := s.Scenes[id]; ok {
-		delete(s.Scenes, id)
-		return true
-	}
-	return false
+	return removeFromMap(s, s.Scenes, id)
 }
 
 // RemoveDevice removes a device from the cache.
 func (s *BridgeState) RemoveDevice(id string) bool {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	if _, ok := s.Devices[id]; ok {
-		delete(s.Devices, id)
-		return true
-	}
-	return false
+	return removeFromMap(s, s.Devices, id)
 }
 
 // RemoveGroupedLight removes a grouped light from the cache.
 func (s *BridgeState) RemoveGroupedLight(id string) bool {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	if _, ok := s.GroupedLights[id]; ok {
-		delete(s.GroupedLights, id)
-		return true
-	}
-	return false
+	return removeFromMap(s, s.GroupedLights, id)
 }
 
 // AddRoom adds a room to the cache.
 func (s *BridgeState) AddRoom(id string, room hueclient.RoomGet) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.Rooms == nil {
-		s.Rooms = make(map[string]hueclient.RoomGet)
-	}
-	s.Rooms[id] = room
+	addToMap(s, &s.Rooms, id, room)
 }
 
 // AddZone adds a zone to the cache.
 func (s *BridgeState) AddZone(id string, zone hueclient.RoomGet) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.Zones == nil {
-		s.Zones = make(map[string]hueclient.RoomGet)
-	}
-	s.Zones[id] = zone
+	addToMap(s, &s.Zones, id, zone)
 }
 
 // AddScene adds a scene to the cache.
 func (s *BridgeState) AddScene(id string, scene hueclient.SceneGet) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.Scenes == nil {
-		s.Scenes = make(map[string]hueclient.SceneGet)
-	}
-	s.Scenes[id] = scene
+	addToMap(s, &s.Scenes, id, scene)
 }
 
 // AddGroupedLight adds a grouped light to the cache.
 func (s *BridgeState) AddGroupedLight(id string, gl hueclient.GroupedLightGet) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.GroupedLights == nil {
-		s.GroupedLights = make(map[string]hueclient.GroupedLightGet)
-	}
-	s.GroupedLights[id] = gl
+	addToMap(s, &s.GroupedLights, id, gl)
 }
 
 // AddLight adds a light to the cache.
 func (s *BridgeState) AddLight(id string, light hueclient.LightGet) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.Lights == nil {
-		s.Lights = make(map[string]hueclient.LightGet)
-	}
-	s.Lights[id] = light
+	addToMap(s, &s.Lights, id, light)
 }
 
 // AddDevice adds a device to the cache.
 func (s *BridgeState) AddDevice(id string, device hueclient.DeviceGet) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.Devices == nil {
-		s.Devices = make(map[string]hueclient.DeviceGet)
-	}
-	s.Devices[id] = device
+	addToMap(s, &s.Devices, id, device)
 }
 
 // UpdateMotionSensors replaces the motion sensors cache.
 func (s *BridgeState) UpdateMotionSensors(sensors map[string]hueclient.MotionGet) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.MotionSensors = sensors
+	updateMap(s, &s.MotionSensors, sensors)
 }
 
 // GetMotionSensor returns a motion sensor by ID.
 func (s *BridgeState) GetMotionSensor(id string) (hueclient.MotionGet, bool) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	m, ok := s.MotionSensors[id]
-	return m, ok
+	return getFromMap(s, s.MotionSensors, id)
 }
 
 // GetDeviceMotionState returns true if the device has a motion sensor service that detects motion.
@@ -1471,54 +1332,37 @@ func (s *BridgeState) GetDeviceBattery(device hueclient.DeviceGet) (hasBattery b
 
 // UpdateTemperatures replaces the temperatures cache.
 func (s *BridgeState) UpdateTemperatures(temps map[string]hueclient.TemperatureGet) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.Temperatures = temps
+	updateMap(s, &s.Temperatures, temps)
 }
 
 // UpdateLightLevels replaces the light levels cache.
 func (s *BridgeState) UpdateLightLevels(levels map[string]hueclient.LightLevelGet) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.LightLevels = levels
+	updateMap(s, &s.LightLevels, levels)
 }
 
 // GetLightLevel returns a light level sensor reading by its service ID.
 func (s *BridgeState) GetLightLevel(id string) (hueclient.LightLevelGet, bool) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	ll, ok := s.LightLevels[id]
-	return ll, ok
+	return getFromMap(s, s.LightLevels, id)
 }
 
 // GetMotion returns a motion sensor reading by its service ID.
 func (s *BridgeState) GetMotion(id string) (hueclient.MotionGet, bool) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	m, ok := s.MotionSensors[id]
-	return m, ok
+	return getFromMap(s, s.MotionSensors, id)
 }
 
 // UpdateDevicePowers replaces the device powers cache.
 func (s *BridgeState) UpdateDevicePowers(powers map[string]hueclient.DevicePowerGet) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.DevicePowers = powers
+	updateMap(s, &s.DevicePowers, powers)
 }
 
 // UpdateEntertainmentConfigurations replaces entertainment configuration data.
 func (s *BridgeState) UpdateEntertainmentConfigurations(configs map[string]EntertainmentConfiguration) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.EntertainmentConfigurations = configs
+	updateMap(s, &s.EntertainmentConfigurations, configs)
 }
 
 // GetEntertainmentConfiguration returns an entertainment configuration by ID.
 func (s *BridgeState) GetEntertainmentConfiguration(id string) (EntertainmentConfiguration, bool) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	ent, ok := s.EntertainmentConfigurations[id]
-	return ent, ok
+	return getFromMap(s, s.EntertainmentConfigurations, id)
 }
 
 // UpdateWifiConnectivity replaces WiFi connectivity data.
@@ -1537,17 +1381,12 @@ func (s *BridgeState) GetWifiConnectivity() []WifiConnectivity {
 
 // UpdateZigbeeConnectivity replaces Zigbee connectivity data.
 func (s *BridgeState) UpdateZigbeeConnectivity(zigbee map[string]ZigbeeConnectivity) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.ZigbeeConnectivity = zigbee
+	updateMap(s, &s.ZigbeeConnectivity, zigbee)
 }
 
 // GetZigbeeConnectivity returns a Zigbee connectivity resource by ID.
 func (s *BridgeState) GetZigbeeConnectivity(id string) (ZigbeeConnectivity, bool) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	zc, ok := s.ZigbeeConnectivity[id]
-	return zc, ok
+	return getFromMap(s, s.ZigbeeConnectivity, id)
 }
 
 // GetDeviceZigbeeConnectivity returns the Zigbee connectivity for a device.
@@ -2084,10 +1923,7 @@ func (s *BridgeState) ApplySceneStatus(id string, status string) bool {
 
 // GetTemperature returns a temperature sensor by ID.
 func (s *BridgeState) GetTemperature(id string) (hueclient.TemperatureGet, bool) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	t, ok := s.Temperatures[id]
-	return t, ok
+	return getFromMap(s, s.Temperatures, id)
 }
 
 // GetDeviceRoom returns the room that contains a device, if any.
