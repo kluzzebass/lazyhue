@@ -1599,7 +1599,9 @@ func renderEvent(styles *ui.Styles, width int, base baseEvent, name, details, in
 			indicatorStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(indicatorColor))
 			indicator = indicatorStyle.Render(indicatorChar) + " "
 		} else {
-			indicator = lipgloss.NewStyle().Foreground(styles.Theme.Success).Render(indicatorChar) + " "
+			// Fallback to entity color if no specific color available
+			fallbackColor := getResourceTypeColor(styles, base.resourceType)
+			indicator = lipgloss.NewStyle().Foreground(fallbackColor).Render(indicatorChar) + " "
 		}
 	} else if (base.resourceType == "light" || base.resourceType == "grouped_light") && !isOn {
 		indicator = styles.Dimmed.Render("○") + " "
