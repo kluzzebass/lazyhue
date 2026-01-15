@@ -1114,6 +1114,74 @@ func (s *BridgeState) GetDeviceLightLevel(device hueclient.DeviceGet) (hasLevel 
 	return false, 0
 }
 
+// GetDeviceTemperatureSensor returns the temperature sensor for a device if it has one.
+// Returns the sensor ID and the full sensor object.
+func (s *BridgeState) GetDeviceTemperatureSensor(device hueclient.DeviceGet) (sensorID string, sensor hueclient.TemperatureGet, found bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	deviceID := ""
+	if device.Id != nil {
+		deviceID = *device.Id
+	}
+
+	// First, try to find via device services
+	if device.Services != nil {
+		for _, svc := range *device.Services {
+			if svc.Rtype != nil && *svc.Rtype == hueclient.ResourceIdentifierRtypeTemperature && svc.Rid != nil {
+				if temp, ok := s.Temperatures[*svc.Rid]; ok {
+					return *svc.Rid, temp, true
+				}
+			}
+		}
+	}
+
+	// Fallback: check if any temperature sensor is owned by this device
+	if deviceID != "" {
+		for id, temp := range s.Temperatures {
+			if temp.Owner != nil && temp.Owner.Rid != nil && *temp.Owner.Rid == deviceID {
+				return id, temp, true
+			}
+		}
+	}
+
+	return "", hueclient.TemperatureGet{}, false
+}
+
+// GetDeviceLightLevelSensor returns the light level sensor for a device if it has one.
+// Returns the sensor ID and the full sensor object.
+func (s *BridgeState) GetDeviceLightLevelSensor(device hueclient.DeviceGet) (sensorID string, sensor hueclient.LightLevelGet, found bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	deviceID := ""
+	if device.Id != nil {
+		deviceID = *device.Id
+	}
+
+	// First, try to find via device services
+	if device.Services != nil {
+		for _, svc := range *device.Services {
+			if svc.Rtype != nil && *svc.Rtype == hueclient.ResourceIdentifierRtypeLightLevel && svc.Rid != nil {
+				if ll, ok := s.LightLevels[*svc.Rid]; ok {
+					return *svc.Rid, ll, true
+				}
+			}
+		}
+	}
+
+	// Fallback: check if any light level sensor is owned by this device
+	if deviceID != "" {
+		for id, ll := range s.LightLevels {
+			if ll.Owner != nil && ll.Owner.Rid != nil && *ll.Owner.Rid == deviceID {
+				return id, ll, true
+			}
+		}
+	}
+
+	return "", hueclient.LightLevelGet{}, false
+}
+
 // GetDeviceBattery returns the battery status for a device if it has a device_power service.
 func (s *BridgeState) GetDeviceBattery(device hueclient.DeviceGet) (hasBattery bool, level int, state string) {
 	if device.Services == nil {
@@ -1583,6 +1651,28 @@ func (s *BridgeState) SetMotionSensorSensitivity(id string, sensitivity int) {
 		}
 		motion.Sensitivity.Sensitivity = &sensitivity
 		s.MotionSensors[id] = motion
+	}
+}
+
+// SetTemperatureSensorEnabled optimistically updates a temperature sensor's enabled state in the cache.
+func (s *BridgeState) SetTemperatureSensorEnabled(id string, enabled bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if temp, ok := s.Temperatures[id]; ok {
+		temp.Enabled = &enabled
+		s.Temperatures[id] = temp
+	}
+}
+
+// SetLightLevelSensorEnabled optimistically updates a light level sensor's enabled state in the cache.
+func (s *BridgeState) SetLightLevelSensorEnabled(id string, enabled bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if ll, ok := s.LightLevels[id]; ok {
+		ll.Enabled = &enabled
+		s.LightLevels[id] = ll
 	}
 }
 

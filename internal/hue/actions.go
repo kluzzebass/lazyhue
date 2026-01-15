@@ -532,6 +532,70 @@ func (b *Bridge) SetMotionSensorSensitivity(motionID string, sensitivity int) er
 	return err
 }
 
+// SetTemperatureSensorEnabled enables or disables a temperature sensor.
+func (b *Bridge) SetTemperatureSensorEnabled(temperatureID string, enabled bool) error {
+	b.mu.RLock()
+	client := b.client
+	b.mu.RUnlock()
+
+	if client == nil {
+		return ErrAuthFailed
+	}
+
+	// Optimistic update
+	b.state.SetTemperatureSensorEnabled(temperatureID, enabled)
+
+	deviceName := "Unknown"
+	if temp, ok := b.state.GetTemperature(temperatureID); ok {
+		if temp.Owner != nil && temp.Owner.Rid != nil {
+			if device, ok := b.state.GetDevice(*temp.Owner.Rid); ok {
+				deviceName = b.state.GetDeviceName(device)
+			}
+		}
+	}
+	action := "temperature sensor enabled"
+	if !enabled {
+		action = "temperature sensor disabled"
+	}
+	b.logRequest(fmt.Sprintf("%s: %s", deviceName, action))
+	_, err := client.UpdateTemperature(context.Background(), temperatureID, hueclient.UpdateTemperatureJSONRequestBody{
+		Enabled: &enabled,
+	})
+	return err
+}
+
+// SetLightLevelSensorEnabled enables or disables a light level sensor.
+func (b *Bridge) SetLightLevelSensorEnabled(lightLevelID string, enabled bool) error {
+	b.mu.RLock()
+	client := b.client
+	b.mu.RUnlock()
+
+	if client == nil {
+		return ErrAuthFailed
+	}
+
+	// Optimistic update
+	b.state.SetLightLevelSensorEnabled(lightLevelID, enabled)
+
+	deviceName := "Unknown"
+	if ll, ok := b.state.GetLightLevel(lightLevelID); ok {
+		if ll.Owner != nil && ll.Owner.Rid != nil {
+			if device, ok := b.state.GetDevice(*ll.Owner.Rid); ok {
+				deviceName = b.state.GetDeviceName(device)
+			}
+		}
+	}
+	action := "light level sensor enabled"
+	if !enabled {
+		action = "light level sensor disabled"
+	}
+	b.logRequest(fmt.Sprintf("%s: %s", deviceName, action))
+	_, err := client.UpdateLightLevel(context.Background(), lightLevelID, hueclient.UpdateLightLevelJSONRequestBody{
+		Enabled: &enabled,
+	})
+	return err
+}
+
 // RenameDevice renames a device.
 func (b *Bridge) RenameDevice(deviceID, newName string) error {
 	b.mu.RLock()

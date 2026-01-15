@@ -1176,6 +1176,58 @@ func (m *Model) handleNewFieldChange(msg field.FieldChangedMsg) {
 				m.status = "Scene activated"
 			}
 		}
+	} else if strings.HasPrefix(msg.FieldID, "motion-enabled:") {
+		motionID := strings.TrimPrefix(msg.FieldID, "motion-enabled:")
+		if v, ok := msg.Value.(field.ToggleValue); ok {
+			action := "disabled"
+			if v.On {
+				action = "enabled"
+			}
+			m.status = fmt.Sprintf("Motion sensor %s", action)
+			err = bridge.SetMotionSensorEnabled(motionID, v.On)
+			if err != nil {
+				m.status = fmt.Sprintf("Error: %v", err)
+			}
+			return
+		}
+	} else if strings.HasPrefix(msg.FieldID, "motion-sensitivity:") {
+		motionID := strings.TrimPrefix(msg.FieldID, "motion-sensitivity:")
+		if v, ok := msg.Value.(field.SliderValue); ok {
+			m.status = fmt.Sprintf("Motion sensitivity: %d", v.Value)
+			err = bridge.SetMotionSensorSensitivity(motionID, v.Value)
+			if err != nil {
+				m.status = fmt.Sprintf("Error: %v", err)
+			}
+			return
+		}
+	} else if strings.HasPrefix(msg.FieldID, "temp-enabled:") {
+		tempID := strings.TrimPrefix(msg.FieldID, "temp-enabled:")
+		if v, ok := msg.Value.(field.ToggleValue); ok {
+			action := "disabled"
+			if v.On {
+				action = "enabled"
+			}
+			m.status = fmt.Sprintf("Temperature sensor %s", action)
+			err = bridge.SetTemperatureSensorEnabled(tempID, v.On)
+			if err != nil {
+				m.status = fmt.Sprintf("Error: %v", err)
+			}
+			return
+		}
+	} else if strings.HasPrefix(msg.FieldID, "ll-enabled:") {
+		llID := strings.TrimPrefix(msg.FieldID, "ll-enabled:")
+		if v, ok := msg.Value.(field.ToggleValue); ok {
+			action := "disabled"
+			if v.On {
+				action = "enabled"
+			}
+			m.status = fmt.Sprintf("Light level sensor %s", action)
+			err = bridge.SetLightLevelSensorEnabled(llID, v.On)
+			if err != nil {
+				m.status = fmt.Sprintf("Error: %v", err)
+			}
+			return
+		}
 	} else if strings.HasPrefix(msg.FieldID, "room-power:") || strings.HasPrefix(msg.FieldID, "zone-power:") {
 		// Room or zone grouped light power control
 		var glID string
@@ -2350,7 +2402,7 @@ func (m *Model) buildDeviceGridRows(device hueclient.DeviceGet, state *hue.Bridg
 		})
 	}
 
-	// 2. Settings section (name)
+	// 2. Settings section (name, sensor toggles)
 	settingsHeader := field.NewHeaderComponent("settings-header", "Settings", &m.styles, m.zones)
 	rows = append(rows, gridlayout.GridRow{
 		Type:    gridlayout.RowTypeSection,
@@ -2369,6 +2421,78 @@ func (m *Model) buildDeviceGridRows(device hueclient.DeviceGet, state *hue.Bridg
 				{Component: textInput},
 			},
 		})
+	}
+
+	// Sensor enable/disable toggles in Settings
+	if state != nil {
+		// Motion sensor toggle and sensitivity
+		if motionID, motion, found := state.GetDeviceMotionSensor(device); found {
+			enabled := motion.Enabled != nil && *motion.Enabled
+			motionToggle := field.NewToggleComponent(
+				"motion-enabled:"+motionID, "Motion Sensor", enabled,
+				&m.styles, m.zones,
+			)
+			rows = append(rows, gridlayout.GridRow{
+				Type: gridlayout.RowTypeNormal,
+				Cells: []gridlayout.GridCell{
+					{Component: gridlayout.NewLabelWithWidth("Motion Sensor", infoLabelWidth)},
+					{Component: motionToggle},
+				},
+			})
+
+			// Sensitivity slider
+			if motion.Sensitivity != nil && motion.Sensitivity.SensitivityMax != nil {
+				sensitivity := 0
+				if motion.Sensitivity.Sensitivity != nil {
+					sensitivity = *motion.Sensitivity.Sensitivity
+				}
+				maxSensitivity := *motion.Sensitivity.SensitivityMax
+				sensitivitySlider := field.NewSliderComponent(
+					"motion-sensitivity:"+motionID, "Sensitivity",
+					sensitivity, 0, maxSensitivity, 1,
+					&m.styles, m.zones,
+				)
+				rows = append(rows, gridlayout.GridRow{
+					Type: gridlayout.RowTypeNormal,
+					Cells: []gridlayout.GridCell{
+						{Component: gridlayout.NewLabelWithWidth("Sensitivity", infoLabelWidth)},
+						{Component: sensitivitySlider},
+					},
+				})
+			}
+		}
+
+		// Temperature sensor toggle
+		if tempID, tempSensor, found := state.GetDeviceTemperatureSensor(device); found {
+			enabled := tempSensor.Enabled != nil && *tempSensor.Enabled
+			tempToggle := field.NewToggleComponent(
+				"temp-enabled:"+tempID, "Temp Sensor", enabled,
+				&m.styles, m.zones,
+			)
+			rows = append(rows, gridlayout.GridRow{
+				Type: gridlayout.RowTypeNormal,
+				Cells: []gridlayout.GridCell{
+					{Component: gridlayout.NewLabelWithWidth("Temp Sensor", infoLabelWidth)},
+					{Component: tempToggle},
+				},
+			})
+		}
+
+		// Light level sensor toggle
+		if llID, llSensor, found := state.GetDeviceLightLevelSensor(device); found {
+			enabled := llSensor.Enabled != nil && *llSensor.Enabled
+			llToggle := field.NewToggleComponent(
+				"ll-enabled:"+llID, "Light Sensor", enabled,
+				&m.styles, m.zones,
+			)
+			rows = append(rows, gridlayout.GridRow{
+				Type: gridlayout.RowTypeNormal,
+				Cells: []gridlayout.GridCell{
+					{Component: gridlayout.NewLabelWithWidth("Light Sensor", infoLabelWidth)},
+					{Component: llToggle},
+				},
+			})
+		}
 	}
 
 	// 3. Product section
@@ -2401,7 +2525,7 @@ func (m *Model) buildDeviceGridRows(device hueclient.DeviceGet, state *hue.Bridg
 	if state != nil {
 		var sensorRows []gridlayout.GridRow
 
-		// Motion sensor
+		// Motion sensor (read-only status)
 		if _, motion, found := state.GetDeviceMotionSensor(device); found {
 			isDetecting := false
 			if motion.Motion != nil {
@@ -2418,31 +2542,39 @@ func (m *Model) buildDeviceGridRows(device hueclient.DeviceGet, state *hue.Bridg
 				statusStyle = m.styles.Success
 			}
 			sensorRows = append(sensorRows, gridlayout.NewStyledInfoRow("Motion", status, infoLabelWidth, statusStyle))
+		}
 
-			// Enabled status
-			if motion.Enabled != nil {
-				enabledText := "disabled"
-				enabledStyle := m.styles.Dimmed
-				if *motion.Enabled {
-					enabledText = "enabled"
-					enabledStyle = m.styles.Success
+		// Temperature (read-only value)
+		if _, tempSensor, found := state.GetDeviceTemperatureSensor(device); found {
+			tempValue := "N/A"
+			if tempSensor.Temperature != nil {
+				if tempSensor.Temperature.TemperatureReport != nil && tempSensor.Temperature.TemperatureReport.Temperature != nil {
+					tempValue = fmt.Sprintf("%.1f°C", *tempSensor.Temperature.TemperatureReport.Temperature)
+				} else if tempSensor.Temperature.Temperature != nil {
+					tempValue = fmt.Sprintf("%.1f°C", *tempSensor.Temperature.Temperature)
 				}
-				sensorRows = append(sensorRows, gridlayout.NewStyledInfoRow("Sensor", enabledText, infoLabelWidth, enabledStyle))
 			}
+			sensorRows = append(sensorRows, gridlayout.NewInfoRow("Temperature", tempValue, infoLabelWidth))
 		}
 
-		// Temperature
-		if hasTemp, tempC := state.GetDeviceTemperature(device); hasTemp {
-			sensorRows = append(sensorRows, gridlayout.NewInfoRow("Temperature", fmt.Sprintf("%.1f°C", tempC), infoLabelWidth))
-		}
-
-		// Light level
-		if hasLevel, level := state.GetDeviceLightLevel(device); hasLevel {
-			lux := 0.0
-			if level > 1 {
-				lux = math.Pow(10, float64(level-1)/10000.0)
+		// Light level (read-only value)
+		if _, llSensor, found := state.GetDeviceLightLevelSensor(device); found {
+			llValue := "N/A"
+			if llSensor.Light != nil {
+				level := 0
+				if llSensor.Light.LightLevelReport != nil && llSensor.Light.LightLevelReport.LightLevel != nil {
+					level = *llSensor.Light.LightLevelReport.LightLevel
+				} else if llSensor.Light.LightLevel != nil {
+					level = *llSensor.Light.LightLevel
+				}
+				if level > 1 {
+					lux := math.Pow(10, float64(level-1)/10000.0)
+					llValue = fmt.Sprintf("%.0f lux", lux)
+				} else {
+					llValue = "0 lux"
+				}
 			}
-			sensorRows = append(sensorRows, gridlayout.NewInfoRow("Light Level", fmt.Sprintf("%.0f lux", lux), infoLabelWidth))
+			sensorRows = append(sensorRows, gridlayout.NewInfoRow("Light Level", llValue, infoLabelWidth))
 		}
 
 		// Battery
