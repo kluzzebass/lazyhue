@@ -42,6 +42,11 @@ type TextValue struct {
 	Text string
 }
 
+// ButtonValue is the value type for button fields.
+type ButtonValue struct {
+	Pressed bool
+}
+
 // StartCaptureMsg is sent when a field wants to capture mouse events.
 // This is used for drag operations on sliders and color wheels.
 type StartCaptureMsg struct {

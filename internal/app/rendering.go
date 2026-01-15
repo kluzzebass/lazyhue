@@ -1066,9 +1066,23 @@ func (m *Model) handleNewFieldChange(msg field.FieldChangedMsg) {
 			}
 			return
 		}
+	} else if strings.HasPrefix(msg.FieldID, "identify:") {
+		// General identify handler for lights and devices
+		deviceID := strings.TrimPrefix(msg.FieldID, "identify:")
+		if _, ok := msg.Value.(field.ButtonValue); ok {
+			m.status = "Identifying device..."
+			err = bridge.IdentifyDevice(deviceID)
+			if err != nil {
+				m.status = fmt.Sprintf("Error: %v", err)
+			} else {
+				m.status = "Device identification triggered"
+			}
+			return
+		}
 	} else if strings.HasPrefix(msg.FieldID, "bridge-identify:") {
+		// Bridge-specific identify handler
 		deviceID := strings.TrimPrefix(msg.FieldID, "bridge-identify:")
-		if v, ok := msg.Value.(field.ToggleValue); ok && v.On {
+		if _, ok := msg.Value.(field.ButtonValue); ok {
 			m.status = "Identifying bridge..."
 			err = bridge.IdentifyDevice(deviceID)
 			if err != nil {
@@ -1076,8 +1090,6 @@ func (m *Model) handleNewFieldChange(msg field.FieldChangedMsg) {
 			} else {
 				m.status = "Bridge identification triggered"
 			}
-			// Refresh to reset the toggle to off
-			m.updateDetailContent()
 			return
 		}
 	} else if strings.HasPrefix(msg.FieldID, "device-name:") {
@@ -1469,6 +1481,21 @@ func (m *Model) buildControlsRows(light hueclient.LightGet) []gridlayout.GridRow
 				},
 			})
 		}
+	}
+
+	// Identify button (uses device ID from light owner)
+	if light.Owner != nil && light.Owner.Rid != nil {
+		identifyBtn := field.NewButtonComponent(
+			"identify:"+*light.Owner.Rid, "Identify", "Identify",
+			&m.styles, m.zones,
+		)
+		rows = append(rows, gridlayout.GridRow{
+			Type: gridlayout.RowTypeNormal,
+			Cells: []gridlayout.GridCell{
+				{Component: gridlayout.NewLabelWithWidth("Identify", infoLabelWidth)},
+				{Component: identifyBtn},
+			},
+		})
 	}
 
 	return rows
@@ -2128,6 +2155,21 @@ func (m *Model) buildDeviceGridRows(device hueclient.DeviceGet, state *hue.Bridg
 		})
 	}
 
+	// Identify button
+	if deviceID != "" {
+		identifyBtn := field.NewButtonComponent(
+			"identify:"+deviceID, "Identify", "Identify",
+			&m.styles, m.zones,
+		)
+		rows = append(rows, gridlayout.GridRow{
+			Type: gridlayout.RowTypeNormal,
+			Cells: []gridlayout.GridCell{
+				{Component: gridlayout.NewLabelWithWidth("Identify", infoLabelWidth)},
+				{Component: identifyBtn},
+			},
+		})
+	}
+
 	// Product section
 	if device.ProductData != nil {
 		pd := device.ProductData
@@ -2300,17 +2342,17 @@ func (m *Model) buildBridgeGridRows(bridgeID string) []gridlayout.GridRow {
 				})
 			}
 
-			// Identify toggle
+			// Identify button
 			if deviceID != "" {
-				identifyToggle := field.NewToggleComponent(
-					"bridge-identify:"+deviceID, "Identify", false,
+				identifyBtn := field.NewButtonComponent(
+					"bridge-identify:"+deviceID, "Identify", "Identify",
 					&m.styles, m.zones,
 				)
 				rows = append(rows, gridlayout.GridRow{
 					Type: gridlayout.RowTypeNormal,
 					Cells: []gridlayout.GridCell{
 						{Component: gridlayout.NewLabelWithWidth("Identify", infoLabelWidth)},
-						{Component: identifyToggle},
+						{Component: identifyBtn},
 					},
 				})
 			}
