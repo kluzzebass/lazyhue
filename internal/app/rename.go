@@ -60,7 +60,7 @@ func (m *Model) startRenameMode() tea.Cmd {
 	case panels.EntityScene:
 		nameFieldID = "scene-name:" + item.ID
 	case panels.EntityDevice:
-		nameFieldID = "device-name:" + item.ID
+		nameFieldID = "name:" + item.ID
 	case panels.EntityLight:
 		// Lights are renamed via their owning device - find the device ID
 		var light hueclient.LightGet
@@ -100,11 +100,12 @@ func (m *Model) startRenameMode() tea.Cmd {
 	m.updateDetailContent()
 
 	// Focus the name field in the grid and start editing
+	var cmd tea.Cmd
 	if m.lightGrid.FocusByFieldID(nameFieldID) {
 		// Get the component and start editing if it's a text field
 		if comp := m.lightGrid.GetComponentByID(nameFieldID); comp != nil {
 			if textComp, ok := comp.(*field.TextComponent); ok {
-				textComp.StartEditing()
+				cmd = textComp.StartEditing()
 			}
 		}
 		// Re-render the grid to show edit mode
@@ -120,7 +121,7 @@ func (m *Model) startRenameMode() tea.Cmd {
 		m.status = "Name field not found"
 	}
 
-	return nil
+	return cmd
 }
 
 // findBridgeForEntity finds the bridge ID that owns the given entity.

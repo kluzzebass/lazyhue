@@ -27,6 +27,7 @@ func NewTextComponent(id, label, value string, styles *ui.Styles, zones *zone.Ma
 	input.SetValue(value)
 	input.Prompt = ""
 	input.CharLimit = 64
+	input.VirtualCursor = true // Use visual cursor (works inside viewports)
 
 	return &TextComponent{
 		BaseField: NewBaseField(id, label, styles, zones),
@@ -47,11 +48,21 @@ func (t *TextComponent) Update(msg tea.Msg) (component.Component, tea.Cmd) {
 		return t, nil
 	}
 
+	// When editing, pass ALL messages to textinput (including cursor blink messages)
+	if t.Editing {
+		switch msg := msg.(type) {
+		case tea.KeyMsg:
+			return t.handleEditingKey(msg)
+		default:
+			// Pass other messages (cursor blink, etc.) to textinput
+			var cmd tea.Cmd
+			t.Input, cmd = t.Input.Update(msg)
+			return t, cmd
+		}
+	}
+
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
-		if t.Editing {
-			return t.handleEditingKey(msg)
-		}
 		return t.handleNormalKey(msg)
 
 	case tea.MouseClickMsg:
@@ -140,17 +151,17 @@ func (t *TextComponent) startEditing() (component.Component, tea.Cmd) {
 	t.Editing = true
 	t.OriginalValue = t.Value
 	t.Input.SetValue(t.Value)
-	t.Input.Focus()
-	return t, nil
+	cmd := t.Input.Focus()
+	return t, cmd
 }
 
-// StartEditing puts the text field into edit mode.
+// StartEditing puts the text field into edit mode and returns the cursor blink command.
 // This is a public version of startEditing for external callers.
-func (t *TextComponent) StartEditing() {
+func (t *TextComponent) StartEditing() tea.Cmd {
 	t.Editing = true
 	t.OriginalValue = t.Value
 	t.Input.SetValue(t.Value)
-	t.Input.Focus()
+	return t.Input.Focus()
 }
 
 // ViewControl renders only the control portion (no label).

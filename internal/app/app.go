@@ -40,7 +40,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if cmd != nil {
 				cmds = append(cmds, cmd)
 			}
-			m.updateDetailContent()
+			// Re-render grid view WITHOUT rebuilding rows (preserves edit state)
+			if m.lightGrid.RowCount() > 0 {
+				m.detailViewport.SetContent(m.lightGrid.View())
+			}
 			return m, tea.Batch(cmds...)
 		}
 	}
@@ -361,18 +364,21 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if bridge := m.manager.GetBridge(msg.bridgeID); bridge != nil {
 			m.rebuildTreeForActiveTab()
 			// Update detail panel if the event is for the currently selected entity
-			if node := m.tree.SelectedNode(); node != nil && node.Item != nil {
-				selectedID := node.Item.ID
-				// Check if event matches selected entity
-				shouldUpdate := false
-				switch msg.resourceType {
-				case "light":
-					shouldUpdate = msg.resourceID == m.selectedLightID || msg.resourceID == selectedID
-				case "room", "zone", "scene", "device", "grouped_light":
-					shouldUpdate = msg.resourceID == selectedID
-				}
-				if shouldUpdate {
-					m.updateDetailContent()
+			// Skip if grid is in editing mode to preserve edit state
+			if !m.lightGrid.IsEditing() {
+				if node := m.tree.SelectedNode(); node != nil && node.Item != nil {
+					selectedID := node.Item.ID
+					// Check if event matches selected entity
+					shouldUpdate := false
+					switch msg.resourceType {
+					case "light":
+						shouldUpdate = msg.resourceID == m.selectedLightID || msg.resourceID == selectedID
+					case "room", "zone", "scene", "device", "grouped_light":
+						shouldUpdate = msg.resourceID == selectedID
+					}
+					if shouldUpdate {
+						m.updateDetailContent()
+					}
 				}
 			}
 		}
@@ -487,7 +493,21 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 
-		// 2. Global keys - always available (except when modal is active, handled above)
+		// 2. Inline editing (e.g., rename in grid) takes priority over global keys
+		if m.lightGrid.IsEditing() {
+			if handled, cmd := m.lightGrid.RouteEvent(msg); handled {
+				if cmd != nil {
+					cmds = append(cmds, cmd)
+				}
+				// Re-render the grid view WITHOUT rebuilding rows (preserves edit state)
+				if m.lightGrid.RowCount() > 0 {
+					m.detailViewport.SetContent(m.lightGrid.View())
+				}
+				return m, tea.Batch(cmds...)
+			}
+		}
+
+		// 3. Global keys - always available (except when modal/editing is active, handled above)
 		keyStr := msg.String()
 
 		switch {
@@ -728,7 +748,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				// If no item or room, let tree handle it (toggle expand)
 
 			case "x":
-				// Delete selected item (bridge, room, or zone) - show confirmation
+				// Delete selected item - show confirmation
 				item := m.tree.SelectedItem()
 				if item == nil {
 					m.status = "No item selected"
@@ -741,7 +761,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					if cmd := m.startBridgeDeleteConfirmation(); cmd != nil {
 						return m, cmd
 					}
-				case panels.EntityRoom, panels.EntityZone:
+				case panels.EntityRoom, panels.EntityZone, panels.EntityScene, panels.EntitySmartScene, panels.EntityDevice, panels.EntityLight:
 					if cmd := m.startEntityDeleteConfirmation(); cmd != nil {
 						return m, cmd
 					}

@@ -6,6 +6,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea/v2"
 
+	"github.com/kluzzebass/lazyhue/internal/hueclient"
 	"github.com/kluzzebass/lazyhue/internal/ui/panels"
 )
 
@@ -108,7 +109,7 @@ func (m *Model) startEntityDeleteConfirmation() tea.Cmd {
 
 	// Only certain entity types can be deleted
 	switch item.Type {
-	case panels.EntityRoom, panels.EntityZone, panels.EntityScene, panels.EntitySmartScene, panels.EntityDevice:
+	case panels.EntityRoom, panels.EntityZone, panels.EntityScene, panels.EntitySmartScene, panels.EntityDevice, panels.EntityLight:
 		// These can be deleted
 	default:
 		m.status = fmt.Sprintf("%s cannot be deleted", item.Type.String())
@@ -122,9 +123,40 @@ func (m *Model) startEntityDeleteConfirmation() tea.Cmd {
 		return nil
 	}
 
+	// For lights, we need to find and delete the parent device
+	deleteID := item.ID
+	if item.Type == panels.EntityLight {
+		var light hueclient.LightGet
+		var hasLight bool
+		if item.RawPtr != nil {
+			if l, ok := item.RawPtr.(hueclient.LightGet); ok {
+				light = l
+				hasLight = true
+			}
+		}
+		if !hasLight {
+			bridge := m.manager.GetBridge(bridgeID)
+			if bridge != nil {
+				if state := bridge.GetState(); state != nil {
+					light, hasLight = state.GetLight(item.ID)
+				}
+			}
+		}
+		if !hasLight {
+			m.status = "Light not found"
+			return nil
+		}
+		if light.Owner == nil || light.Owner.Rid == nil {
+			m.status = "Light has no owning device"
+			return nil
+		}
+		// Store the device ID for deletion
+		deleteID = *light.Owner.Rid
+	}
+
 	// Set confirmation state
 	m.confirmingDeleteEntity = true
-	m.deleteEntityID = item.ID
+	m.deleteEntityID = deleteID
 	m.deleteEntityName = item.Name
 	m.deleteEntityType = item.Type
 	m.deleteEntityBridgeID = bridgeID
@@ -178,7 +210,8 @@ func (m *Model) confirmEntityDelete() tea.Cmd {
 		err = bridge.DeleteScene(m.deleteEntityID)
 	case panels.EntitySmartScene:
 		err = bridge.DeleteSmartScene(m.deleteEntityID)
-	case panels.EntityDevice:
+	case panels.EntityDevice, panels.EntityLight:
+		// For lights, deleteEntityID contains the parent device ID
 		err = bridge.DeleteDevice(m.deleteEntityID)
 	default:
 		m.status = fmt.Sprintf("Cannot delete %s", m.deleteEntityType.String())

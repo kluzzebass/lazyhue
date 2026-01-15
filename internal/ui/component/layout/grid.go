@@ -321,6 +321,23 @@ func (g *Grid) RouteEvent(msg tea.Msg) (bool, tea.Cmd) {
 		return false, nil
 	}
 
+	// For keyboard events, first check if ANY component is editing and route there
+	// This ensures editing components receive input even if focus moved elsewhere
+	for _, row := range g.rows {
+		if row.Type != RowTypeNormal {
+			continue
+		}
+		for _, cell := range row.Cells {
+			if cell.Component != nil {
+				if ed, ok := cell.Component.(editable); ok && ed.IsEditing() {
+					if handled, cmd := cell.Component.RouteEvent(msg); handled {
+						return true, cmd
+					}
+				}
+			}
+		}
+	}
+
 	// For other events (keyboard), route to all cells in focused row
 	// This allows interactive components (toggles, selects) to receive events
 	// even when the label in column 0 has focus
@@ -753,6 +770,29 @@ func (g *Grid) FocusedRowYPosition() int {
 	}
 
 	return y
+}
+
+// editable is a local interface for components that support edit mode.
+type editable interface {
+	IsEditing() bool
+}
+
+// IsEditing returns true if any component in the grid is in edit mode.
+// This is used to prevent global key shortcuts from intercepting input.
+func (g *Grid) IsEditing() bool {
+	for _, row := range g.rows {
+		if row.Type != RowTypeNormal {
+			continue
+		}
+		for _, cell := range row.Cells {
+			if cell.Component != nil {
+				if ed, ok := cell.Component.(editable); ok && ed.IsEditing() {
+					return true
+				}
+			}
+		}
+	}
+	return false
 }
 
 // getRowLineCount returns how many lines a row takes when rendered.

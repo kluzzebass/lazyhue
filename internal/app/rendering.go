@@ -360,21 +360,45 @@ func (m *Model) buildEntityDeleteConfirmationContent() string {
 
 	// Header with warning color
 	warningStyle := lipgloss.NewStyle().Foreground(m.styles.Theme.Error).Bold(true)
-	content.WriteString(warningStyle.Render(fmt.Sprintf("Delete %s", m.deleteEntityType.String())))
-	content.WriteString("\n\n")
 
-	// Entity name and ID
-	content.WriteString(fmt.Sprintf("  %s: %s\n", m.deleteEntityType.String(), m.styles.Highlight.Render(m.deleteEntityName)))
-	content.WriteString(fmt.Sprintf("     ID: %s\n\n", m.styles.Dimmed.Render(m.deleteEntityID)))
+	// For lights, we're actually deleting the device (factory reset)
+	if m.deleteEntityType == panels.EntityLight {
+		content.WriteString(warningStyle.Render("Delete Light (Factory Reset Device)"))
+		content.WriteString("\n\n")
 
-	// Warning message
-	content.WriteString(m.styles.Dimmed.Render(fmt.Sprintf("  This will permanently delete this %s.", m.deleteEntityType.String())))
-	content.WriteString("\n\n")
+		// Entity name and device ID
+		content.WriteString(fmt.Sprintf("  Light: %s\n", m.styles.Highlight.Render(m.deleteEntityName)))
+		content.WriteString(fmt.Sprintf("  Device ID: %s\n\n", m.styles.Dimmed.Render(m.deleteEntityID)))
 
-	// Confirmation prompt
-	content.WriteString("  ")
-	content.WriteString(warningStyle.Render(fmt.Sprintf("Delete this %s?", m.deleteEntityType.String())))
-	content.WriteString("\n\n")
+		// Warning message
+		content.WriteString(warningStyle.Render("  WARNING: This will factory reset the device!"))
+		content.WriteString("\n")
+		content.WriteString(m.styles.Dimmed.Render("  The device will be removed from this bridge and"))
+		content.WriteString("\n")
+		content.WriteString(m.styles.Dimmed.Render("  must be re-paired to use again."))
+		content.WriteString("\n\n")
+
+		// Confirmation prompt
+		content.WriteString("  ")
+		content.WriteString(warningStyle.Render("Factory reset this device?"))
+		content.WriteString("\n\n")
+	} else {
+		content.WriteString(warningStyle.Render(fmt.Sprintf("Delete %s", m.deleteEntityType.String())))
+		content.WriteString("\n\n")
+
+		// Entity name and ID
+		content.WriteString(fmt.Sprintf("  %s: %s\n", m.deleteEntityType.String(), m.styles.Highlight.Render(m.deleteEntityName)))
+		content.WriteString(fmt.Sprintf("     ID: %s\n\n", m.styles.Dimmed.Render(m.deleteEntityID)))
+
+		// Warning message
+		content.WriteString(m.styles.Dimmed.Render(fmt.Sprintf("  This will permanently delete this %s.", m.deleteEntityType.String())))
+		content.WriteString("\n\n")
+
+		// Confirmation prompt
+		content.WriteString("  ")
+		content.WriteString(warningStyle.Render(fmt.Sprintf("Delete this %s?", m.deleteEntityType.String())))
+		content.WriteString("\n\n")
+	}
 
 	// Instructions
 	yesStyle := lipgloss.NewStyle().Foreground(m.styles.Theme.Error).Bold(true)
