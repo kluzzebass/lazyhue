@@ -58,6 +58,32 @@ func (d TreeDelegate) Spacing() int { return 0 }
 // Update handles item-level updates.
 func (d TreeDelegate) Update(_ tea.Msg, _ *list.Model) tea.Cmd { return nil }
 
+// getEntityColor returns the theme color for a given entity type.
+func (d TreeDelegate) getEntityColor(entityType EntityType) color.Color {
+	switch entityType {
+	case EntityLight:
+		return d.Styles.Theme.EntityLight
+	case EntityBridge:
+		return d.Styles.Theme.EntityBridge
+	case EntityRoom:
+		return d.Styles.Theme.EntityRoom
+	case EntityZone:
+		return d.Styles.Theme.EntityZone
+	case EntityDevice:
+		return d.Styles.Theme.EntityDevice
+	case EntityScene:
+		return d.Styles.Theme.EntityScene
+	case EntityEntertainment:
+		return d.Styles.Theme.EntityEntertainment
+	// Category folders use neutral white
+	case EntityLightsCategory, EntityDevicesCategory, EntityScenesCategory,
+		EntityRoomsCategory, EntityZonesCategory, EntityEntertainmentCategory:
+		return d.Styles.Theme.TextBright
+	default:
+		return d.Styles.Theme.TextBright
+	}
+}
+
 // Render renders a single tree item.
 func (d TreeDelegate) Render(w io.Writer, m list.Model, index int, item list.Item) {
 	f, ok := item.(FlatNode)
@@ -84,14 +110,17 @@ func (d TreeDelegate) Render(w io.Writer, m list.Model, index int, item list.Ite
 	// On/off indicator for entities
 	indicator := ""
 	if node.Item != nil {
+		// Get the entity type color
+		entityColor := d.getEntityColor(node.Item.Type)
+
 		// Special handling for bridges - show blink when Brightness > 0
 		if node.Item.Type == EntityBridge {
 			if node.Item.Brightness > 0 {
 				// Blinking state - use bright accent color
 				indicator = d.Styles.Accent.Render("◉") + " "
 			} else if node.Item.IsOn {
-				// Connected but not blinking
-				indicator = d.Styles.Success.Render("●") + " "
+				// Connected - use entity color
+				indicator = lipgloss.NewStyle().Foreground(entityColor).Render("●") + " "
 			} else {
 				// Disconnected
 				indicator = d.Styles.Dimmed.Render("○") + " "
@@ -100,10 +129,11 @@ func (d TreeDelegate) Render(w io.Writer, m list.Model, index int, item list.Ite
 			// Use RenderBrightnessIndicator for lights with brightness and color
 			if node.Item.Brightness > 0 {
 				if node.Item.IndicatorColor != "" {
+					// Lights use their actual color
 					indicator = ui.RenderBrightnessIndicatorFromHex(node.Item.Brightness, node.Item.IndicatorColor) + " "
 				} else {
-					// Default to theme success color if no indicator color
-					indicator = ui.RenderBrightnessIndicator(node.Item.Brightness, d.Styles.Theme.Success) + " "
+					// Use entity type color
+					indicator = ui.RenderBrightnessIndicator(node.Item.Brightness, entityColor) + " "
 				}
 			} else {
 				// Fallback for on items without brightness
@@ -112,7 +142,7 @@ func (d TreeDelegate) Render(w io.Writer, m list.Model, index int, item list.Ite
 						Foreground(lipgloss.Color(node.Item.IndicatorColor)).
 						Render("●") + " "
 				} else {
-					indicator = d.Styles.Success.Render("●") + " "
+					indicator = lipgloss.NewStyle().Foreground(entityColor).Render("●") + " "
 				}
 			}
 		} else {
@@ -137,6 +167,10 @@ func (d TreeDelegate) Render(w io.Writer, m list.Model, index int, item list.Ite
 	} else if node.Item == nil {
 		// Group headers get a different style
 		label = d.Styles.Title.Render(label)
+	} else {
+		// Apply entity type color to label
+		entityColor := d.getEntityColor(node.Item.Type)
+		label = lipgloss.NewStyle().Foreground(entityColor).Render(label)
 	}
 
 	// Compose the line

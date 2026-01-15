@@ -33,6 +33,15 @@ type Theme struct {
 	BorderActive color.Color
 	Selection    color.Color
 	Highlight    color.Color
+
+	// Entity type colors (soft pastels for tree indicators)
+	EntityLight         color.Color
+	EntityBridge        color.Color
+	EntityRoom          color.Color
+	EntityZone          color.Color
+	EntityDevice        color.Color
+	EntityScene         color.Color
+	EntityEntertainment color.Color
 }
 
 // DefaultTheme returns the default dark theme.
@@ -62,6 +71,15 @@ func DefaultTheme() Theme {
 		BorderActive: lipgloss.Color("#FF9500"),
 		Selection:    lipgloss.Color("#3A3A3A"),
 		Highlight:    lipgloss.Color("#FF9500"),
+
+		// Entity type colors (soft pastels)
+		EntityLight:         lipgloss.Color("#A8D8A8"), // Soft sage green (lights use actual color when available)
+		EntityBridge:        lipgloss.Color("#B8B8D8"), // Soft periwinkle/gray-blue
+		EntityRoom:          lipgloss.Color("#A8C8E8"), // Soft sky blue
+		EntityZone:          lipgloss.Color("#C8A8E8"), // Soft lavender
+		EntityDevice:        lipgloss.Color("#A8E8E8"), // Soft cyan/teal
+		EntityScene:         lipgloss.Color("#E8A8C8"), // Soft rose/pink
+		EntityEntertainment: lipgloss.Color("#E8D8A8"), // Soft warm sand
 	}
 }
 
