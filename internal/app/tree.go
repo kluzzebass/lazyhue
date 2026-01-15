@@ -829,7 +829,7 @@ func (m *Model) buildDevicesTree(_ *hue.BridgeState) {
 	m.tree.SetRoots(nodes)
 }
 
-// buildScenesTree builds the tree panel showing all Scenes from all bridges.
+// buildScenesTree builds the tree panel showing all Scenes and Smart Scenes from all bridges.
 func (m *Model) buildScenesTree(_ *hue.BridgeState) {
 	allBridges := m.manager.AllBridges()
 	var nodes []*panels.TreeNode
@@ -844,6 +844,8 @@ func (m *Model) buildScenesTree(_ *hue.BridgeState) {
 		}
 
 		bridgeName := getBridgeDisplayName(bridge, state)
+
+		// Regular scenes
 		scenes := state.AllScenes()
 		for _, scene := range scenes {
 			name := scene.SceneName("")
@@ -859,7 +861,6 @@ func (m *Model) buildScenesTree(_ *hue.BridgeState) {
 				if room, ok := state.GetRoom(groupID); ok {
 					groupName = state.GetRoomName(room)
 				} else if zone, ok := state.GetZone(groupID); ok {
-					// Zones use RoomGet type, so use GetRoomName
 					groupName = state.GetRoomName(zone)
 				}
 			}
@@ -880,6 +881,50 @@ func (m *Model) buildScenesTree(_ *hue.BridgeState) {
 					ID:       id,
 					Name:     name,
 					Type:     panels.EntityScene,
+					BridgeID: bridge.Info.ID,
+				},
+			})
+		}
+
+		// Smart scenes
+		smartScenes := state.AllSmartScenes()
+		for _, scene := range smartScenes {
+			name := state.GetSmartSceneName(scene)
+			id := ""
+			if scene.Id != nil {
+				id = *scene.Id
+			}
+
+			// Get room/zone name for the smart scene
+			groupName := ""
+			if scene.Group.Rid != nil {
+				groupID := *scene.Group.Rid
+				if room, ok := state.GetRoom(groupID); ok {
+					groupName = state.GetRoomName(room)
+				} else if zone, ok := state.GetZone(groupID); ok {
+					groupName = state.GetRoomName(zone)
+				}
+			}
+
+			// Build suffixes
+			groupSuffix := ""
+			if groupName != "" {
+				groupSuffix = "(" + groupName + ")"
+			}
+
+			isActive := scene.State == "active"
+
+			nodes = append(nodes, &panels.TreeNode{
+				ID:           nodeID(bridge.Info.ID, id),
+				Label:        name,
+				GroupSuffix:  groupSuffix,
+				BridgeSuffix: "[" + bridgeName + "]",
+				Depth:        0,
+				Item: &panels.EntityItem{
+					ID:       id,
+					Name:     name,
+					Type:     panels.EntitySmartScene,
+					IsOn:     isActive,
 					BridgeID: bridge.Info.ID,
 				},
 			})

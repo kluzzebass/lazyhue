@@ -541,8 +541,8 @@ func (p *TreePanel) View(focused bool) string {
 	content := p.list.View()
 
 	// Calculate dimensions
-	innerWidth := p.width - 2   // Account for left+right border
-	innerHeight := p.height - 3 // Account for top border (with tabs), bottom border, and content
+	innerWidth := p.width - 2  // Account for left+right border
+	innerHeight := p.height - 2 // Account for top border (with tabs) + bottom border
 	if innerWidth < 1 {
 		innerWidth = 1
 	}
