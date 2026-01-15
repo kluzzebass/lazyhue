@@ -1346,7 +1346,8 @@ func (a *RequestActivity) Render(styles *ui.Styles, width int) string {
 	typeIndicator := typeStyle.Render("→")
 	bridgeStr := ""
 	if a.bridgeName != "" {
-		bridgeStr = styles.Dimmed.Render("["+a.bridgeName+"]") + " "
+		bridgeStyle := lipgloss.NewStyle().Foreground(styles.Theme.EntityBridge)
+		bridgeStr = styles.Dimmed.Render("[") + bridgeStyle.Render(a.bridgeName) + styles.Dimmed.Render("]") + " "
 	}
 	line := fmt.Sprintf("%s %s %s%s", styles.Dimmed.Render(timeStr), typeIndicator, bridgeStr, a.message)
 
@@ -1375,7 +1376,8 @@ func (a *ErrorActivity) Render(styles *ui.Styles, width int) string {
 	typeIndicator := typeStyle.Render("!")
 	bridgeStr := ""
 	if a.bridgeName != "" {
-		bridgeStr = styles.Dimmed.Render("["+a.bridgeName+"]") + " "
+		bridgeStyle := lipgloss.NewStyle().Foreground(styles.Theme.EntityBridge)
+		bridgeStr = styles.Dimmed.Render("[") + bridgeStyle.Render(a.bridgeName) + styles.Dimmed.Render("]") + " "
 	}
 	line := fmt.Sprintf("%s %s %s%s", styles.Dimmed.Render(timeStr), typeIndicator, bridgeStr, a.message)
 
