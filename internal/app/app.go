@@ -1273,6 +1273,24 @@ func (m *Model) startRenameMode() tea.Cmd {
 	var nameFieldID string
 
 	switch item.Type {
+	case panels.EntityBridge:
+		// Bridges are renamed via their bridge device
+		bridge := m.manager.GetBridge(bridgeID)
+		if bridge == nil {
+			m.status = "Bridge not found"
+			return nil
+		}
+		state := bridge.GetState()
+		if state == nil {
+			m.status = "Bridge state not available"
+			return nil
+		}
+		bridgeDevice, ok := state.GetBridgeDevice()
+		if !ok || bridgeDevice.Id == nil {
+			m.status = "Bridge device not found"
+			return nil
+		}
+		nameFieldID = "bridge-name:" + *bridgeDevice.Id
 	case panels.EntityRoom:
 		nameFieldID = "room-name:" + item.ID
 	case panels.EntityZone:
