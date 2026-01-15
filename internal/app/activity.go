@@ -1610,8 +1610,6 @@ func renderEvent(styles *ui.Styles, width int, base baseEvent, name, details, in
 	resourceTypeStyle := lipgloss.NewStyle().Foreground(resourceTypeColor)
 	resourceTypeStr := resourceTypeStyle.Render(base.resourceType)
 
-	nameStyle := lipgloss.NewStyle().Foreground(styles.Theme.TextMuted)
-
 	var line string
 	if name != "" {
 		if details != "" {
@@ -1621,7 +1619,7 @@ func renderEvent(styles *ui.Styles, width int, base baseEvent, name, details, in
 				bridgeStr,
 				indicator,
 				resourceTypeStr,
-				nameStyle.Render(name),
+				name,
 				details)
 		} else {
 			line = fmt.Sprintf("%s %s %s%s%s %s",
@@ -1630,7 +1628,7 @@ func renderEvent(styles *ui.Styles, width int, base baseEvent, name, details, in
 				bridgeStr,
 				indicator,
 				resourceTypeStr,
-				nameStyle.Render(name))
+				name)
 		}
 	} else {
 		if details != "" {
