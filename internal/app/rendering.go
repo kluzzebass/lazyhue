@@ -668,6 +668,66 @@ func (m *Model) updateDetailContent() {
 			}
 		}
 
+	case panels.EntityRoomsCategory:
+		m.selectedLightID = ""
+		if data, ok := node.Item.RawPtr.(panels.RoomsCategoryData); ok {
+			rows := m.buildRoomsCategoryGridRows(data, state)
+			m.lightGrid.SetRows(rows)
+			if len(m.lightGrid.Children()) > 0 {
+				content.WriteString(m.lightGrid.View())
+			}
+		}
+
+	case panels.EntityZonesCategory:
+		m.selectedLightID = ""
+		if data, ok := node.Item.RawPtr.(panels.ZonesCategoryData); ok {
+			rows := m.buildZonesCategoryGridRows(data, state)
+			m.lightGrid.SetRows(rows)
+			if len(m.lightGrid.Children()) > 0 {
+				content.WriteString(m.lightGrid.View())
+			}
+		}
+
+	case panels.EntityLightsCategory:
+		m.selectedLightID = ""
+		if data, ok := node.Item.RawPtr.(panels.LightsCategoryData); ok {
+			rows := m.buildLightsCategoryGridRows(data, state)
+			m.lightGrid.SetRows(rows)
+			if len(m.lightGrid.Children()) > 0 {
+				content.WriteString(m.lightGrid.View())
+			}
+		}
+
+	case panels.EntityDevicesCategory:
+		m.selectedLightID = ""
+		if data, ok := node.Item.RawPtr.(panels.DevicesCategoryData); ok {
+			rows := m.buildDevicesCategoryGridRows(data, state)
+			m.lightGrid.SetRows(rows)
+			if len(m.lightGrid.Children()) > 0 {
+				content.WriteString(m.lightGrid.View())
+			}
+		}
+
+	case panels.EntityScenesCategory:
+		m.selectedLightID = ""
+		if data, ok := node.Item.RawPtr.(panels.ScenesCategoryData); ok {
+			rows := m.buildScenesCategoryGridRows(data, state)
+			m.lightGrid.SetRows(rows)
+			if len(m.lightGrid.Children()) > 0 {
+				content.WriteString(m.lightGrid.View())
+			}
+		}
+
+	case panels.EntityEntertainmentCategory:
+		m.selectedLightID = ""
+		if data, ok := node.Item.RawPtr.(panels.EntertainmentCategoryData); ok {
+			rows := m.buildEntertainmentCategoryGridRows(data)
+			m.lightGrid.SetRows(rows)
+			if len(m.lightGrid.Children()) > 0 {
+				content.WriteString(m.lightGrid.View())
+			}
+		}
+
 	default:
 		// Clear grid for unknown entities
 		m.lightGrid.SetRows(nil)
@@ -2513,6 +2573,247 @@ func (m *Model) buildEntertainmentGridRows(cfg hue.EntertainmentConfiguration, s
 		Section: idsHeader,
 	})
 	rows = append(rows, gridlayout.NewStyledInfoRow("ID", cfg.ID, infoLabelWidth, m.styles.Dimmed))
+
+	return rows
+}
+
+// buildRoomsCategoryGridRows builds a list of all rooms in a category.
+func (m *Model) buildRoomsCategoryGridRows(data panels.RoomsCategoryData, state *hue.BridgeState) []gridlayout.GridRow {
+	var rows []gridlayout.GridRow
+
+	// Header with count
+	header := field.NewHeaderComponent("rooms-header", fmt.Sprintf("Rooms (%d)", len(data.Rooms)), &m.styles, m.zones)
+	rows = append(rows, gridlayout.GridRow{
+		Type:    gridlayout.RowTypeSection,
+		Section: header,
+	})
+
+	// Count on/off rooms
+	onCount := 0
+	for _, room := range data.Rooms {
+		lights := state.RoomLights(room)
+		for _, light := range lights {
+			if panels.IsLightOn(light) {
+				onCount++
+				break
+			}
+		}
+	}
+
+	rows = append(rows, gridlayout.NewInfoRow("Active", fmt.Sprintf("%d of %d", onCount, len(data.Rooms)), infoLabelWidth))
+	rows = append(rows, gridlayout.NewEmptyRow())
+
+	// List each room
+	for _, room := range data.Rooms {
+		name := "Unknown"
+		if room.Metadata != nil && room.Metadata.Name != nil {
+			name = *room.Metadata.Name
+		}
+
+		// Get room's lights and calculate state
+		lights := state.RoomLights(room)
+		brightness, indicatorColor := hue.CalculateRoomAggregate(lights)
+
+		// Build indicator
+		indicator := m.styles.Dimmed.Render("○")
+		if brightness > 0 {
+			indicator = ui.RenderBrightnessIndicatorFromHex(brightness, indicatorColor)
+		}
+
+		rows = append(rows, gridlayout.NewListItemRow(indicator, name))
+	}
+
+	return rows
+}
+
+// buildZonesCategoryGridRows builds a list of all zones in a category.
+func (m *Model) buildZonesCategoryGridRows(data panels.ZonesCategoryData, state *hue.BridgeState) []gridlayout.GridRow {
+	var rows []gridlayout.GridRow
+
+	// Header with count
+	header := field.NewHeaderComponent("zones-header", fmt.Sprintf("Zones (%d)", len(data.Zones)), &m.styles, m.zones)
+	rows = append(rows, gridlayout.GridRow{
+		Type:    gridlayout.RowTypeSection,
+		Section: header,
+	})
+
+	// Count on/off zones
+	onCount := 0
+	for _, zone := range data.Zones {
+		lights := state.RoomLights(zone)
+		for _, light := range lights {
+			if panels.IsLightOn(light) {
+				onCount++
+				break
+			}
+		}
+	}
+
+	rows = append(rows, gridlayout.NewInfoRow("Active", fmt.Sprintf("%d of %d", onCount, len(data.Zones)), infoLabelWidth))
+	rows = append(rows, gridlayout.NewEmptyRow())
+
+	// List each zone
+	for _, zone := range data.Zones {
+		name := "Unknown"
+		if zone.Metadata != nil && zone.Metadata.Name != nil {
+			name = *zone.Metadata.Name
+		}
+
+		// Get zone's lights and calculate state
+		lights := state.RoomLights(zone)
+		brightness, indicatorColor := hue.CalculateRoomAggregate(lights)
+
+		// Build indicator
+		indicator := m.styles.Dimmed.Render("○")
+		if brightness > 0 {
+			indicator = ui.RenderBrightnessIndicatorFromHex(brightness, indicatorColor)
+		}
+
+		rows = append(rows, gridlayout.NewListItemRow(indicator, name))
+	}
+
+	return rows
+}
+
+// buildLightsCategoryGridRows builds a list of all lights in a category.
+func (m *Model) buildLightsCategoryGridRows(data panels.LightsCategoryData, _ *hue.BridgeState) []gridlayout.GridRow {
+	var rows []gridlayout.GridRow
+
+	// Header with parent context
+	headerText := fmt.Sprintf("Lights (%d)", len(data.Lights))
+	if data.ParentName != "" {
+		headerText = fmt.Sprintf("Lights in %s (%d)", data.ParentName, len(data.Lights))
+	}
+	header := field.NewHeaderComponent("lights-header", headerText, &m.styles, m.zones)
+	rows = append(rows, gridlayout.GridRow{
+		Type:    gridlayout.RowTypeSection,
+		Section: header,
+	})
+
+	// Count on/off lights
+	onCount := 0
+	for _, light := range data.Lights {
+		if panels.IsLightOn(light) {
+			onCount++
+		}
+	}
+
+	rows = append(rows, gridlayout.NewInfoRow("On", fmt.Sprintf("%d of %d", onCount, len(data.Lights)), infoLabelWidth))
+	rows = append(rows, gridlayout.NewEmptyRow())
+
+	// List each light
+	for _, light := range data.Lights {
+		name := "Unknown"
+		if light.Metadata != nil && light.Metadata.Name != nil {
+			name = *light.Metadata.Name
+		}
+
+		isOn := panels.IsLightOn(light)
+		brightness := 0.0
+		indicatorColor := ""
+		if isOn {
+			if light.Dimming != nil && light.Dimming.Brightness != nil {
+				brightness = float64(*light.Dimming.Brightness)
+			} else {
+				brightness = 100.0
+			}
+			indicatorColor = ui.GetLightColor(light)
+		}
+
+		// Build indicator
+		indicator := m.styles.Dimmed.Render("○")
+		if brightness > 0 {
+			indicator = ui.RenderBrightnessIndicatorFromHex(brightness, indicatorColor)
+		}
+
+		rows = append(rows, gridlayout.NewListItemRow(indicator, name))
+	}
+
+	return rows
+}
+
+// buildDevicesCategoryGridRows builds a list of all devices in a category.
+func (m *Model) buildDevicesCategoryGridRows(data panels.DevicesCategoryData, state *hue.BridgeState) []gridlayout.GridRow {
+	var rows []gridlayout.GridRow
+
+	// Header with parent context
+	headerText := fmt.Sprintf("Devices (%d)", len(data.Devices))
+	if data.ParentName != "" {
+		headerText = fmt.Sprintf("Devices in %s (%d)", data.ParentName, len(data.Devices))
+	}
+	header := field.NewHeaderComponent("devices-header", headerText, &m.styles, m.zones)
+	rows = append(rows, gridlayout.GridRow{
+		Type:    gridlayout.RowTypeSection,
+		Section: header,
+	})
+
+	rows = append(rows, gridlayout.NewInfoRow("Total", fmt.Sprintf("%d", len(data.Devices)), infoLabelWidth))
+	rows = append(rows, gridlayout.NewEmptyRow())
+
+	// List each device
+	for _, device := range data.Devices {
+		name := device.DeviceName("Unknown")
+
+		// Check if device has motion sensor and its state
+		hasMotion, isDetecting := state.GetDeviceMotionState(device)
+
+		// Build indicator based on motion state
+		indicator := m.styles.Dimmed.Render("○")
+		if hasMotion && isDetecting {
+			indicator = m.styles.Success.Render("●")
+		}
+
+		rows = append(rows, gridlayout.NewListItemRow(indicator, name))
+	}
+
+	return rows
+}
+
+// buildScenesCategoryGridRows builds a list of all scenes in a category.
+func (m *Model) buildScenesCategoryGridRows(data panels.ScenesCategoryData, _ *hue.BridgeState) []gridlayout.GridRow {
+	var rows []gridlayout.GridRow
+
+	// Header with parent context
+	headerText := fmt.Sprintf("Scenes (%d)", len(data.Scenes))
+	if data.ParentName != "" {
+		headerText = fmt.Sprintf("Scenes in %s (%d)", data.ParentName, len(data.Scenes))
+	}
+	header := field.NewHeaderComponent("scenes-header", headerText, &m.styles, m.zones)
+	rows = append(rows, gridlayout.GridRow{
+		Type:    gridlayout.RowTypeSection,
+		Section: header,
+	})
+
+	rows = append(rows, gridlayout.NewInfoRow("Total", fmt.Sprintf("%d", len(data.Scenes)), infoLabelWidth))
+	rows = append(rows, gridlayout.NewEmptyRow())
+
+	// List each scene
+	for _, scene := range data.Scenes {
+		name := scene.SceneName("Unknown")
+		rows = append(rows, gridlayout.NewListItemRow("•", name))
+	}
+
+	return rows
+}
+
+// buildEntertainmentCategoryGridRows builds a list of all entertainment configurations in a category.
+func (m *Model) buildEntertainmentCategoryGridRows(data panels.EntertainmentCategoryData) []gridlayout.GridRow {
+	var rows []gridlayout.GridRow
+
+	// Header with count
+	header := field.NewHeaderComponent("entertainment-header", fmt.Sprintf("Entertainment Areas (%d)", len(data.Configurations)), &m.styles, m.zones)
+	rows = append(rows, gridlayout.GridRow{
+		Type:    gridlayout.RowTypeSection,
+		Section: header,
+	})
+
+	rows = append(rows, gridlayout.NewInfoRow("Total", fmt.Sprintf("%d", len(data.Configurations)), infoLabelWidth))
+	rows = append(rows, gridlayout.NewEmptyRow())
+
+	// List each entertainment configuration
+	for _, cfg := range data.Configurations {
+		rows = append(rows, gridlayout.NewListItemRow("•", cfg.Name))
+	}
 
 	return rows
 }

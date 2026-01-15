@@ -16,9 +16,12 @@ const (
 	EntityDevice
 	EntityEntertainment
 	EntityBridge
-	EntityLightsCategory  // Aggregate for "Lights" folder
-	EntityDevicesCategory // Aggregate for "Devices" folder
-	EntityScenesCategory  // Aggregate for "Scenes" folder
+	EntityLightsCategory        // Aggregate for "Lights" folder
+	EntityDevicesCategory       // Aggregate for "Devices" folder
+	EntityScenesCategory        // Aggregate for "Scenes" folder
+	EntityRoomsCategory         // Aggregate for "Rooms" folder
+	EntityZonesCategory         // Aggregate for "Zones" folder
+	EntityEntertainmentCategory // Aggregate for "Entertainment Areas" folder
 )
 
 // String returns a human-readable name for the entity type.
@@ -44,6 +47,12 @@ func (t EntityType) String() string {
 		return "Devices"
 	case EntityScenesCategory:
 		return "Scenes"
+	case EntityRoomsCategory:
+		return "Rooms"
+	case EntityZonesCategory:
+		return "Zones"
+	case EntityEntertainmentCategory:
+		return "Entertainment Areas"
 	default:
 		return "Unknown"
 	}
@@ -65,6 +74,30 @@ type DevicesCategoryData struct {
 type ScenesCategoryData struct {
 	ParentName string
 	Scenes     []hueclient.SceneGet
+}
+
+// RoomsCategoryData holds aggregate data for a rooms category folder.
+type RoomsCategoryData struct {
+	BridgeID string
+	Rooms    []hueclient.RoomGet
+}
+
+// ZonesCategoryData holds aggregate data for a zones category folder.
+type ZonesCategoryData struct {
+	BridgeID string
+	Zones    []hueclient.RoomGet
+}
+
+// EntertainmentCategoryData holds aggregate data for an entertainment areas category folder.
+type EntertainmentCategoryData struct {
+	BridgeID       string
+	Configurations []EntertainmentConfig
+}
+
+// EntertainmentConfig is a simplified entertainment configuration for category display.
+type EntertainmentConfig struct {
+	ID   string
+	Name string
 }
 
 // IsLightOn checks if a light is on (nil-safe).

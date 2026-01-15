@@ -625,6 +625,16 @@ func NewListItemRow(bullet, text string) GridRow {
 	}
 }
 
+// NewEmptyRow creates an empty row for spacing.
+func NewEmptyRow() GridRow {
+	return GridRow{
+		Type: RowTypeNormal,
+		Cells: []GridCell{
+			{Component: NewLabel("")},
+		},
+	}
+}
+
 // SetFocus sets focus to a specific cell (only works for normal rows).
 func (g *Grid) SetFocus(row, col int) {
 	// Blur current

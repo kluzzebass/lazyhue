@@ -101,6 +101,16 @@ func (m *Model) buildBridgeChildren(bridgeNode *panels.TreeNode, state *hue.Brid
 			Label:    fmt.Sprintf("Rooms (%d)", len(rooms)),
 			Depth:    1,
 			Expanded: true,
+			Item: &panels.EntityItem{
+				ID:       bridgeNode.ID + ":rooms",
+				Name:     "Rooms",
+				Type:     panels.EntityRoomsCategory,
+				BridgeID: bridgeID,
+				RawPtr: panels.RoomsCategoryData{
+					BridgeID: bridgeID,
+					Rooms:    rooms,
+				},
+			},
 			Children: make([]*panels.TreeNode, 0, len(rooms)),
 		}
 
@@ -175,6 +185,16 @@ func (m *Model) buildBridgeChildren(bridgeNode *panels.TreeNode, state *hue.Brid
 					Label:    fmt.Sprintf("Lights (%d)", len(lights)),
 					Depth:    3,
 					Expanded: false,
+					Item: &panels.EntityItem{
+						ID:       roomID + ":lights",
+						Name:     fmt.Sprintf("Lights in %s", name),
+						Type:     panels.EntityLightsCategory,
+						BridgeID: bridgeID,
+						RawPtr: panels.LightsCategoryData{
+							ParentName: name,
+							Lights:     lights,
+						},
+					},
 					Children: make([]*panels.TreeNode, 0, len(lights)),
 				}
 				for _, light := range lights {
@@ -213,6 +233,16 @@ func (m *Model) buildBridgeChildren(bridgeNode *panels.TreeNode, state *hue.Brid
 					Label:    fmt.Sprintf("Devices (%d)", len(nonLightDevices)),
 					Depth:    3,
 					Expanded: false,
+					Item: &panels.EntityItem{
+						ID:       roomID + ":devices",
+						Name:     fmt.Sprintf("Devices in %s", name),
+						Type:     panels.EntityDevicesCategory,
+						BridgeID: bridgeID,
+						RawPtr: panels.DevicesCategoryData{
+							ParentName: name,
+							Devices:    nonLightDevices,
+						},
+					},
 					Children: make([]*panels.TreeNode, 0, len(nonLightDevices)),
 				}
 				for _, device := range nonLightDevices {
@@ -247,6 +277,16 @@ func (m *Model) buildBridgeChildren(bridgeNode *panels.TreeNode, state *hue.Brid
 					Label:    fmt.Sprintf("Scenes (%d)", len(scenes)),
 					Depth:    3,
 					Expanded: false,
+					Item: &panels.EntityItem{
+						ID:       roomID + ":scenes",
+						Name:     fmt.Sprintf("Scenes in %s", name),
+						Type:     panels.EntityScenesCategory,
+						BridgeID: bridgeID,
+						RawPtr: panels.ScenesCategoryData{
+							ParentName: name,
+							Scenes:     scenes,
+						},
+					},
 					Children: make([]*panels.TreeNode, 0, len(scenes)),
 				}
 				for _, scene := range scenes {
@@ -283,6 +323,16 @@ func (m *Model) buildBridgeChildren(bridgeNode *panels.TreeNode, state *hue.Brid
 			Label:    fmt.Sprintf("Zones (%d)", len(zones)),
 			Depth:    1,
 			Expanded: false,
+			Item: &panels.EntityItem{
+				ID:       bridgeNode.ID + ":zones",
+				Name:     "Zones",
+				Type:     panels.EntityZonesCategory,
+				BridgeID: bridgeID,
+				RawPtr: panels.ZonesCategoryData{
+					BridgeID: bridgeID,
+					Zones:    zones,
+				},
+			},
 			Children: make([]*panels.TreeNode, 0, len(zones)),
 		}
 
@@ -366,11 +416,30 @@ func (m *Model) buildBridgeChildren(bridgeNode *panels.TreeNode, state *hue.Brid
 	// Entertainment configurations category
 	entConfigs := state.AllEntertainmentConfigurations()
 	if len(entConfigs) > 0 {
+		// Build simplified config list for category data
+		var configList []panels.EntertainmentConfig
+		for _, ent := range entConfigs {
+			configList = append(configList, panels.EntertainmentConfig{
+				ID:   ent.ID,
+				Name: ent.EntertainmentName("Unknown"),
+			})
+		}
+
 		entNode := &panels.TreeNode{
 			ID:       bridgeNode.ID + ":entertainment",
 			Label:    fmt.Sprintf("Entertainment Areas (%d)", len(entConfigs)),
 			Depth:    1,
 			Expanded: false,
+			Item: &panels.EntityItem{
+				ID:       bridgeNode.ID + ":entertainment",
+				Name:     "Entertainment Areas",
+				Type:     panels.EntityEntertainmentCategory,
+				BridgeID: bridgeID,
+				RawPtr: panels.EntertainmentCategoryData{
+					BridgeID:       bridgeID,
+					Configurations: configList,
+				},
+			},
 			Children: make([]*panels.TreeNode, 0, len(entConfigs)),
 		}
 
