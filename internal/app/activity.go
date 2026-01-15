@@ -1560,8 +1560,8 @@ func getResourceTypeColor(styles *ui.Styles, resourceType string) color.Color {
 	switch resourceType {
 	case "light":
 		return styles.Theme.EntityLight
-	case "grouped_light":
-		return styles.Theme.EntityRoom // grouped lights are room-level
+	case "grouped_light", "grouped_light_level", "grouped_motion":
+		return styles.Theme.EntityRoom // grouped resources are room-level
 	case "room":
 		return styles.Theme.EntityRoom
 	case "zone":
@@ -1570,14 +1570,18 @@ func getResourceTypeColor(styles *ui.Styles, resourceType string) color.Color {
 		return styles.Theme.EntityScene
 	case "smart_scene":
 		return styles.Theme.EntityScene // same color as regular scenes
-	case "device", "device_power", "zigbee_connectivity":
+	case "device", "device_power", "device_software_update":
 		return styles.Theme.EntityDevice
+	case "zigbee_connectivity", "zgp_connectivity", "wifi_connectivity":
+		return styles.Theme.EntityDevice // connectivity is device-related
+	case "button", "relative_rotary", "contact", "tamper":
+		return styles.Theme.EntityDevice // input sensors are device-related
+	case "motion", "light_level", "temperature":
+		return styles.Theme.EntityDevice // environmental sensors are device-related
 	case "bridge", "bridge_home":
 		return styles.Theme.EntityBridge
 	case "entertainment", "entertainment_configuration":
 		return styles.Theme.EntityEntertainment
-	case "motion", "light_level", "temperature":
-		return styles.Theme.EntityDevice // sensors are device-related
 	default:
 		return styles.Theme.TextMuted
 	}
