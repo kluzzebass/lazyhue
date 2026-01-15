@@ -2,6 +2,7 @@ package hue
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -57,7 +58,7 @@ func (b *Bridge) ToggleLight(lightID string) error {
 	if httpResp != nil && httpResp.HTTPResponse != nil && httpResp.HTTPResponse.StatusCode >= 400 {
 		errMsg := fmt.Sprintf("%s: %s failed: HTTP %d", lightName, action, httpResp.HTTPResponse.StatusCode)
 		b.logError(errMsg)
-		return fmt.Errorf(errMsg)
+		return errors.New(errMsg)
 	}
 	return nil
 }
@@ -115,7 +116,7 @@ func (b *Bridge) SetLightOn(lightID string, on bool) error {
 	if httpResp != nil && httpResp.HTTPResponse != nil && httpResp.HTTPResponse.StatusCode >= 400 {
 		errMsg := fmt.Sprintf("%s: %s failed: HTTP %d", lightName, action, httpResp.HTTPResponse.StatusCode)
 		b.logError(errMsg)
-		return fmt.Errorf(errMsg)
+		return errors.New(errMsg)
 	}
 	return nil
 }
@@ -309,7 +310,7 @@ func (b *Bridge) SetLightEffect(lightID string, effect hueclient.SupportedEffect
 	if httpResp != nil && httpResp.HTTPResponse != nil && httpResp.HTTPResponse.StatusCode >= 400 {
 		errMsg := fmt.Sprintf("%s: effect %s failed: HTTP %d", lightName, effectName, httpResp.HTTPResponse.StatusCode)
 		b.logError(errMsg)
-		return fmt.Errorf(errMsg)
+		return errors.New(errMsg)
 	}
 	return nil
 }
