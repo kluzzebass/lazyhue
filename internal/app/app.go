@@ -124,7 +124,8 @@ type Model struct {
 	detailStack *component.StackedContainer
 
 	// Help display
-	showHelp bool // Whether help is displayed in detail panel
+	showHelp     bool // Whether help is displayed in detail panel
+	showActivity bool // Whether activity log panel is visible
 
 	// State restoration
 	stateRestored      bool   // Whether UI state has been restored from disk
@@ -214,6 +215,7 @@ func New(creds *config.CredentialStore) Model {
 		selectedLightID:  "",
 		historyIndex:     -1, // No history initially
 		inputStack:       NewInputStack(),
+		showActivity:     true, // Activity log visible by default
 	}
 
 	// Initialize keybindings
@@ -763,6 +765,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, nil
 
+		case keyStr == "a":
+			// Toggle activity log panel
+			m.showActivity = !m.showActivity
+			m.rebuildLayout()
+			return m, nil
+
 		case key.Matches(msg, m.keys.NextBridge):
 			m.tree.NextTab()
 			m.rebuildTreeForActiveTab()
@@ -776,29 +784,33 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 
 		case key.Matches(msg, m.keys.NextPanel):
+			m.previousPane = m.focusedPane
 			switch m.focusedPane {
 			case PanelTree:
-				m.previousPane = m.focusedPane
 				m.focusedPane = PanelDetail
 			case PanelDetail:
-				m.previousPane = m.focusedPane
-				m.focusedPane = PanelLog
+				if m.showActivity {
+					m.focusedPane = PanelLog
+				} else {
+					m.focusedPane = PanelTree
+				}
 			default:
-				m.previousPane = m.focusedPane
 				m.focusedPane = PanelTree
 			}
 			return m, nil
 
 		case key.Matches(msg, m.keys.PrevPanel):
+			m.previousPane = m.focusedPane
 			switch m.focusedPane {
 			case PanelTree:
-				m.previousPane = m.focusedPane
-				m.focusedPane = PanelLog
+				if m.showActivity {
+					m.focusedPane = PanelLog
+				} else {
+					m.focusedPane = PanelDetail
+				}
 			case PanelLog:
-				m.previousPane = m.focusedPane
 				m.focusedPane = PanelDetail
 			default:
-				m.previousPane = m.focusedPane
 				m.focusedPane = PanelTree
 			}
 			return m, nil
@@ -935,9 +947,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 
 	// Pass events to focused panel
-	if keyMsg, ok := msg.(tea.KeyMsg); ok {
-		m.status = fmt.Sprintf("Key: %s, Panel: %s", keyMsg.String(), m.focusedPane)
-	}
 	switch m.focusedPane {
 	case PanelTree:
 		// Handle tree-specific keys
@@ -1166,7 +1175,6 @@ func (m Model) View() string {
 
 	// Calculate panel bounds
 	detailBounds := m.layout.Bounds(PanelDetail)
-	logBounds := m.layout.Bounds(PanelLog)
 
 	// Render left column: tree
 	treeContent := m.tree.View(m.focusedPane == PanelTree)
@@ -1174,12 +1182,18 @@ func (m Model) View() string {
 
 	// Get panel keys from panelOrder
 	detailKey := m.getPanelKey(PanelDetail)
-	logKey := m.getPanelKey(PanelLog)
 
-	// Render right column: detail + log
+	// Render right column: detail (+ log if visible)
 	detailContent := m.renderDetailPanel(detailBounds.Width, detailBounds.Height, m.focusedPane == PanelDetail, detailKey)
-	logContent := m.renderLogPanel(logBounds.Width, logBounds.Height, m.focusedPane == PanelLog, logKey)
-	rightColumn := lipgloss.JoinVertical(lipgloss.Left, detailContent, logContent)
+	var rightColumn string
+	if m.showActivity {
+		logBounds := m.layout.Bounds(PanelLog)
+		logKey := m.getPanelKey(PanelLog)
+		logContent := m.renderLogPanel(logBounds.Width, logBounds.Height, m.focusedPane == PanelLog, logKey)
+		rightColumn = lipgloss.JoinVertical(lipgloss.Left, detailContent, logContent)
+	} else {
+		rightColumn = detailContent
+	}
 
 	// Compose layout - constrain each column to prevent terminal overflow
 	treeBounds := m.layout.Bounds(PanelTree)
@@ -1222,6 +1236,41 @@ func (m *Model) getPanelKey(panelID string) string {
 		}
 	}
 	return ""
+}
+
+// rebuildLayout rebuilds the layout tree based on showActivity state.
+func (m *Model) rebuildLayout() {
+	var layoutRoot *layout.Container
+	if m.showActivity {
+		// Show activity log: Tree | Detail + Log
+		layoutRoot = layout.HSplit(
+			layout.Child{Size: layout.Flex(0.4), Node: layout.NewLeaf(PanelTree)},
+			layout.Child{Size: layout.Flex(0.6), Node: layout.VSplit(
+				layout.Child{Size: layout.Flex(0.67), Node: layout.NewLeaf(PanelDetail)},
+				layout.Child{Size: layout.Flex(0.33), Node: layout.NewLeaf(PanelLog)},
+			)},
+		)
+		// Ensure log is in panel order
+		if len(m.panelOrder) == 2 {
+			m.panelOrder = append(m.panelOrder, PanelLog)
+		}
+	} else {
+		// Hide activity log: Tree | Detail (full height)
+		layoutRoot = layout.HSplit(
+			layout.Child{Size: layout.Flex(0.4), Node: layout.NewLeaf(PanelTree)},
+			layout.Child{Size: layout.Flex(0.6), Node: layout.NewLeaf(PanelDetail)},
+		)
+		// Remove log from panel order if focused there
+		if m.focusedPane == PanelLog {
+			m.focusedPane = PanelDetail
+		}
+		// Remove log from panel order
+		if len(m.panelOrder) == 3 {
+			m.panelOrder = m.panelOrder[:2]
+		}
+	}
+	m.layout = layout.NewTree(layoutRoot)
+	m.layout.Layout(m.width, m.height-1) // -1 for status line
 }
 
 // rebuildTreeForActiveTab rebuilds the tree for the active tab, showing all bridges.

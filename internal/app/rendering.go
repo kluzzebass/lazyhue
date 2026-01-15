@@ -2419,6 +2419,42 @@ func (m *Model) buildRoomGridRows(room hueclient.RoomGet, isZone bool, state *hu
 	}
 	rows = append(rows, gridlayout.NewInfoRow("Lights", fmt.Sprintf("%d/%d on", onCount, len(lights)), infoLabelWidth))
 
+	// Motion sensor status - check devices in the room for motion sensors
+	if room.Children != nil {
+		var motionSensors int
+		var motionDetected bool
+		for _, child := range *room.Children {
+			if child.Rid == nil || child.Rtype == nil || *child.Rtype != hueclient.ResourceIdentifierRtypeDevice {
+				continue
+			}
+			device, ok := state.GetDevice(*child.Rid)
+			if !ok {
+				continue
+			}
+			if hasMotion, detecting := state.GetDeviceMotionState(device); hasMotion {
+				motionSensors++
+				if detecting {
+					motionDetected = true
+				}
+			}
+		}
+		if motionSensors > 0 {
+			motionStyle := lipgloss.NewStyle()
+			var motionStatus string
+			if motionDetected {
+				motionStyle = motionStyle.Foreground(m.styles.Theme.Warning)
+				motionStatus = motionStyle.Render("● motion detected")
+			} else {
+				motionStyle = motionStyle.Foreground(m.styles.Theme.TextMuted)
+				motionStatus = motionStyle.Render("○ clear")
+			}
+			if motionSensors > 1 {
+				motionStatus += m.styles.Dimmed.Render(fmt.Sprintf(" (%d sensors)", motionSensors))
+			}
+			rows = append(rows, gridlayout.NewInfoRow("Motion", motionStatus, infoLabelWidth))
+		}
+	}
+
 	// Lights section
 	if len(lights) > 0 {
 		lightsHeaderText := fmt.Sprintf("Lights %s%d%s", m.styles.Dimmed.Render("["), len(lights), m.styles.Dimmed.Render("]"))
@@ -2458,7 +2494,7 @@ func (m *Model) buildRoomGridRows(room hueclient.RoomGet, isZone bool, state *hu
 
 	// Non-light devices
 	if room.Children != nil && len(*room.Children) > 0 {
-		var nonLightDevices []string
+		var nonLightDevices []hueclient.DeviceGet
 		for _, child := range *room.Children {
 			if child.Rid == nil || child.Rtype == nil || *child.Rtype != hueclient.ResourceIdentifierRtypeDevice {
 				continue
@@ -2479,7 +2515,7 @@ func (m *Model) buildRoomGridRows(room hueclient.RoomGet, isZone bool, state *hu
 			if isLight {
 				continue
 			}
-			nonLightDevices = append(nonLightDevices, device.DeviceName(""))
+			nonLightDevices = append(nonLightDevices, device)
 		}
 
 		if len(nonLightDevices) > 0 {
@@ -2490,8 +2526,23 @@ func (m *Model) buildRoomGridRows(room hueclient.RoomGet, isZone bool, state *hu
 				Section: devicesHeader,
 			})
 			deviceStyle := lipgloss.NewStyle().Foreground(m.styles.Theme.EntityDevice)
-			for _, name := range nonLightDevices {
-				rows = append(rows, gridlayout.NewListItemRow("•", deviceStyle.Render(name)))
+			for _, device := range nonLightDevices {
+				name := device.DeviceName("")
+				indicator := "•"
+				suffix := ""
+
+				// Check for motion sensor
+				if hasMotion, detecting := state.GetDeviceMotionState(device); hasMotion {
+					if detecting {
+						indicator = lipgloss.NewStyle().Foreground(m.styles.Theme.Warning).Render("●")
+						suffix = " " + m.styles.Dimmed.Render("motion")
+					} else {
+						indicator = lipgloss.NewStyle().Foreground(m.styles.Theme.TextMuted).Render("○")
+						suffix = " " + m.styles.Dimmed.Render("clear")
+					}
+				}
+
+				rows = append(rows, gridlayout.NewListItemRow(indicator, deviceStyle.Render(name)+suffix))
 			}
 		}
 	}
@@ -3416,7 +3467,7 @@ func (m *Model) buildDevicesCategoryGridRows(data panels.DevicesCategoryData, st
 		// Build indicator based on motion state
 		indicator := m.styles.Dimmed.Render("○")
 		if hasMotion && isDetecting {
-			indicator = m.styles.Success.Render("●")
+			indicator = lipgloss.NewStyle().Foreground(m.styles.Theme.Warning).Render("●")
 		}
 
 		rows = append(rows, gridlayout.NewListItemRow(indicator, catDeviceStyle.Render(name)))

@@ -53,10 +53,12 @@ func (m *Model) buildHomeTree(_ *hue.BridgeState) {
 		state := bridge.GetState()
 		bridgeName := getBridgeDisplayName(bridge, state)
 
-		// Check if bridge is currently blinking
-		isBlinking := false
+		// Check if bridge is currently blinking (message received)
+		indicatorColor := ""
 		if until, ok := m.bridgeBlinkUntil[bridge.Info.ID]; ok {
-			isBlinking = time.Now().Before(until)
+			if time.Now().Before(until) {
+				indicatorColor = "#FFD600" // Warning color for message received
+			}
 		}
 
 		// Create bridge node
@@ -66,18 +68,13 @@ func (m *Model) buildHomeTree(_ *hue.BridgeState) {
 			Depth:    0,
 			Expanded: true, // Start expanded
 			Item: &panels.EntityItem{
-				ID:       bridge.Info.ID,
-				Name:     bridgeName,
-				Type:     panels.EntityBridge,
-				IsOn:     bridge.IsConnected(), // Use connection status for IsOn
-				RawPtr:   bridge,
-				BridgeID: bridge.Info.ID,
-				Brightness: func() float64 {
-					if isBlinking {
-						return 100.0 // Full brightness when blinking
-					}
-					return 0 // No brightness indicator when not blinking
-				}(),
+				ID:             bridge.Info.ID,
+				Name:           bridgeName,
+				Type:           panels.EntityBridge,
+				IsOn:           bridge.IsConnected(), // Use connection status for IsOn
+				IndicatorColor: indicatorColor,
+				RawPtr:         bridge,
+				BridgeID:       bridge.Info.ID,
 			},
 			Children: make([]*panels.TreeNode, 0),
 		}
@@ -263,16 +260,21 @@ func (m *Model) buildBridgeChildren(bridgeNode *panels.TreeNode, state *hue.Brid
 					// Check if device has motion sensor and its state
 					hasMotion, isDetecting := state.GetDeviceMotionState(device)
 					isOn := hasMotion && isDetecting
+					indicatorColor := ""
+					if isOn {
+						indicatorColor = "#FFD600" // Warning color for motion detected
+					}
 					devicesNode.Children = append(devicesNode.Children, &panels.TreeNode{
 						ID:    nodeID(bridgeID, deviceID),
 						Label: deviceName,
 						Depth: 4,
 						Item: &panels.EntityItem{
-							ID:       deviceID,
-							Name:     deviceName,
-							Type:     panels.EntityDevice,
-							IsOn:     isOn,
-							BridgeID: bridgeID,
+							ID:             deviceID,
+							Name:           deviceName,
+							Type:           panels.EntityDevice,
+							IsOn:           isOn,
+							IndicatorColor: indicatorColor,
+							BridgeID:       bridgeID,
 						},
 					})
 				}
@@ -686,8 +688,13 @@ func (m *Model) buildLightsTree(_ *hue.BridgeState) {
 			}
 		}
 
-		// Calculate aggregate brightness/color for bridge
-		bridgeBrightness, bridgeIndicatorColor := hue.CalculateRoomAggregate(lights)
+		// Check if bridge is currently blinking (message received)
+		indicatorColor := ""
+		if until, ok := m.bridgeBlinkUntil[bridge.Info.ID]; ok {
+			if time.Now().Before(until) {
+				indicatorColor = "#FFD600" // Warning color for message received
+			}
+		}
 
 		// Create bridge node
 		bridgeNode := &panels.TreeNode{
@@ -700,8 +707,7 @@ func (m *Model) buildLightsTree(_ *hue.BridgeState) {
 				Name:           bridgeName,
 				Type:           panels.EntityBridge,
 				IsOn:           bridge.IsConnected(),
-				Brightness:     bridgeBrightness,
-				IndicatorColor: bridgeIndicatorColor,
+				IndicatorColor: indicatorColor,
 				RawPtr:         bridge,
 				BridgeID:       bridge.Info.ID,
 			},
@@ -835,6 +841,14 @@ func (m *Model) buildDevicesTree(_ *hue.BridgeState) {
 			return nonLightDevices[i].DeviceName("") < nonLightDevices[j].DeviceName("")
 		})
 
+		// Check if bridge is currently blinking (message received)
+		indicatorColor := ""
+		if until, ok := m.bridgeBlinkUntil[bridge.Info.ID]; ok {
+			if time.Now().Before(until) {
+				indicatorColor = "#FFD600" // Warning color for message received
+			}
+		}
+
 		// Create bridge node
 		bridgeNode := &panels.TreeNode{
 			ID:       bridge.Info.ID,
@@ -842,12 +856,13 @@ func (m *Model) buildDevicesTree(_ *hue.BridgeState) {
 			Depth:    0,
 			Expanded: true,
 			Item: &panels.EntityItem{
-				ID:       bridge.Info.ID,
-				Name:     bridgeName,
-				Type:     panels.EntityBridge,
-				IsOn:     bridge.IsConnected(),
-				RawPtr:   bridge,
-				BridgeID: bridge.Info.ID,
+				ID:             bridge.Info.ID,
+				Name:           bridgeName,
+				Type:           panels.EntityBridge,
+				IsOn:           bridge.IsConnected(),
+				IndicatorColor: indicatorColor,
+				RawPtr:         bridge,
+				BridgeID:       bridge.Info.ID,
 			},
 			Children: make([]*panels.TreeNode, 0, len(nonLightDevices)),
 		}
@@ -909,6 +924,14 @@ func (m *Model) buildScenesTree(_ *hue.BridgeState) {
 		smartScenes := state.AllSmartScenes()
 		totalScenes := len(scenes) + len(smartScenes)
 
+		// Check if bridge is currently blinking (message received)
+		indicatorColor := ""
+		if until, ok := m.bridgeBlinkUntil[bridge.Info.ID]; ok {
+			if time.Now().Before(until) {
+				indicatorColor = "#FFD600" // Warning color for message received
+			}
+		}
+
 		// Create bridge node
 		bridgeNode := &panels.TreeNode{
 			ID:       bridge.Info.ID,
@@ -916,12 +939,13 @@ func (m *Model) buildScenesTree(_ *hue.BridgeState) {
 			Depth:    0,
 			Expanded: true,
 			Item: &panels.EntityItem{
-				ID:       bridge.Info.ID,
-				Name:     bridgeName,
-				Type:     panels.EntityBridge,
-				IsOn:     bridge.IsConnected(),
-				RawPtr:   bridge,
-				BridgeID: bridge.Info.ID,
+				ID:             bridge.Info.ID,
+				Name:           bridgeName,
+				Type:           panels.EntityBridge,
+				IsOn:           bridge.IsConnected(),
+				IndicatorColor: indicatorColor,
+				RawPtr:         bridge,
+				BridgeID:       bridge.Info.ID,
 			},
 			Children: make([]*panels.TreeNode, 0, totalScenes),
 		}

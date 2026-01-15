@@ -130,14 +130,14 @@ func (d TreeDelegate) Render(w io.Writer, m list.Model, index int, item list.Ite
 		// Get the entity type color
 		entityColor := d.getEntityColor(node.Item.Type)
 
-		// Special handling for bridges - show blink when Brightness > 0
+		// Special handling for bridges
 		if node.Item.Type == EntityBridge {
-			if node.Item.Brightness > 0 {
-				// Blinking state - use bright accent color
-				indicator = d.Styles.Accent.Render("◉") + " "
+			if node.Item.IndicatorColor != "" {
+				// Blinking state (message received) - use indicator color (warning)
+				indicator = lipgloss.NewStyle().Foreground(lipgloss.Color(node.Item.IndicatorColor)).Render("●") + " "
 			} else if node.Item.IsOn {
-				// Connected - use entity color
-				indicator = lipgloss.NewStyle().Foreground(entityColor).Render("●") + " "
+				// Connected - use green/success color
+				indicator = d.Styles.Success.Render("●") + " "
 			} else {
 				// Disconnected
 				indicator = d.Styles.Dimmed.Render("○") + " "
