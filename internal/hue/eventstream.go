@@ -80,6 +80,10 @@ type ResourceUpdate struct {
 		Name      *string `json:"name,omitempty"`
 		Archetype *string `json:"archetype,omitempty"`
 	} `json:"metadata,omitempty"`
+	// Button event data
+	Button *struct {
+		LastEvent string `json:"last_event"` // "initial_press", "repeat", "short_release", "long_release", "double_short_release"
+	} `json:"button,omitempty"`
 }
 
 // EventStream manages the SSE connection to a bridge.

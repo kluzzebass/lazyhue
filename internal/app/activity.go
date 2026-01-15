@@ -348,6 +348,72 @@ func (e *MotionEvent) Render(styles *ui.Styles, width int) string {
 	return renderEvent(styles, width, e.baseEvent, e.Name, e.Details, "", 0, false)
 }
 
+// ButtonEvent represents a button press event.
+type ButtonEvent struct {
+	baseEvent
+	Name    string
+	Details string
+}
+
+func (e *ButtonEvent) Parse(bridgeID, bridgeName, eventType string, data json.RawMessage, state *hue.BridgeState) (Event, error) {
+	var updates []hue.ResourceUpdate
+	if err := json.Unmarshal(data, &updates); err != nil {
+		return nil, fmt.Errorf("parse button event: %w", err)
+	}
+
+	if len(updates) == 0 {
+		return nil, fmt.Errorf("no updates in button event")
+	}
+
+	update := updates[0]
+	e.baseEvent = baseEvent{
+		bridgeID:     bridgeID,
+		bridgeName:   bridgeName,
+		resourceType: "button",
+		resourceID:   update.ID,
+		eventType:    eventType,
+		timestamp:    time.Now(),
+	}
+
+	// Get button action from the update
+	if update.Button != nil && update.Button.LastEvent != "" {
+		e.Details = formatButtonEvent(update.Button.LastEvent)
+	}
+
+	// Get device name from owner
+	if state != nil && update.Owner != nil {
+		if device, ok := state.GetDevice(update.Owner.Rid); ok {
+			e.Name = device.DeviceName("")
+		}
+	}
+
+	return e, nil
+}
+
+// formatButtonEvent converts Hue button event names to human-readable form.
+func formatButtonEvent(event string) string {
+	switch event {
+	case "initial_press":
+		return "pressed"
+	case "repeat":
+		return "held"
+	case "short_release":
+		return "short press"
+	case "long_release":
+		return "long press"
+	case "double_short_release":
+		return "double press"
+	case "long_press":
+		return "long press"
+	default:
+		return event
+	}
+}
+
+func (e *ButtonEvent) Render(styles *ui.Styles, width int) string {
+	return renderEvent(styles, width, e.baseEvent, e.Name, e.Details, "", 0, false)
+}
+
 // TemperatureEvent represents a temperature sensor event.
 type TemperatureEvent struct {
 	baseEvent

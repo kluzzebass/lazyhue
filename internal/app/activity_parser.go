@@ -34,6 +34,9 @@ func parseEventFromBridgeCallback(bridgeID, bridgeName, resourceType, resourceID
 	case "grouped_motion":
 		evt := &GroupedMotionEvent{}
 		event, err = evt.Parse(bridgeID, bridgeName, eventType, data, state)
+	case "button":
+		evt := &ButtonEvent{}
+		event, err = evt.Parse(bridgeID, bridgeName, eventType, data, state)
 	case "temperature":
 		evt := &TemperatureEvent{}
 		event, err = evt.Parse(bridgeID, bridgeName, eventType, data, state)
