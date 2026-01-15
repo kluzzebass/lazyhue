@@ -2004,6 +2004,33 @@ func (s *BridgeState) GetDeviceRoom(deviceID string) (hueclient.RoomGet, bool) {
 	return hueclient.RoomGet{}, false
 }
 
+// GetLightZones returns all zones that contain a light.
+func (s *BridgeState) GetLightZones(lightID string) []hueclient.RoomGet {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	var zones []hueclient.RoomGet
+	for _, zone := range s.Zones {
+		if zone.Children == nil {
+			continue
+		}
+		for _, child := range *zone.Children {
+			if child.Rtype != nil && *child.Rtype == hueclient.ResourceIdentifierRtypeLight &&
+				child.Rid != nil && *child.Rid == lightID {
+				zones = append(zones, zone)
+				break
+			}
+		}
+	}
+
+	// Sort by name for stable ordering
+	sort.Slice(zones, func(i, j int) bool {
+		return zones[i].RoomName("") < zones[j].RoomName("")
+	})
+
+	return zones
+}
+
 // GetGroupedLightName returns the room or zone name for a grouped light.
 func (s *BridgeState) GetGroupedLightName(groupedLightID string) string {
 	s.mu.RLock()

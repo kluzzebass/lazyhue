@@ -1179,6 +1179,41 @@ func (m *Model) handleNewFieldChange(msg field.FieldChangedMsg) {
 				return
 			}
 		}
+	} else if strings.HasPrefix(msg.FieldID, "light-zone:") {
+		// Handle zone membership toggle - format is "light-zone:{lightID}:{zoneID}"
+		parts := strings.TrimPrefix(msg.FieldID, "light-zone:")
+		splitParts := strings.SplitN(parts, ":", 2)
+		if len(splitParts) == 2 {
+			lightID := splitParts[0]
+			zoneID := splitParts[1]
+			if v, ok := msg.Value.(field.ToggleValue); ok {
+				bridgeState := bridge.GetState()
+				zoneName := "zone"
+				if bridgeState != nil {
+					if zone, ok := bridgeState.GetZone(zoneID); ok {
+						zoneName = zone.RoomName("")
+					}
+				}
+
+				if v.On {
+					m.status = fmt.Sprintf("Adding light to %s...", zoneName)
+					err = bridge.AddLightToZone(lightID, zoneID)
+					if err == nil {
+						m.status = fmt.Sprintf("Light added to %s", zoneName)
+					}
+				} else {
+					m.status = fmt.Sprintf("Removing light from %s...", zoneName)
+					err = bridge.RemoveLightFromZone(lightID, zoneID)
+					if err == nil {
+						m.status = fmt.Sprintf("Light removed from %s", zoneName)
+					}
+				}
+				if err != nil {
+					m.status = fmt.Sprintf("Error: %v", err)
+				}
+				return
+			}
+		}
 	} else if strings.HasPrefix(msg.FieldID, "room-create-scene:") {
 		roomID := strings.TrimPrefix(msg.FieldID, "room-create-scene:")
 		if _, ok := msg.Value.(field.ButtonValue); ok {
@@ -1627,6 +1662,63 @@ func (m *Model) buildLightSettingsRows(light hueclient.LightGet, device *hueclie
 							{Component: roomSelect},
 						},
 					})
+				}
+			}
+		}
+	}
+
+	// Zone membership (toggles for each zone)
+	if light.Id != nil {
+		zoneNode := m.tree.SelectedNode()
+		if zoneNode != nil && zoneNode.Item != nil {
+			zoneBridge := m.manager.GetBridge(zoneNode.Item.BridgeID)
+			if zoneBridge != nil {
+				zoneState := zoneBridge.GetState()
+				if zoneState != nil {
+					lightID := *light.Id
+					allZones := zoneState.AllZones()
+					if len(allZones) > 0 {
+						// Build a set of zone IDs this light is in
+						lightZones := zoneState.GetLightZones(lightID)
+						lightZoneIDs := make(map[string]bool)
+						for _, zone := range lightZones {
+							if zone.Id != nil {
+								lightZoneIDs[*zone.Id] = true
+							}
+						}
+
+						// Add header for zones section
+						zonesHeader := field.NewHeaderComponent("zones-header", "Zones", &m.styles, m.zones)
+						rows = append(rows, gridlayout.GridRow{
+							Type:    gridlayout.RowTypeSection,
+							Section: zonesHeader,
+						})
+
+						// Add a toggle for each zone
+						for _, zone := range allZones {
+							zoneID := ""
+							zoneName := "Unknown"
+							if zone.Id != nil {
+								zoneID = *zone.Id
+							}
+							if zone.Metadata != nil && zone.Metadata.Name != nil {
+								zoneName = *zone.Metadata.Name
+							}
+
+							isInZone := lightZoneIDs[zoneID]
+							zoneToggle := field.NewToggleComponent(
+								"light-zone:"+lightID+":"+zoneID, zoneName, isInZone,
+								&m.styles, m.zones,
+							)
+							rows = append(rows, gridlayout.GridRow{
+								Type: gridlayout.RowTypeNormal,
+								Cells: []gridlayout.GridCell{
+									{Component: gridlayout.NewLabelWithWidth(zoneName, infoLabelWidth)},
+									{Component: zoneToggle},
+								},
+							})
+						}
+					}
 				}
 			}
 		}

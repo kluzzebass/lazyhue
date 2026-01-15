@@ -958,6 +958,63 @@ func (b *Bridge) UpdateZoneServices(zoneID string, serviceIDs []string) error {
 	return err
 }
 
+// AddLightToZone adds a light to a zone.
+func (b *Bridge) AddLightToZone(lightID, zoneID string) error {
+	zone, ok := b.state.GetZone(zoneID)
+	if !ok {
+		return fmt.Errorf("zone not found: %s", zoneID)
+	}
+
+	// Get current light IDs in the zone
+	var lightIDs []string
+	if zone.Children != nil {
+		for _, child := range *zone.Children {
+			if child.Rid != nil && child.Rtype != nil &&
+				*child.Rtype == hueclient.ResourceIdentifierRtypeLight {
+				// Check if light is already in the zone
+				if *child.Rid == lightID {
+					return nil // Already in zone, nothing to do
+				}
+				lightIDs = append(lightIDs, *child.Rid)
+			}
+		}
+	}
+
+	// Add the new light
+	lightIDs = append(lightIDs, lightID)
+	return b.UpdateZoneServices(zoneID, lightIDs)
+}
+
+// RemoveLightFromZone removes a light from a zone.
+func (b *Bridge) RemoveLightFromZone(lightID, zoneID string) error {
+	zone, ok := b.state.GetZone(zoneID)
+	if !ok {
+		return fmt.Errorf("zone not found: %s", zoneID)
+	}
+
+	// Get current light IDs in the zone, excluding the one to remove
+	var lightIDs []string
+	found := false
+	if zone.Children != nil {
+		for _, child := range *zone.Children {
+			if child.Rid != nil && child.Rtype != nil &&
+				*child.Rtype == hueclient.ResourceIdentifierRtypeLight {
+				if *child.Rid == lightID {
+					found = true
+					continue // Skip this light
+				}
+				lightIDs = append(lightIDs, *child.Rid)
+			}
+		}
+	}
+
+	if !found {
+		return nil // Light wasn't in zone, nothing to do
+	}
+
+	return b.UpdateZoneServices(zoneID, lightIDs)
+}
+
 // SetRoomArchetype updates a room's archetype.
 func (b *Bridge) SetRoomArchetype(roomID string, archetype hueclient.RoomArchetype) error {
 	b.mu.RLock()
