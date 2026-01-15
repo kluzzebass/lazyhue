@@ -470,6 +470,451 @@ func (e *DevicePowerEvent) Render(styles *ui.Styles, width int) string {
 	return renderEvent(styles, width, e.baseEvent, e.Name, e.Details, "", 0, false)
 }
 
+// RelativeRotaryEvent represents a rotary dial event (Hue Tap Dial).
+type RelativeRotaryEvent struct {
+	baseEvent
+	Name    string
+	Details string
+}
+
+func (e *RelativeRotaryEvent) Parse(bridgeID, bridgeName, eventType string, data json.RawMessage, state *hue.BridgeState) (Event, error) {
+	var updates []hue.ResourceUpdate
+	if err := json.Unmarshal(data, &updates); err != nil {
+		return nil, fmt.Errorf("parse relative_rotary event: %w", err)
+	}
+	if len(updates) == 0 {
+		return nil, fmt.Errorf("no updates in relative_rotary event")
+	}
+	update := updates[0]
+	e.baseEvent = baseEvent{
+		bridgeID:     bridgeID,
+		bridgeName:   bridgeName,
+		resourceType: "relative_rotary",
+		resourceID:   update.ID,
+		eventType:    eventType,
+		timestamp:    time.Now(),
+	}
+	if update.RelativeRotary != nil && update.RelativeRotary.LastEvent != nil {
+		evt := update.RelativeRotary.LastEvent
+		if evt.Rotation != nil {
+			dir := "→"
+			if evt.Rotation.Direction == "counter_clock_wise" {
+				dir = "←"
+			}
+			e.Details = fmt.Sprintf("%s %d steps", dir, evt.Rotation.Steps)
+		} else {
+			e.Details = evt.Action
+		}
+	}
+	if state != nil && update.Owner != nil {
+		if device, ok := state.GetDevice(update.Owner.Rid); ok {
+			e.Name = device.DeviceName("")
+		}
+	}
+	return e, nil
+}
+
+func (e *RelativeRotaryEvent) Render(styles *ui.Styles, width int) string {
+	return renderEvent(styles, width, e.baseEvent, e.Name, e.Details, "", 0, false)
+}
+
+// ContactEvent represents a contact sensor event (door/window).
+type ContactEvent struct {
+	baseEvent
+	Name    string
+	Details string
+}
+
+func (e *ContactEvent) Parse(bridgeID, bridgeName, eventType string, data json.RawMessage, state *hue.BridgeState) (Event, error) {
+	var updates []hue.ResourceUpdate
+	if err := json.Unmarshal(data, &updates); err != nil {
+		return nil, fmt.Errorf("parse contact event: %w", err)
+	}
+	if len(updates) == 0 {
+		return nil, fmt.Errorf("no updates in contact event")
+	}
+	update := updates[0]
+	e.baseEvent = baseEvent{
+		bridgeID:     bridgeID,
+		bridgeName:   bridgeName,
+		resourceType: "contact",
+		resourceID:   update.ID,
+		eventType:    eventType,
+		timestamp:    time.Now(),
+	}
+	if update.ContactReport != nil {
+		if update.ContactReport.State == "contact" {
+			e.Details = "closed"
+		} else {
+			e.Details = "open"
+		}
+	}
+	if state != nil && update.Owner != nil {
+		if device, ok := state.GetDevice(update.Owner.Rid); ok {
+			e.Name = device.DeviceName("")
+		}
+	}
+	return e, nil
+}
+
+func (e *ContactEvent) Render(styles *ui.Styles, width int) string {
+	return renderEvent(styles, width, e.baseEvent, e.Name, e.Details, "", 0, false)
+}
+
+// TamperEvent represents a tamper sensor event.
+type TamperEvent struct {
+	baseEvent
+	Name    string
+	Details string
+}
+
+func (e *TamperEvent) Parse(bridgeID, bridgeName, eventType string, data json.RawMessage, state *hue.BridgeState) (Event, error) {
+	var updates []hue.ResourceUpdate
+	if err := json.Unmarshal(data, &updates); err != nil {
+		return nil, fmt.Errorf("parse tamper event: %w", err)
+	}
+	if len(updates) == 0 {
+		return nil, fmt.Errorf("no updates in tamper event")
+	}
+	update := updates[0]
+	e.baseEvent = baseEvent{
+		bridgeID:     bridgeID,
+		bridgeName:   bridgeName,
+		resourceType: "tamper",
+		resourceID:   update.ID,
+		eventType:    eventType,
+		timestamp:    time.Now(),
+	}
+	if update.TamperReports != nil && len(*update.TamperReports) > 0 {
+		if (*update.TamperReports)[0].State == "tampered" {
+			e.Details = "tampered"
+		} else {
+			e.Details = "secure"
+		}
+	}
+	if state != nil && update.Owner != nil {
+		if device, ok := state.GetDevice(update.Owner.Rid); ok {
+			e.Name = device.DeviceName("")
+		}
+	}
+	return e, nil
+}
+
+func (e *TamperEvent) Render(styles *ui.Styles, width int) string {
+	return renderEvent(styles, width, e.baseEvent, e.Name, e.Details, "", 0, false)
+}
+
+// ZigbeeConnectivityEvent represents a Zigbee connectivity status change.
+type ZigbeeConnectivityEvent struct {
+	baseEvent
+	Name    string
+	Details string
+}
+
+func (e *ZigbeeConnectivityEvent) Parse(bridgeID, bridgeName, eventType string, data json.RawMessage, state *hue.BridgeState) (Event, error) {
+	var updates []hue.ResourceUpdate
+	if err := json.Unmarshal(data, &updates); err != nil {
+		return nil, fmt.Errorf("parse zigbee_connectivity event: %w", err)
+	}
+	if len(updates) == 0 {
+		return nil, fmt.Errorf("no updates in zigbee_connectivity event")
+	}
+	update := updates[0]
+	e.baseEvent = baseEvent{
+		bridgeID:     bridgeID,
+		bridgeName:   bridgeName,
+		resourceType: "zigbee_connectivity",
+		resourceID:   update.ID,
+		eventType:    eventType,
+		timestamp:    time.Now(),
+	}
+	if update.ConnectivityStatus != nil {
+		e.Details = strings.ReplaceAll(update.ConnectivityStatus.Status, "_", " ")
+	}
+	if state != nil && update.Owner != nil {
+		if device, ok := state.GetDevice(update.Owner.Rid); ok {
+			e.Name = device.DeviceName("")
+		}
+	}
+	return e, nil
+}
+
+func (e *ZigbeeConnectivityEvent) Render(styles *ui.Styles, width int) string {
+	return renderEvent(styles, width, e.baseEvent, e.Name, e.Details, "", 0, false)
+}
+
+// ZgpConnectivityEvent represents a ZGP (Zigbee Green Power) connectivity status change.
+type ZgpConnectivityEvent struct {
+	baseEvent
+	Name    string
+	Details string
+}
+
+func (e *ZgpConnectivityEvent) Parse(bridgeID, bridgeName, eventType string, data json.RawMessage, state *hue.BridgeState) (Event, error) {
+	var updates []hue.ResourceUpdate
+	if err := json.Unmarshal(data, &updates); err != nil {
+		return nil, fmt.Errorf("parse zgp_connectivity event: %w", err)
+	}
+	if len(updates) == 0 {
+		return nil, fmt.Errorf("no updates in zgp_connectivity event")
+	}
+	update := updates[0]
+	e.baseEvent = baseEvent{
+		bridgeID:     bridgeID,
+		bridgeName:   bridgeName,
+		resourceType: "zgp_connectivity",
+		resourceID:   update.ID,
+		eventType:    eventType,
+		timestamp:    time.Now(),
+	}
+	if update.ConnectivityStatus != nil {
+		e.Details = strings.ReplaceAll(update.ConnectivityStatus.Status, "_", " ")
+	}
+	if state != nil && update.Owner != nil {
+		if device, ok := state.GetDevice(update.Owner.Rid); ok {
+			e.Name = device.DeviceName("")
+		}
+	}
+	return e, nil
+}
+
+func (e *ZgpConnectivityEvent) Render(styles *ui.Styles, width int) string {
+	return renderEvent(styles, width, e.baseEvent, e.Name, e.Details, "", 0, false)
+}
+
+// WifiConnectivityEvent represents a WiFi connectivity status change.
+type WifiConnectivityEvent struct {
+	baseEvent
+	Name    string
+	Details string
+}
+
+func (e *WifiConnectivityEvent) Parse(bridgeID, bridgeName, eventType string, data json.RawMessage, state *hue.BridgeState) (Event, error) {
+	var updates []hue.ResourceUpdate
+	if err := json.Unmarshal(data, &updates); err != nil {
+		return nil, fmt.Errorf("parse wifi_connectivity event: %w", err)
+	}
+	if len(updates) == 0 {
+		return nil, fmt.Errorf("no updates in wifi_connectivity event")
+	}
+	update := updates[0]
+	e.baseEvent = baseEvent{
+		bridgeID:     bridgeID,
+		bridgeName:   bridgeName,
+		resourceType: "wifi_connectivity",
+		resourceID:   update.ID,
+		eventType:    eventType,
+		timestamp:    time.Now(),
+	}
+	if update.ConnectivityStatus != nil {
+		e.Details = strings.ReplaceAll(update.ConnectivityStatus.Status, "_", " ")
+	}
+	if state != nil && update.Owner != nil {
+		if device, ok := state.GetDevice(update.Owner.Rid); ok {
+			e.Name = device.DeviceName("")
+		}
+	}
+	return e, nil
+}
+
+func (e *WifiConnectivityEvent) Render(styles *ui.Styles, width int) string {
+	return renderEvent(styles, width, e.baseEvent, e.Name, e.Details, "", 0, false)
+}
+
+// DeviceSoftwareUpdateEvent represents a device software update event.
+type DeviceSoftwareUpdateEvent struct {
+	baseEvent
+	Name    string
+	Details string
+}
+
+func (e *DeviceSoftwareUpdateEvent) Parse(bridgeID, bridgeName, eventType string, data json.RawMessage, state *hue.BridgeState) (Event, error) {
+	var updates []hue.ResourceUpdate
+	if err := json.Unmarshal(data, &updates); err != nil {
+		return nil, fmt.Errorf("parse device_software_update event: %w", err)
+	}
+	if len(updates) == 0 {
+		return nil, fmt.Errorf("no updates in device_software_update event")
+	}
+	update := updates[0]
+	e.baseEvent = baseEvent{
+		bridgeID:     bridgeID,
+		bridgeName:   bridgeName,
+		resourceType: "device_software_update",
+		resourceID:   update.ID,
+		eventType:    eventType,
+		timestamp:    time.Now(),
+	}
+	if update.SoftwareUpdate != nil {
+		e.Details = strings.ReplaceAll(update.SoftwareUpdate.State, "_", " ")
+	}
+	if state != nil && update.Owner != nil {
+		if device, ok := state.GetDevice(update.Owner.Rid); ok {
+			e.Name = device.DeviceName("")
+		}
+	}
+	return e, nil
+}
+
+func (e *DeviceSoftwareUpdateEvent) Render(styles *ui.Styles, width int) string {
+	return renderEvent(styles, width, e.baseEvent, e.Name, e.Details, "", 0, false)
+}
+
+// SmartSceneEvent represents a smart scene event.
+type SmartSceneEvent struct {
+	baseEvent
+	Name    string
+	Details string
+}
+
+func (e *SmartSceneEvent) Parse(bridgeID, bridgeName, eventType string, data json.RawMessage, state *hue.BridgeState) (Event, error) {
+	var updates []hue.ResourceUpdate
+	if err := json.Unmarshal(data, &updates); err != nil {
+		return nil, fmt.Errorf("parse smart_scene event: %w", err)
+	}
+	if len(updates) == 0 {
+		return nil, fmt.Errorf("no updates in smart_scene event")
+	}
+	update := updates[0]
+	e.baseEvent = baseEvent{
+		bridgeID:     bridgeID,
+		bridgeName:   bridgeName,
+		resourceType: "smart_scene",
+		resourceID:   update.ID,
+		eventType:    eventType,
+		timestamp:    time.Now(),
+	}
+	if update.SmartSceneState != nil {
+		e.Details = update.SmartSceneState.Active
+	}
+	if update.Metadata != nil && update.Metadata.Name != nil {
+		e.Name = *update.Metadata.Name
+	}
+	return e, nil
+}
+
+func (e *SmartSceneEvent) Render(styles *ui.Styles, width int) string {
+	return renderEvent(styles, width, e.baseEvent, e.Name, e.Details, "", 0, false)
+}
+
+// SimpleDeviceEvent is a generic event for device-owned resources that just need name + event type.
+type SimpleDeviceEvent struct {
+	baseEvent
+	Name    string
+	Details string
+}
+
+func (e *SimpleDeviceEvent) Parse(bridgeID, bridgeName, eventType string, data json.RawMessage, state *hue.BridgeState) (Event, error) {
+	// This should not be called directly - use ParseWithType instead
+	return nil, fmt.Errorf("SimpleDeviceEvent.Parse should not be called directly")
+}
+
+func (e *SimpleDeviceEvent) ParseWithType(bridgeID, bridgeName, resourceType, eventType string, data json.RawMessage, state *hue.BridgeState) (Event, error) {
+	var updates []hue.ResourceUpdate
+	if err := json.Unmarshal(data, &updates); err != nil {
+		return nil, fmt.Errorf("parse %s event: %w", resourceType, err)
+	}
+	if len(updates) == 0 {
+		return nil, fmt.Errorf("no updates in %s event", resourceType)
+	}
+	update := updates[0]
+	e.baseEvent = baseEvent{
+		bridgeID:     bridgeID,
+		bridgeName:   bridgeName,
+		resourceType: resourceType,
+		resourceID:   update.ID,
+		eventType:    eventType,
+		timestamp:    time.Now(),
+	}
+	e.Details = eventType
+	if state != nil && update.Owner != nil {
+		if device, ok := state.GetDevice(update.Owner.Rid); ok {
+			e.Name = device.DeviceName("")
+		}
+	}
+	return e, nil
+}
+
+func (e *SimpleDeviceEvent) Render(styles *ui.Styles, width int) string {
+	return renderEvent(styles, width, e.baseEvent, e.Name, e.Details, "", 0, false)
+}
+
+// SimpleNamedEvent is a generic event for resources with metadata name.
+type SimpleNamedEvent struct {
+	baseEvent
+	Name    string
+	Details string
+}
+
+func (e *SimpleNamedEvent) Parse(bridgeID, bridgeName, eventType string, data json.RawMessage, state *hue.BridgeState) (Event, error) {
+	// This should not be called directly - use ParseWithType instead
+	return nil, fmt.Errorf("SimpleNamedEvent.Parse should not be called directly")
+}
+
+func (e *SimpleNamedEvent) ParseWithType(bridgeID, bridgeName, resourceType, eventType string, data json.RawMessage, state *hue.BridgeState) (Event, error) {
+	var updates []hue.ResourceUpdate
+	if err := json.Unmarshal(data, &updates); err != nil {
+		return nil, fmt.Errorf("parse %s event: %w", resourceType, err)
+	}
+	if len(updates) == 0 {
+		return nil, fmt.Errorf("no updates in %s event", resourceType)
+	}
+	update := updates[0]
+	e.baseEvent = baseEvent{
+		bridgeID:     bridgeID,
+		bridgeName:   bridgeName,
+		resourceType: resourceType,
+		resourceID:   update.ID,
+		eventType:    eventType,
+		timestamp:    time.Now(),
+	}
+	e.Details = eventType
+	if update.Metadata != nil && update.Metadata.Name != nil {
+		e.Name = *update.Metadata.Name
+	}
+	return e, nil
+}
+
+func (e *SimpleNamedEvent) Render(styles *ui.Styles, width int) string {
+	return renderEvent(styles, width, e.baseEvent, e.Name, e.Details, "", 0, false)
+}
+
+// SimpleEvent is a generic event for resources without specific data.
+type SimpleEvent struct {
+	baseEvent
+	Details string
+}
+
+func (e *SimpleEvent) Parse(bridgeID, bridgeName, eventType string, data json.RawMessage, state *hue.BridgeState) (Event, error) {
+	// This should not be called directly - use ParseWithType instead
+	return nil, fmt.Errorf("SimpleEvent.Parse should not be called directly")
+}
+
+func (e *SimpleEvent) ParseWithType(bridgeID, bridgeName, resourceType, eventType string, data json.RawMessage, state *hue.BridgeState) (Event, error) {
+	var updates []hue.ResourceUpdate
+	if err := json.Unmarshal(data, &updates); err != nil {
+		return nil, fmt.Errorf("parse %s event: %w", resourceType, err)
+	}
+	if len(updates) == 0 {
+		return nil, fmt.Errorf("no updates in %s event", resourceType)
+	}
+	update := updates[0]
+	e.baseEvent = baseEvent{
+		bridgeID:     bridgeID,
+		bridgeName:   bridgeName,
+		resourceType: resourceType,
+		resourceID:   update.ID,
+		eventType:    eventType,
+		timestamp:    time.Now(),
+	}
+	e.Details = eventType
+	return e, nil
+}
+
+func (e *SimpleEvent) Render(styles *ui.Styles, width int) string {
+	return renderEvent(styles, width, e.baseEvent, "", e.Details, "", 0, false)
+}
+
 // TemperatureEvent represents a temperature sensor event.
 type TemperatureEvent struct {
 	baseEvent

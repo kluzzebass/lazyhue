@@ -89,6 +89,41 @@ type ResourceUpdate struct {
 		BatteryLevel *int    `json:"battery_level,omitempty"`
 		BatteryState *string `json:"battery_state,omitempty"` // "normal", "low", "critical"
 	} `json:"power_state,omitempty"`
+	// Rotary dial event data
+	RelativeRotary *struct {
+		LastEvent *struct {
+			Action   string `json:"action"`   // "start", "repeat"
+			Rotation *struct {
+				Direction string `json:"direction"` // "clock_wise", "counter_clock_wise"
+				Steps     int    `json:"steps"`
+				Duration  int    `json:"duration"`
+			} `json:"rotation,omitempty"`
+		} `json:"last_event,omitempty"`
+	} `json:"relative_rotary,omitempty"`
+	// Contact sensor event data
+	ContactReport *struct {
+		State string `json:"state"` // "contact", "no_contact"
+	} `json:"contact_report,omitempty"`
+	// Tamper sensor event data
+	TamperReports *[]struct {
+		State string `json:"state"` // "tampered", "not_tampered"
+	} `json:"tamper_reports,omitempty"`
+	// Zigbee connectivity data
+	ConnectivityStatus *struct {
+		Status string `json:"status"` // "connected", "disconnected", "connectivity_issue", "unidirectional_incoming"
+	} `json:"zigbee_connectivity,omitempty"`
+	// Software update data
+	SoftwareUpdate *struct {
+		State string `json:"state"` // "no_update", "update_available", "installing", etc.
+	} `json:"software_update,omitempty"`
+	// Geolocation data
+	Geolocation *struct {
+		IsConfigured bool `json:"is_configured"`
+	} `json:"is_configured,omitempty"`
+	// Smart scene state
+	SmartSceneState *struct {
+		Active string `json:"active"` // "active", "inactive"
+	} `json:"state,omitempty"`
 }
 
 // EventStream manages the SSE connection to a bridge.
