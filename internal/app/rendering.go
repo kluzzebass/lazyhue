@@ -1139,6 +1139,52 @@ func (m *Model) handleNewFieldChange(msg field.FieldChangedMsg) {
 			}
 			return
 		}
+	} else if strings.HasPrefix(msg.FieldID, "room-create-scene:") {
+		roomID := strings.TrimPrefix(msg.FieldID, "room-create-scene:")
+		if _, ok := msg.Value.(field.ButtonValue); ok {
+			// Get room name for the scene name
+			sceneName := "New Scene"
+			bridgeState := bridge.GetState()
+			if bridgeState != nil {
+				if room, ok := bridgeState.GetRoom(roomID); ok {
+					roomName := bridgeState.GetRoomName(room)
+					sceneName = fmt.Sprintf("%s Scene", roomName)
+				}
+			}
+			m.status = fmt.Sprintf("Creating scene \"%s\"...", sceneName)
+			err = bridge.CreateSceneFromCurrentState(roomID, false, sceneName)
+			if err == nil {
+				m.status = fmt.Sprintf("Scene \"%s\" created", sceneName)
+				m.rebuildTreeForActiveTab()
+			}
+			if err != nil {
+				m.status = fmt.Sprintf("Error: %v", err)
+			}
+			return
+		}
+	} else if strings.HasPrefix(msg.FieldID, "zone-create-scene:") {
+		zoneID := strings.TrimPrefix(msg.FieldID, "zone-create-scene:")
+		if _, ok := msg.Value.(field.ButtonValue); ok {
+			// Get zone name for the scene name
+			sceneName := "New Scene"
+			bridgeState := bridge.GetState()
+			if bridgeState != nil {
+				if zone, ok := bridgeState.GetZone(zoneID); ok {
+					zoneName := zone.RoomName("Zone")
+					sceneName = fmt.Sprintf("%s Scene", zoneName)
+				}
+			}
+			m.status = fmt.Sprintf("Creating scene \"%s\"...", sceneName)
+			err = bridge.CreateSceneFromCurrentState(zoneID, true, sceneName)
+			if err == nil {
+				m.status = fmt.Sprintf("Scene \"%s\" created", sceneName)
+				m.rebuildTreeForActiveTab()
+			}
+			if err != nil {
+				m.status = fmt.Sprintf("Error: %v", err)
+			}
+			return
+		}
 	} else if strings.HasPrefix(msg.FieldID, "scene-name:") {
 		sceneID := strings.TrimPrefix(msg.FieldID, "scene-name:")
 		if v, ok := msg.Value.(field.TextValue); ok {
@@ -2124,6 +2170,19 @@ func (m *Model) buildRoomGridRows(room hueclient.RoomGet, isZone bool, state *hu
 				},
 			})
 		}
+
+		// Create Scene button (captures current light states)
+		createSceneBtn := field.NewButtonComponent(
+			fieldPrefix+"create-scene:"+roomID, "Create Scene", "Create Scene",
+			&m.styles, m.zones,
+		)
+		rows = append(rows, gridlayout.GridRow{
+			Type: gridlayout.RowTypeNormal,
+			Cells: []gridlayout.GridCell{
+				{Component: gridlayout.NewLabelWithWidth("Scene", infoLabelWidth)},
+				{Component: createSceneBtn},
+			},
+		})
 	}
 
 	// 2. Settings section (name, archetype)

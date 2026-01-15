@@ -584,6 +584,31 @@ func (s *BridgeState) RoomLights(room hueclient.RoomGet) []hueclient.LightGet {
 	return lights
 }
 
+// ZoneLights returns all lights in a zone.
+// Zones reference lights directly in their children (unlike rooms which reference devices).
+func (s *BridgeState) ZoneLights(zone hueclient.RoomGet) []hueclient.LightGet {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	var lights []hueclient.LightGet
+	if zone.Children != nil {
+		for _, child := range *zone.Children {
+			if child.Rid != nil && child.Rtype != nil && *child.Rtype == hueclient.ResourceIdentifierRtypeLight {
+				if light, ok := s.Lights[*child.Rid]; ok {
+					lights = append(lights, light)
+				}
+			}
+		}
+	}
+
+	// Sort by name for stable ordering
+	sort.Slice(lights, func(i, j int) bool {
+		return s.GetLightName(lights[i]) < s.GetLightName(lights[j])
+	})
+
+	return lights
+}
+
 // RoomGroupedLight returns the grouped light for a room.
 func (s *BridgeState) RoomGroupedLight(room hueclient.RoomGet) (hueclient.GroupedLightGet, bool) {
 	if room.Services == nil {

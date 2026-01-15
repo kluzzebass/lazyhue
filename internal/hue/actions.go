@@ -1161,3 +1161,98 @@ func (b *Bridge) DeleteSmartScene(sceneID string) error {
 	_, err := client.DeleteSmartScene(context.Background(), sceneID)
 	return err
 }
+
+// CreateSceneFromCurrentState creates a new scene for a room/zone using the current light states.
+func (b *Bridge) CreateSceneFromCurrentState(groupID string, isZone bool, sceneName string) error {
+	b.mu.RLock()
+	client := b.client
+	b.mu.RUnlock()
+
+	if client == nil {
+		return ErrAuthFailed
+	}
+
+	// Get the room/zone to find its lights
+	var lights []hueclient.LightGet
+	var groupType hueclient.ResourceIdentifierRtype
+	if isZone {
+		zone, ok := b.state.GetZone(groupID)
+		if !ok {
+			return fmt.Errorf("zone not found: %s", groupID)
+		}
+		lights = b.state.ZoneLights(zone)
+		groupType = hueclient.ResourceIdentifierRtypeZone
+	} else {
+		room, ok := b.state.GetRoom(groupID)
+		if !ok {
+			return fmt.Errorf("room not found: %s", groupID)
+		}
+		lights = b.state.RoomLights(room)
+		groupType = hueclient.ResourceIdentifierRtypeRoom
+	}
+
+	if len(lights) == 0 {
+		return fmt.Errorf("no lights in group")
+	}
+
+	// Build actions from current light states
+	var actions []hueclient.ActionPost
+	lightType := hueclient.ResourceIdentifierRtypeLight
+	for _, light := range lights {
+		if light.Id == nil {
+			continue
+		}
+		lightID := *light.Id
+
+		action := hueclient.ActionPost{
+			Target: hueclient.ResourceIdentifier{
+				Rid:   &lightID,
+				Rtype: &lightType,
+			},
+		}
+
+		// Capture on/off state
+		if light.On != nil && light.On.On != nil {
+			action.Action.On = &hueclient.On{On: light.On.On}
+		}
+
+		// Capture brightness
+		if light.Dimming != nil && light.Dimming.Brightness != nil {
+			action.Action.Dimming = &hueclient.Dimming{Brightness: light.Dimming.Brightness}
+		}
+
+		// Capture color (XY)
+		if light.Color != nil && light.Color.Xy != nil {
+			action.Action.Color = &hueclient.Color{
+				Xy: light.Color.Xy,
+			}
+		}
+
+		// Capture color temperature (mirek)
+		if light.ColorTemperature != nil && light.ColorTemperature.Mirek != nil {
+			action.Action.ColorTemperature = &struct {
+				Mirek *hueclient.Mirek `json:"mirek,omitempty"`
+			}{
+				Mirek: light.ColorTemperature.Mirek,
+			}
+		}
+
+		actions = append(actions, action)
+	}
+
+	// Create the scene
+	b.logRequest(fmt.Sprintf("Creating scene \"%s\" with %d lights", sceneName, len(actions)))
+
+	_, err := client.CreateScene(context.Background(), hueclient.CreateSceneJSONRequestBody{
+		Metadata: hueclient.SceneMetadata{
+			Name: &sceneName,
+		},
+		Group: hueclient.ResourceIdentifier{
+			Rid:   &groupID,
+			Rtype: &groupType,
+		},
+		Actions: actions,
+	})
+
+	return err
+}
