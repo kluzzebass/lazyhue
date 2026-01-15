@@ -869,6 +869,62 @@ func (b *Bridge) UpdateRoomDevices(roomID string, deviceIDs []string) error {
 	return err
 }
 
+// MoveDeviceToRoom moves a device from its current room to a new room.
+// If newRoomID is empty, the device is removed from its current room without being added to another.
+func (b *Bridge) MoveDeviceToRoom(deviceID, newRoomID string) error {
+	// Find current room
+	oldRoom, hasOldRoom := b.state.GetDeviceRoom(deviceID)
+	oldRoomID := ""
+	if hasOldRoom && oldRoom.Id != nil {
+		oldRoomID = *oldRoom.Id
+	}
+
+	// If already in the target room, nothing to do
+	if oldRoomID == newRoomID {
+		return nil
+	}
+
+	// Remove from old room if it was in one
+	if hasOldRoom && oldRoom.Children != nil {
+		var remainingDevices []string
+		for _, child := range *oldRoom.Children {
+			if child.Rid != nil && child.Rtype != nil &&
+				*child.Rtype == hueclient.ResourceIdentifierRtypeDevice &&
+				*child.Rid != deviceID {
+				remainingDevices = append(remainingDevices, *child.Rid)
+			}
+		}
+		if err := b.UpdateRoomDevices(oldRoomID, remainingDevices); err != nil {
+			return fmt.Errorf("remove device from old room: %w", err)
+		}
+	}
+
+	// Add to new room if specified
+	if newRoomID != "" {
+		newRoom, ok := b.state.GetRoom(newRoomID)
+		if !ok {
+			return fmt.Errorf("room not found: %s", newRoomID)
+		}
+
+		var newDevices []string
+		if newRoom.Children != nil {
+			for _, child := range *newRoom.Children {
+				if child.Rid != nil && child.Rtype != nil &&
+					*child.Rtype == hueclient.ResourceIdentifierRtypeDevice {
+					newDevices = append(newDevices, *child.Rid)
+				}
+			}
+		}
+		newDevices = append(newDevices, deviceID)
+
+		if err := b.UpdateRoomDevices(newRoomID, newDevices); err != nil {
+			return fmt.Errorf("add device to new room: %w", err)
+		}
+	}
+
+	return nil
+}
+
 // UpdateZoneServices updates the services (lights) assigned to a zone.
 func (b *Bridge) UpdateZoneServices(zoneID string, serviceIDs []string) error {
 	b.mu.RLock()

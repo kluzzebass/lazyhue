@@ -1139,6 +1139,46 @@ func (m *Model) handleNewFieldChange(msg field.FieldChangedMsg) {
 			}
 			return
 		}
+	} else if strings.HasPrefix(msg.FieldID, "device-room:") || strings.HasPrefix(msg.FieldID, "light-room:") {
+		// Handle both device and light room assignment (both use device ID)
+		deviceID := strings.TrimPrefix(msg.FieldID, "device-room:")
+		if strings.HasPrefix(msg.FieldID, "light-room:") {
+			deviceID = strings.TrimPrefix(msg.FieldID, "light-room:")
+		}
+		if v, ok := msg.Value.(field.SelectValue); ok {
+			bridgeState := bridge.GetState()
+			if bridgeState != nil {
+				allRooms := bridgeState.AllRooms()
+				var newRoomID string
+				var newRoomName string
+
+				if v.Index == 0 {
+					// "No Room" selected - remove from current room
+					newRoomID = ""
+					newRoomName = "No Room"
+				} else if v.Index > 0 && v.Index <= len(allRooms) {
+					// Room selected (index 1 = first room in AllRooms)
+					room := allRooms[v.Index-1]
+					if room.Id != nil {
+						newRoomID = *room.Id
+					}
+					if room.Metadata != nil && room.Metadata.Name != nil {
+						newRoomName = *room.Metadata.Name
+					}
+				}
+
+				m.status = fmt.Sprintf("Moving device to %s...", newRoomName)
+				err = bridge.MoveDeviceToRoom(deviceID, newRoomID)
+				if err == nil {
+					m.status = fmt.Sprintf("Device moved to %s", newRoomName)
+					m.rebuildTreeForActiveTab()
+				}
+				if err != nil {
+					m.status = fmt.Sprintf("Error: %v", err)
+				}
+				return
+			}
+		}
 	} else if strings.HasPrefix(msg.FieldID, "room-create-scene:") {
 		roomID := strings.TrimPrefix(msg.FieldID, "room-create-scene:")
 		if _, ok := msg.Value.(field.ButtonValue); ok {
@@ -1521,12 +1561,12 @@ func (m *Model) buildLightSettingsRows(light hueclient.LightGet, device *hueclie
 	})
 
 	// Device name (editable)
-	if device != nil && device.Metadata != nil && device.Metadata.Name != nil {
-		deviceID := ""
-		if device.Id != nil {
-			deviceID = *device.Id
-		}
+	deviceID := ""
+	if device != nil && device.Id != nil {
+		deviceID = *device.Id
+	}
 
+	if device != nil && device.Metadata != nil && device.Metadata.Name != nil {
 		textInput := field.NewTextComponent(
 			"name:"+deviceID, "Name", *device.Metadata.Name,
 			&m.styles, m.zones,
@@ -1538,6 +1578,58 @@ func (m *Model) buildLightSettingsRows(light hueclient.LightGet, device *hueclie
 				{Component: textInput},
 			},
 		})
+	}
+
+	// Room assignment dropdown (lights move with their device)
+	if deviceID != "" {
+		// Get state from the selected bridge
+		node := m.tree.SelectedNode()
+		if node != nil && node.Item != nil {
+			bridge := m.manager.GetBridge(node.Item.BridgeID)
+			if bridge != nil {
+				state := bridge.GetState()
+				if state != nil {
+					currentRoom, hasRoom := state.GetDeviceRoom(deviceID)
+					currentRoomID := ""
+					if hasRoom && currentRoom.Id != nil {
+						currentRoomID = *currentRoom.Id
+					}
+
+					// Build room options: "No Room" + all rooms
+					allRooms := state.AllRooms()
+					options := make([]field.Option, 0, len(allRooms)+1)
+					options = append(options, field.Option{Label: "No Room", Value: 0})
+					selectedIndex := 0
+
+					for i, room := range allRooms {
+						roomName := "Unknown"
+						roomID := ""
+						if room.Metadata != nil && room.Metadata.Name != nil {
+							roomName = *room.Metadata.Name
+						}
+						if room.Id != nil {
+							roomID = *room.Id
+						}
+						options = append(options, field.Option{Label: roomName, Value: i + 1})
+						if roomID == currentRoomID {
+							selectedIndex = i + 1
+						}
+					}
+
+					roomSelect := field.NewSelectComponent(
+						"light-room:"+deviceID, "Room", selectedIndex, options,
+						&m.styles, m.zones,
+					)
+					rows = append(rows, gridlayout.GridRow{
+						Type: gridlayout.RowTypeNormal,
+						Cells: []gridlayout.GridCell{
+							{Component: gridlayout.NewLabelWithWidth("Room", infoLabelWidth)},
+							{Component: roomSelect},
+						},
+					})
+				}
+			}
+		}
 	}
 
 	// Archetype (editable)
@@ -2530,6 +2622,48 @@ func (m *Model) buildDeviceGridRows(device hueclient.DeviceGet, state *hue.Bridg
 			Cells: []gridlayout.GridCell{
 				{Component: gridlayout.NewLabelWithWidth("Name", infoLabelWidth)},
 				{Component: textInput},
+			},
+		})
+	}
+
+	// Room assignment dropdown
+	if state != nil && deviceID != "" {
+		currentRoom, hasRoom := state.GetDeviceRoom(deviceID)
+		currentRoomID := ""
+		if hasRoom && currentRoom.Id != nil {
+			currentRoomID = *currentRoom.Id
+		}
+
+		// Build room options: "No Room" + all rooms
+		allRooms := state.AllRooms()
+		options := make([]field.Option, 0, len(allRooms)+1)
+		options = append(options, field.Option{Label: "No Room", Value: 0})
+		selectedIndex := 0
+
+		for i, room := range allRooms {
+			roomName := "Unknown"
+			roomID := ""
+			if room.Metadata != nil && room.Metadata.Name != nil {
+				roomName = *room.Metadata.Name
+			}
+			if room.Id != nil {
+				roomID = *room.Id
+			}
+			options = append(options, field.Option{Label: roomName, Value: i + 1})
+			if roomID == currentRoomID {
+				selectedIndex = i + 1
+			}
+		}
+
+		roomSelect := field.NewSelectComponent(
+			"device-room:"+deviceID, "Room", selectedIndex, options,
+			&m.styles, m.zones,
+		)
+		rows = append(rows, gridlayout.GridRow{
+			Type: gridlayout.RowTypeNormal,
+			Cells: []gridlayout.GridCell{
+				{Component: gridlayout.NewLabelWithWidth("Room", infoLabelWidth)},
+				{Component: roomSelect},
 			},
 		})
 	}
