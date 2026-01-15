@@ -1667,63 +1667,6 @@ func (m *Model) buildLightSettingsRows(light hueclient.LightGet, device *hueclie
 		}
 	}
 
-	// Zone membership (toggles for each zone)
-	if light.Id != nil {
-		zoneNode := m.tree.SelectedNode()
-		if zoneNode != nil && zoneNode.Item != nil {
-			zoneBridge := m.manager.GetBridge(zoneNode.Item.BridgeID)
-			if zoneBridge != nil {
-				zoneState := zoneBridge.GetState()
-				if zoneState != nil {
-					lightID := *light.Id
-					allZones := zoneState.AllZones()
-					if len(allZones) > 0 {
-						// Build a set of zone IDs this light is in
-						lightZones := zoneState.GetLightZones(lightID)
-						lightZoneIDs := make(map[string]bool)
-						for _, zone := range lightZones {
-							if zone.Id != nil {
-								lightZoneIDs[*zone.Id] = true
-							}
-						}
-
-						// Add header for zones section
-						zonesHeader := field.NewHeaderComponent("zones-header", "Zones", &m.styles, m.zones)
-						rows = append(rows, gridlayout.GridRow{
-							Type:    gridlayout.RowTypeSection,
-							Section: zonesHeader,
-						})
-
-						// Add a toggle for each zone
-						for _, zone := range allZones {
-							zoneID := ""
-							zoneName := "Unknown"
-							if zone.Id != nil {
-								zoneID = *zone.Id
-							}
-							if zone.Metadata != nil && zone.Metadata.Name != nil {
-								zoneName = *zone.Metadata.Name
-							}
-
-							isInZone := lightZoneIDs[zoneID]
-							zoneToggle := field.NewToggleComponent(
-								"light-zone:"+lightID+":"+zoneID, zoneName, isInZone,
-								&m.styles, m.zones,
-							)
-							rows = append(rows, gridlayout.GridRow{
-								Type: gridlayout.RowTypeNormal,
-								Cells: []gridlayout.GridCell{
-									{Component: gridlayout.NewLabelWithWidth(zoneName, infoLabelWidth)},
-									{Component: zoneToggle},
-								},
-							})
-						}
-					}
-				}
-			}
-		}
-	}
-
 	// Archetype (editable)
 	if device != nil && device.ProductData != nil && device.ProductData.ProductArchetype != nil {
 		deviceID := ""
@@ -1788,6 +1731,63 @@ func (m *Model) buildLightSettingsRows(light hueclient.LightGet, device *hueclie
 				{Component: selectComp},
 			},
 		})
+	}
+
+	// Zone membership (toggles for each zone)
+	if light.Id != nil {
+		zoneNode := m.tree.SelectedNode()
+		if zoneNode != nil && zoneNode.Item != nil {
+			zoneBridge := m.manager.GetBridge(zoneNode.Item.BridgeID)
+			if zoneBridge != nil {
+				zoneState := zoneBridge.GetState()
+				if zoneState != nil {
+					lightID := *light.Id
+					allZones := zoneState.AllZones()
+					if len(allZones) > 0 {
+						// Build a set of zone IDs this light is in
+						lightZones := zoneState.GetLightZones(lightID)
+						lightZoneIDs := make(map[string]bool)
+						for _, zone := range lightZones {
+							if zone.Id != nil {
+								lightZoneIDs[*zone.Id] = true
+							}
+						}
+
+						// Add header for zones section
+						zonesHeader := field.NewHeaderComponent("zones-header", "Zones", &m.styles, m.zones)
+						rows = append(rows, gridlayout.GridRow{
+							Type:    gridlayout.RowTypeSection,
+							Section: zonesHeader,
+						})
+
+						// Add a toggle for each zone
+						for _, zone := range allZones {
+							zoneID := ""
+							zoneName := "Unknown"
+							if zone.Id != nil {
+								zoneID = *zone.Id
+							}
+							if zone.Metadata != nil && zone.Metadata.Name != nil {
+								zoneName = *zone.Metadata.Name
+							}
+
+							isInZone := lightZoneIDs[zoneID]
+							zoneToggle := field.NewToggleComponent(
+								"light-zone:"+lightID+":"+zoneID, zoneName, isInZone,
+								&m.styles, m.zones,
+							)
+							rows = append(rows, gridlayout.GridRow{
+								Type: gridlayout.RowTypeNormal,
+								Cells: []gridlayout.GridCell{
+									{Component: gridlayout.NewLabelWithWidth(zoneName, infoLabelWidth)},
+									{Component: zoneToggle},
+								},
+							})
+						}
+					}
+				}
+			}
+		}
 	}
 
 	return rows
