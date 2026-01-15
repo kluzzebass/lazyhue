@@ -367,13 +367,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Store discovered bridges
 		m.discoveredBridges = msg.bridges
 
-		// Update status
-		if len(msg.bridges) == 0 {
-			if m.manager.BridgeCount() == 0 {
+		// Only update status during initial discovery (no bridges yet) or when pairing
+		// Don't overwrite status during periodic discovery when bridges are connected
+		if m.manager.BridgeCount() == 0 {
+			if len(msg.bridges) == 0 {
 				m.status = "No bridges found. Press 'p' to pair."
+			} else {
+				m.status = fmt.Sprintf("Found %d bridge(s)", len(msg.bridges))
 			}
-		} else {
-			m.status = fmt.Sprintf("Found %d bridge(s)", len(msg.bridges))
 		}
 
 		// Add discovered bridges to manager (but don't connect - that happens separately)
