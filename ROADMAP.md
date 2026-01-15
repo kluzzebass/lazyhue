@@ -73,7 +73,7 @@ A terminal UI for Philips Hue bridge management.
 ## 📋 Planned Features
 
 ### Light Control (Phase 2)
-- [ ] Gradient control for gradient-capable lights (needs hardware to test)
+- [x] Gradient control for gradient-capable lights
 
 ### Room/Zone Management
 - [x] Create new room (`n` key)
