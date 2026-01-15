@@ -1327,39 +1327,6 @@ func (m *Model) buildClassificationRows(light hueclient.LightGet, device *huecli
 		Section: header,
 	})
 
-	// Archetype (editable if device available)
-	if device != nil && device.ProductData != nil && device.ProductData.ProductArchetype != nil {
-		archetypeKeys := getSortedProductArchetypes()
-		var options []field.Option
-		currentIndex := 0
-		currentArchetype := string(*device.ProductData.ProductArchetype)
-
-		for i, key := range archetypeKeys {
-			displayName := hue.ProductArchetypeDisplayNames[key]
-			options = append(options, field.Option{Label: displayName, Value: i})
-			if key == currentArchetype {
-				currentIndex = i
-			}
-		}
-
-		deviceID := ""
-		if device.Id != nil {
-			deviceID = *device.Id
-		}
-
-		selectComp := field.NewSelectComponent(
-			"archetype:"+deviceID, "Archetype", currentIndex, options,
-			&m.styles, m.zones,
-		)
-		rows = append(rows, gridlayout.GridRow{
-			Type: gridlayout.RowTypeNormal,
-			Cells: []gridlayout.GridCell{
-				{Component: gridlayout.NewLabelWithWidth("Archetype", infoLabelWidth)},
-				{Component: selectComp},
-			},
-		})
-	}
-
 	// Type (read-only)
 	if light.Type != nil {
 		rows = append(rows, gridlayout.NewInfoRow("Type", string(*light.Type), infoLabelWidth))
@@ -1370,10 +1337,23 @@ func (m *Model) buildClassificationRows(light hueclient.LightGet, device *huecli
 		rows = append(rows, gridlayout.NewInfoRow("Mode", string(*light.Mode), infoLabelWidth))
 	}
 
+	// Alternate name (read-only) - shows light's own name if different from device name
+	if light.Metadata != nil && light.Metadata.Name != nil {
+		altName := *light.Metadata.Name
+		currentName := ""
+		if device != nil && device.Metadata != nil && device.Metadata.Name != nil {
+			currentName = *device.Metadata.Name
+		}
+		if altName != currentName {
+			rows = append(rows, gridlayout.NewInfoRow("Alternate name", altName, infoLabelWidth))
+		}
+	}
+
 	return rows
 }
 
-// buildLightSettingsRows builds rows for the light settings section (name + power-on behavior).
+// buildLightSettingsRows builds rows for the light settings section.
+// Only includes editable fields: name, archetype, power-on behavior.
 func (m *Model) buildLightSettingsRows(light hueclient.LightGet, device *hueclient.DeviceGet) []gridlayout.GridRow {
 	var rows []gridlayout.GridRow
 
@@ -1404,20 +1384,40 @@ func (m *Model) buildLightSettingsRows(light hueclient.LightGet, device *hueclie
 		})
 	}
 
-	// Show alternate light name if different from device name
-	if light.Metadata != nil && light.Metadata.Name != nil {
-		altName := *light.Metadata.Name
-		currentName := ""
-		if device != nil && device.Metadata != nil && device.Metadata.Name != nil {
-			currentName = *device.Metadata.Name
+	// Archetype (editable)
+	if device != nil && device.ProductData != nil && device.ProductData.ProductArchetype != nil {
+		deviceID := ""
+		if device.Id != nil {
+			deviceID = *device.Id
 		}
-		if altName != currentName {
-			dimStyle := m.styles.Dimmed
-			rows = append(rows, gridlayout.NewStyledInfoRow("Alternate", altName, infoLabelWidth, dimStyle))
+
+		archetypeKeys := getSortedProductArchetypes()
+		var options []field.Option
+		currentIndex := 0
+		currentArchetype := string(*device.ProductData.ProductArchetype)
+
+		for i, key := range archetypeKeys {
+			displayName := hue.ProductArchetypeDisplayNames[key]
+			options = append(options, field.Option{Label: displayName, Value: i})
+			if key == currentArchetype {
+				currentIndex = i
+			}
 		}
+
+		selectComp := field.NewSelectComponent(
+			"archetype:"+deviceID, "Archetype", currentIndex, options,
+			&m.styles, m.zones,
+		)
+		rows = append(rows, gridlayout.GridRow{
+			Type: gridlayout.RowTypeNormal,
+			Cells: []gridlayout.GridCell{
+				{Component: gridlayout.NewLabelWithWidth("Archetype", infoLabelWidth)},
+				{Component: selectComp},
+			},
+		})
 	}
 
-	// Powerup preset (editable) - part of settings, not a separate section
+	// Powerup preset (editable)
 	if light.Powerup != nil && light.Powerup.Preset != nil {
 		presetKeys := getSortedPowerupPresets()
 		var options []field.Option
@@ -1448,52 +1448,6 @@ func (m *Model) buildLightSettingsRows(light hueclient.LightGet, device *hueclie
 				{Component: selectComp},
 			},
 		})
-	}
-
-	return rows
-}
-
-func (m *Model) buildNameRows(light hueclient.LightGet, device *hueclient.DeviceGet) []gridlayout.GridRow {
-	var rows []gridlayout.GridRow
-
-	// Section header
-	header := field.NewHeaderComponent("name-header", "Name", &m.styles, m.zones)
-	rows = append(rows, gridlayout.GridRow{
-		Type:    gridlayout.RowTypeSection,
-		Section: header,
-	})
-
-	// Device name (editable)
-	if device != nil && device.Metadata != nil && device.Metadata.Name != nil {
-		deviceID := ""
-		if device.Id != nil {
-			deviceID = *device.Id
-		}
-
-		textInput := field.NewTextComponent(
-			"name:"+deviceID, "Name", *device.Metadata.Name,
-			&m.styles, m.zones,
-		)
-		rows = append(rows, gridlayout.GridRow{
-			Type: gridlayout.RowTypeNormal,
-			Cells: []gridlayout.GridCell{
-				{Component: gridlayout.NewLabelWithWidth("Name", infoLabelWidth)},
-				{Component: textInput},
-			},
-		})
-	}
-
-	// Show alternate light name if different from device name
-	if light.Metadata != nil && light.Metadata.Name != nil {
-		altName := *light.Metadata.Name
-		currentName := ""
-		if device != nil && device.Metadata != nil && device.Metadata.Name != nil {
-			currentName = *device.Metadata.Name
-		}
-		if altName != currentName {
-			dimStyle := m.styles.Dimmed
-			rows = append(rows, gridlayout.NewStyledInfoRow("Alternate", altName, infoLabelWidth, dimStyle))
-		}
 	}
 
 	return rows
@@ -1669,61 +1623,61 @@ func (m *Model) buildControlsRows(light hueclient.LightGet) []gridlayout.GridRow
 	return rows
 }
 
-// buildStateRows builds rows for the current state section.
+// buildStateRows builds rows for technical state info not shown in controls.
+// Only includes details that add value beyond what the controls already display.
 func (m *Model) buildStateRows(light hueclient.LightGet) []gridlayout.GridRow {
 	var rows []gridlayout.GridRow
 
+	// Collect items that provide info beyond the controls
+	var hasContent bool
+
+	// Min dim level (not shown in brightness slider)
+	if light.Dimming != nil && light.Dimming.MinDimLevel != nil {
+		hasContent = true
+	}
+
+	// Gamut type (not shown in color wheel)
+	if light.Color != nil && light.Color.GamutType != nil {
+		hasContent = true
+	}
+
+	// CT range (not shown in color temp slider)
+	if light.ColorTemperature != nil && light.ColorTemperature.MirekSchema != nil {
+		schema := light.ColorTemperature.MirekSchema
+		if schema.MirekMinimum != nil && schema.MirekMaximum != nil {
+			hasContent = true
+		}
+	}
+
+	// Only add section if we have content
+	if !hasContent {
+		return rows
+	}
+
 	// Section header
-	header := field.NewHeaderComponent("state-header", "State", &m.styles, m.zones)
+	header := field.NewHeaderComponent("state-header", "Limits", &m.styles, m.zones)
 	rows = append(rows, gridlayout.GridRow{
 		Type:    gridlayout.RowTypeSection,
 		Section: header,
 	})
 
-	// On/off status with indicator
-	status := "off"
-	isOn := light.On != nil && light.On.On != nil && *light.On.On
-	if isOn {
-		status = "on"
-	}
-	indicator := m.renderLightIndicator(light, isOn)
-	rows = append(rows, gridlayout.NewInfoRow("Status", indicator+" "+status, infoLabelWidth))
-
-	// Brightness
-	if light.Dimming != nil {
-		if light.Dimming.Brightness != nil {
-			rows = append(rows, gridlayout.NewInfoRow("Brightness", fmt.Sprintf("%.0f%%", *light.Dimming.Brightness), infoLabelWidth))
-		}
-		if light.Dimming.MinDimLevel != nil {
-			rows = append(rows, gridlayout.NewInfoRow("Min Dim", fmt.Sprintf("%.0f%%", *light.Dimming.MinDimLevel), infoLabelWidth))
-		}
+	// Min dim level
+	if light.Dimming != nil && light.Dimming.MinDimLevel != nil {
+		rows = append(rows, gridlayout.NewInfoRow("Min Dim", fmt.Sprintf("%.0f%%", *light.Dimming.MinDimLevel), infoLabelWidth))
 	}
 
-	// Color
-	if light.Color != nil && light.Color.Xy != nil {
-		xy := light.Color.Xy
-		if xy.X != nil && xy.Y != nil {
-			rows = append(rows, gridlayout.NewInfoRow("Color XY", fmt.Sprintf("(%.4f, %.4f)", *xy.X, *xy.Y), infoLabelWidth))
-		}
-		if light.Color.GamutType != nil {
-			rows = append(rows, gridlayout.NewInfoRow("Gamut", string(*light.Color.GamutType), infoLabelWidth))
-		}
+	// Gamut type
+	if light.Color != nil && light.Color.GamutType != nil {
+		rows = append(rows, gridlayout.NewInfoRow("Gamut", string(*light.Color.GamutType), infoLabelWidth))
 	}
 
-	// Color temperature
-	if light.ColorTemperature != nil {
-		if light.ColorTemperature.Mirek != nil {
-			mirek := *light.ColorTemperature.Mirek
-			kelvin := 1000000 / int(mirek)
-			rows = append(rows, gridlayout.NewInfoRow("Color Temp", fmt.Sprintf("%d mirek (~%dK)", mirek, kelvin), infoLabelWidth))
-		}
-		if light.ColorTemperature.MirekSchema != nil {
-			schema := light.ColorTemperature.MirekSchema
-			if schema.MirekMinimum != nil && schema.MirekMaximum != nil {
-				minK := 1000000 / int(*schema.MirekMaximum)
-				maxK := 1000000 / int(*schema.MirekMinimum)
-				rows = append(rows, gridlayout.NewInfoRow("CT Range", fmt.Sprintf("%dK - %dK", minK, maxK), infoLabelWidth))
-			}
+	// CT range
+	if light.ColorTemperature != nil && light.ColorTemperature.MirekSchema != nil {
+		schema := light.ColorTemperature.MirekSchema
+		if schema.MirekMinimum != nil && schema.MirekMaximum != nil {
+			minK := 1000000 / int(*schema.MirekMaximum)
+			maxK := 1000000 / int(*schema.MirekMinimum)
+			rows = append(rows, gridlayout.NewInfoRow("CT Range", fmt.Sprintf("%dK - %dK", minK, maxK), infoLabelWidth))
 		}
 	}
 
