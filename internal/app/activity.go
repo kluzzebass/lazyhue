@@ -555,6 +555,124 @@ func (e *GroupedLightLevelEvent) Render(styles *ui.Styles, width int) string {
 	return renderEvent(styles, width, e.baseEvent, e.Name, e.Details, "", 0, false)
 }
 
+// GroupedMotionEvent represents a grouped_motion event (aggregate motion for a room/zone).
+type GroupedMotionEvent struct {
+	baseEvent
+	Name    string
+	Details string
+}
+
+func (e *GroupedMotionEvent) Parse(bridgeID, bridgeName, eventType string, data json.RawMessage, state *hue.BridgeState) (Event, error) {
+	var updates []hue.ResourceUpdate
+	if err := json.Unmarshal(data, &updates); err != nil {
+		return nil, fmt.Errorf("parse grouped_motion event: %w", err)
+	}
+
+	if len(updates) == 0 {
+		return nil, fmt.Errorf("no updates in grouped_motion event")
+	}
+
+	update := updates[0]
+	e.baseEvent = baseEvent{
+		bridgeID:     bridgeID,
+		bridgeName:   bridgeName,
+		resourceType: "grouped_motion",
+		resourceID:   update.ID,
+		eventType:    eventType,
+		timestamp:    time.Now(),
+	}
+
+	if state != nil {
+		// Check rooms for this grouped_motion service
+		allRooms := state.AllRooms()
+		for _, room := range allRooms {
+			if room.Services != nil {
+				for _, svc := range *room.Services {
+					if svc.Rtype != nil && *svc.Rtype == "grouped_motion" && svc.Rid != nil && *svc.Rid == update.ID {
+						if room.Metadata != nil && room.Metadata.Name != nil {
+							e.Name = *room.Metadata.Name
+						}
+						var anyMotion bool
+						var sensorCount int
+						if room.Children != nil {
+							for _, child := range *room.Children {
+								if child.Rid == nil || child.Rtype == nil || *child.Rtype != "device" {
+									continue
+								}
+								if device, ok := state.GetDevice(*child.Rid); ok {
+									if hasMotion, isDetecting := state.GetDeviceMotionState(device); hasMotion {
+										sensorCount++
+										if isDetecting {
+											anyMotion = true
+										}
+									}
+								}
+							}
+						}
+						if sensorCount > 0 {
+							if anyMotion {
+								e.Details = "motion detected"
+							} else {
+								e.Details = "clear"
+							}
+						} else {
+							e.Details = "no sensors"
+						}
+						return e, nil
+					}
+				}
+			}
+		}
+		// Check zones for this grouped_motion service
+		allZones := state.AllZones()
+		for _, zone := range allZones {
+			if zone.Services != nil {
+				for _, svc := range *zone.Services {
+					if svc.Rtype != nil && *svc.Rtype == "grouped_motion" && svc.Rid != nil && *svc.Rid == update.ID {
+						if zone.Metadata != nil && zone.Metadata.Name != nil {
+							e.Name = *zone.Metadata.Name
+						}
+						var anyMotion bool
+						var sensorCount int
+						if zone.Children != nil {
+							for _, child := range *zone.Children {
+								if child.Rid == nil || child.Rtype == nil || *child.Rtype != "device" {
+									continue
+								}
+								if device, ok := state.GetDevice(*child.Rid); ok {
+									if hasMotion, isDetecting := state.GetDeviceMotionState(device); hasMotion {
+										sensorCount++
+										if isDetecting {
+											anyMotion = true
+										}
+									}
+								}
+							}
+						}
+						if sensorCount > 0 {
+							if anyMotion {
+								e.Details = "motion detected"
+							} else {
+								e.Details = "clear"
+							}
+						} else {
+							e.Details = "no sensors"
+						}
+						return e, nil
+					}
+				}
+			}
+		}
+		e.Details = "motion updated"
+	}
+
+	return e, nil
+}
+
+func (e *GroupedMotionEvent) Render(styles *ui.Styles, width int) string {
+	return renderEvent(styles, width, e.baseEvent, e.Name, e.Details, "", 0, false)
+}
+
 // UnhandledEvent represents an event type that we don't have a specific handler for.
 type UnhandledEvent struct {
 	baseEvent
