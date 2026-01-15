@@ -11,6 +11,25 @@ import (
 	"github.com/kluzzebass/lazyhue/internal/ui/panels"
 )
 
+// getBridgeDisplayName returns the best available display name for a bridge.
+// It prefers the device metadata name (updated via API) over the discovery name.
+func getBridgeDisplayName(bridge *hue.Bridge, state *hue.BridgeState) string {
+	// Try to get name from bridge device metadata (updated via API)
+	if state != nil {
+		if bridgeDevice, ok := state.GetBridgeDevice(); ok {
+			if deviceName := state.GetDeviceName(bridgeDevice); deviceName != "Unknown" {
+				return deviceName
+			}
+		}
+	}
+	// Fall back to discovery name
+	if bridge.Info.Name != "" {
+		return bridge.Info.Name
+	}
+	// Last resort: use bridge ID
+	return bridge.Info.ID
+}
+
 // buildHomeTree builds the tree panel showing Bridges as root nodes,
 // with Rooms, Zones, and Entertainment Areas as children of each bridge.
 func (m *Model) buildHomeTree(_ *hue.BridgeState) {
@@ -25,10 +44,8 @@ func (m *Model) buildHomeTree(_ *hue.BridgeState) {
 
 	// Create a node for each bridge
 	for _, bridge := range allBridges {
-		bridgeName := bridge.Info.Name
-		if bridgeName == "" {
-			bridgeName = bridge.Info.ID
-		}
+		state := bridge.GetState()
+		bridgeName := getBridgeDisplayName(bridge, state)
 
 		// Check if bridge is currently blinking
 		isBlinking := false
@@ -424,7 +441,7 @@ func (m *Model) buildLightsTree(_ *hue.BridgeState) {
 			continue
 		}
 
-		bridgeName := bridge.Info.Name
+		bridgeName := getBridgeDisplayName(bridge, state)
 		lights := state.AllLights()
 		rooms := state.AllRooms()
 
@@ -530,7 +547,7 @@ func (m *Model) buildDevicesTree(_ *hue.BridgeState) {
 			}
 		}
 
-		bridgeName := bridge.Info.Name
+		bridgeName := getBridgeDisplayName(bridge, state)
 
 		for _, device := range devices {
 			id := ""
@@ -607,7 +624,7 @@ func (m *Model) buildScenesTree(_ *hue.BridgeState) {
 			continue
 		}
 
-		bridgeName := bridge.Info.Name
+		bridgeName := getBridgeDisplayName(bridge, state)
 		scenes := state.AllScenes()
 		for _, scene := range scenes {
 			name := scene.SceneName("")
