@@ -1,0 +1,137 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.25.5"
+          cache: false
+
+      - name: Run tests
+        run: go test -v ./...
+
+      - name: Build binaries
+        run: |
+          VERSION=${GITHUB_REF#refs/tags/}
+          COMMIT=$(git rev-parse --short HEAD)
+          DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+          LDFLAGS="-s -w -X main.version=$VERSION -X main.commit=$COMMIT -X main.date=$DATE"
+
+          mkdir -p dist
+
+          # Linux glibc builds
+          GOOS=linux GOARCH=amd64 go build -ldflags "$LDFLAGS" -o dist/lazyhue-x86_64-unknown-linux-gnu ./cmd/lazyhue
+          GOOS=linux GOARCH=arm64 go build -ldflags "$LDFLAGS" -o dist/lazyhue-aarch64-unknown-linux-gnu ./cmd/lazyhue
+          GOOS=linux GOARCH=arm GOARM=6 go build -ldflags "$LDFLAGS" -o dist/lazyhue-arm-unknown-linux-gnueabihf ./cmd/lazyhue
+
+          # Linux musl builds (static)
+          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags "$LDFLAGS" -o dist/lazyhue-x86_64-unknown-linux-musl ./cmd/lazyhue
+          CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -ldflags "$LDFLAGS" -o dist/lazyhue-aarch64-unknown-linux-musl ./cmd/lazyhue
+
+          # macOS
+          GOOS=darwin GOARCH=amd64 go build -ldflags "$LDFLAGS" -o dist/lazyhue-x86_64-apple-darwin ./cmd/lazyhue
+          GOOS=darwin GOARCH=arm64 go build -ldflags "$LDFLAGS" -o dist/lazyhue-aarch64-apple-darwin ./cmd/lazyhue
+
+          # Windows
+          GOOS=windows GOARCH=amd64 go build -ldflags "$LDFLAGS" -o dist/lazyhue-x86_64-pc-windows-gnu.exe ./cmd/lazyhue
+
+          # Create checksums
+          cd dist && sha256sum * > checksums.txt
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: |
+            dist/lazyhue-x86_64-unknown-linux-gnu
+            dist/lazyhue-aarch64-unknown-linux-gnu
+            dist/lazyhue-arm-unknown-linux-gnueabihf
+            dist/lazyhue-x86_64-unknown-linux-musl
+            dist/lazyhue-aarch64-unknown-linux-musl
+            dist/lazyhue-x86_64-apple-darwin
+            dist/lazyhue-aarch64-apple-darwin
+            dist/lazyhue-x86_64-pc-windows-gnu.exe
+            dist/checksums.txt
+          generate_release_notes: true
+
+      - name: Extract version and checksums
+        id: version
+        run: |
+          VERSION=${GITHUB_REF#refs/tags/}
+          VERSION_NUM=${VERSION#v}
+          SHA256_X86=$(grep "lazyhue-x86_64-apple-darwin" dist/checksums.txt | cut -d' ' -f1)
+          SHA256_ARM=$(grep "lazyhue-aarch64-apple-darwin" dist/checksums.txt | cut -d' ' -f1)
+
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "version_number=$VERSION_NUM" >> $GITHUB_OUTPUT
+          echo "sha256_x86=$SHA256_X86" >> $GITHUB_OUTPUT
+          echo "sha256_arm=$SHA256_ARM" >> $GITHUB_OUTPUT
+
+      - name: Checkout homebrew-tap
+        uses: actions/checkout@v4
+        with:
+          repository: kluzzebass/homebrew-tap
+          token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          path: homebrew-tap
+
+      - name: Update Homebrew formula
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          VERSION_NUM: ${{ steps.version.outputs.version_number }}
+          SHA256_X86: ${{ steps.version.outputs.sha256_x86 }}
+          SHA256_ARM: ${{ steps.version.outputs.sha256_arm }}
+        run: |
+          cd homebrew-tap
+          cat > lazyhue.rb << EOF
+          class Lazyhue < Formula
+            desc "TUI tool for managing Hue bridges"
+            homepage "https://github.com/kluzzebass/lazyhue"
+            version "$VERSION_NUM"
+            license "MIT"
+
+            on_macos do
+              on_intel do
+                url "https://github.com/kluzzebass/lazyhue/releases/download/$VERSION/lazyhue-x86_64-apple-darwin"
+                sha256 "$SHA256_X86"
+              end
+
+              on_arm do
+                url "https://github.com/kluzzebass/lazyhue/releases/download/$VERSION/lazyhue-aarch64-apple-darwin"
+                sha256 "$SHA256_ARM"
+              end
+            end
+
+            def install
+              bin.install Dir["lazyhue-*"].first => "lazyhue"
+            end
+
+            test do
+              output = shell_output("#{bin}/lazyhue -h")
+              assert_match "debug-log", output
+            end
+          end
+          EOF
+
+      - name: Commit and push Homebrew formula
+        run: |
+          cd homebrew-tap
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add lazyhue.rb
+          git commit -m "Update lazyhue to ${{ steps.version.outputs.version }}"
+          git push
