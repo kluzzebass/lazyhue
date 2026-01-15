@@ -646,10 +646,15 @@ func (m *Model) buildBridgeChildren(bridgeNode *panels.TreeNode, state *hue.Brid
 	}
 }
 
-// buildLightsTree builds the tree panel showing all Lights from all bridges.
+// buildLightsTree builds the tree panel showing Lights grouped by bridge.
 func (m *Model) buildLightsTree(_ *hue.BridgeState) {
 	allBridges := m.manager.AllBridges()
-	var nodes []*panels.TreeNode
+	var bridgeNodes []*panels.TreeNode
+
+	// Sort bridges by name for consistent ordering
+	sort.Slice(allBridges, func(i, j int) bool {
+		return allBridges[i].Info.Name < allBridges[j].Info.Name
+	})
 
 	for _, bridge := range allBridges {
 		if !bridge.IsConnected() {
@@ -681,6 +686,33 @@ func (m *Model) buildLightsTree(_ *hue.BridgeState) {
 			}
 		}
 
+		// Calculate aggregate brightness/color for bridge
+		bridgeBrightness, bridgeIndicatorColor := hue.CalculateRoomAggregate(lights)
+
+		// Create bridge node
+		bridgeNode := &panels.TreeNode{
+			ID:       bridge.Info.ID,
+			Label:    fmt.Sprintf("%s (%d)", bridgeName, len(lights)),
+			Depth:    0,
+			Expanded: true,
+			Item: &panels.EntityItem{
+				ID:             bridge.Info.ID,
+				Name:           bridgeName,
+				Type:           panels.EntityBridge,
+				IsOn:           bridge.IsConnected(),
+				Brightness:     bridgeBrightness,
+				IndicatorColor: bridgeIndicatorColor,
+				RawPtr:         bridge,
+				BridgeID:       bridge.Info.ID,
+			},
+			Children: make([]*panels.TreeNode, 0, len(lights)),
+		}
+
+		// Sort lights by name
+		sort.Slice(lights, func(i, j int) bool {
+			return state.GetLightName(lights[i]) < state.GetLightName(lights[j])
+		})
+
 		for _, light := range lights {
 			name := state.GetLightName(light)
 			isOn := light.On != nil && light.On.On != nil && *light.On.On
@@ -696,12 +728,11 @@ func (m *Model) buildLightsTree(_ *hue.BridgeState) {
 
 			// Store a copy of the light in RawPtr for later access
 			lightCopy := light
-			nodes = append(nodes, &panels.TreeNode{
-				ID:           nodeID(bridge.Info.ID, *light.Id),
-				Label:        name,
-				GroupSuffix:  groupSuffix,
-				BridgeSuffix: "[" + bridgeName + "]",
-				Depth:        0,
+			bridgeNode.Children = append(bridgeNode.Children, &panels.TreeNode{
+				ID:          nodeID(bridge.Info.ID, *light.Id),
+				Label:       name,
+				GroupSuffix: groupSuffix,
+				Depth:       1,
 				Item: &panels.EntityItem{
 					ID:             *light.Id,
 					Name:           name,
@@ -714,20 +745,22 @@ func (m *Model) buildLightsTree(_ *hue.BridgeState) {
 				},
 			})
 		}
+
+		bridgeNodes = append(bridgeNodes, bridgeNode)
 	}
 
-	// Sort by name
-	sort.Slice(nodes, func(i, j int) bool {
-		return nodes[i].Item.Name < nodes[j].Item.Name
-	})
-
-	m.tree.SetRoots(nodes)
+	m.tree.SetRoots(bridgeNodes)
 }
 
-// buildDevicesTree builds the tree panel showing all Devices from all bridges.
+// buildDevicesTree builds the tree panel showing Devices grouped by bridge.
 func (m *Model) buildDevicesTree(_ *hue.BridgeState) {
 	allBridges := m.manager.AllBridges()
-	var nodes []*panels.TreeNode
+	var bridgeNodes []*panels.TreeNode
+
+	// Sort bridges by name for consistent ordering
+	sort.Slice(allBridges, func(i, j int) bool {
+		return allBridges[i].Info.Name < allBridges[j].Info.Name
+	})
 
 	for _, bridge := range allBridges {
 		if !bridge.IsConnected() {
@@ -738,6 +771,7 @@ func (m *Model) buildDevicesTree(_ *hue.BridgeState) {
 			continue
 		}
 
+		bridgeName := getBridgeDisplayName(bridge, state)
 		devices := state.AllDevices()
 		rooms := state.AllRooms()
 
@@ -766,8 +800,8 @@ func (m *Model) buildDevicesTree(_ *hue.BridgeState) {
 			}
 		}
 
-		bridgeName := getBridgeDisplayName(bridge, state)
-
+		// Filter and collect non-light devices
+		var nonLightDevices []hueclient.DeviceGet
 		for _, device := range devices {
 			id := ""
 			if device.Id != nil {
@@ -793,6 +827,37 @@ func (m *Model) buildDevicesTree(_ *hue.BridgeState) {
 				continue
 			}
 
+			nonLightDevices = append(nonLightDevices, device)
+		}
+
+		// Sort devices by name
+		sort.Slice(nonLightDevices, func(i, j int) bool {
+			return nonLightDevices[i].DeviceName("") < nonLightDevices[j].DeviceName("")
+		})
+
+		// Create bridge node
+		bridgeNode := &panels.TreeNode{
+			ID:       bridge.Info.ID,
+			Label:    fmt.Sprintf("%s (%d)", bridgeName, len(nonLightDevices)),
+			Depth:    0,
+			Expanded: true,
+			Item: &panels.EntityItem{
+				ID:       bridge.Info.ID,
+				Name:     bridgeName,
+				Type:     panels.EntityBridge,
+				IsOn:     bridge.IsConnected(),
+				RawPtr:   bridge,
+				BridgeID: bridge.Info.ID,
+			},
+			Children: make([]*panels.TreeNode, 0, len(nonLightDevices)),
+		}
+
+		for _, device := range nonLightDevices {
+			id := ""
+			if device.Id != nil {
+				id = *device.Id
+			}
+
 			name := device.DeviceName("")
 
 			// Check if device has motion sensor and its state
@@ -804,12 +869,11 @@ func (m *Model) buildDevicesTree(_ *hue.BridgeState) {
 				groupSuffix = "(" + roomName + ")"
 			}
 
-			nodes = append(nodes, &panels.TreeNode{
-				ID:           nodeID(bridge.Info.ID, id),
-				Label:        name,
-				GroupSuffix:  groupSuffix,
-				BridgeSuffix: "[" + bridgeName + "]",
-				Depth:        0,
+			bridgeNode.Children = append(bridgeNode.Children, &panels.TreeNode{
+				ID:          nodeID(bridge.Info.ID, id),
+				Label:       name,
+				GroupSuffix: groupSuffix,
+				Depth:       1,
 				Item: &panels.EntityItem{
 					ID:       id,
 					Name:     name,
@@ -819,20 +883,17 @@ func (m *Model) buildDevicesTree(_ *hue.BridgeState) {
 				},
 			})
 		}
+
+		bridgeNodes = append(bridgeNodes, bridgeNode)
 	}
 
-	// Sort by name
-	sort.Slice(nodes, func(i, j int) bool {
-		return nodes[i].Item.Name < nodes[j].Item.Name
-	})
-
-	m.tree.SetRoots(nodes)
+	m.tree.SetRoots(bridgeNodes)
 }
 
 // buildScenesTree builds the tree panel showing all Scenes and Smart Scenes from all bridges.
 func (m *Model) buildScenesTree(_ *hue.BridgeState) {
 	allBridges := m.manager.AllBridges()
-	var nodes []*panels.TreeNode
+	var bridgeNodes []*panels.TreeNode
 
 	for _, bridge := range allBridges {
 		if !bridge.IsConnected() {
@@ -844,9 +905,35 @@ func (m *Model) buildScenesTree(_ *hue.BridgeState) {
 		}
 
 		bridgeName := getBridgeDisplayName(bridge, state)
+		scenes := state.AllScenes()
+		smartScenes := state.AllSmartScenes()
+		totalScenes := len(scenes) + len(smartScenes)
+
+		// Create bridge node
+		bridgeNode := &panels.TreeNode{
+			ID:       bridge.Info.ID,
+			Label:    fmt.Sprintf("%s (%d)", bridgeName, totalScenes),
+			Depth:    0,
+			Expanded: true,
+			Item: &panels.EntityItem{
+				ID:       bridge.Info.ID,
+				Name:     bridgeName,
+				Type:     panels.EntityBridge,
+				IsOn:     bridge.IsConnected(),
+				RawPtr:   bridge,
+				BridgeID: bridge.Info.ID,
+			},
+			Children: make([]*panels.TreeNode, 0, totalScenes),
+		}
+
+		// Collect all scene nodes for sorting
+		type sceneNode struct {
+			name string
+			node *panels.TreeNode
+		}
+		var sceneNodes []sceneNode
 
 		// Regular scenes
-		scenes := state.AllScenes()
 		for _, scene := range scenes {
 			name := scene.SceneName("")
 			id := ""
@@ -865,29 +952,29 @@ func (m *Model) buildScenesTree(_ *hue.BridgeState) {
 				}
 			}
 
-			// Build suffixes
 			groupSuffix := ""
 			if groupName != "" {
 				groupSuffix = "(" + groupName + ")"
 			}
 
-			nodes = append(nodes, &panels.TreeNode{
-				ID:           nodeID(bridge.Info.ID, id),
-				Label:        name,
-				GroupSuffix:  groupSuffix,
-				BridgeSuffix: "[" + bridgeName + "]",
-				Depth:        0,
-				Item: &panels.EntityItem{
-					ID:       id,
-					Name:     name,
-					Type:     panels.EntityScene,
-					BridgeID: bridge.Info.ID,
+			sceneNodes = append(sceneNodes, sceneNode{
+				name: name,
+				node: &panels.TreeNode{
+					ID:          nodeID(bridge.Info.ID, id),
+					Label:       name,
+					GroupSuffix: groupSuffix,
+					Depth:       1,
+					Item: &panels.EntityItem{
+						ID:       id,
+						Name:     name,
+						Type:     panels.EntityScene,
+						BridgeID: bridge.Info.ID,
+					},
 				},
 			})
 		}
 
 		// Smart scenes
-		smartScenes := state.AllSmartScenes()
 		for _, scene := range smartScenes {
 			name := state.GetSmartSceneName(scene)
 			id := ""
@@ -906,7 +993,6 @@ func (m *Model) buildScenesTree(_ *hue.BridgeState) {
 				}
 			}
 
-			// Build suffixes
 			groupSuffix := ""
 			if groupName != "" {
 				groupSuffix = "(" + groupName + ")"
@@ -914,29 +1000,38 @@ func (m *Model) buildScenesTree(_ *hue.BridgeState) {
 
 			isActive := scene.State == "active"
 
-			nodes = append(nodes, &panels.TreeNode{
-				ID:           nodeID(bridge.Info.ID, id),
-				Label:        name,
-				GroupSuffix:  groupSuffix,
-				BridgeSuffix: "[" + bridgeName + "]",
-				Depth:        0,
-				Item: &panels.EntityItem{
-					ID:       id,
-					Name:     name,
-					Type:     panels.EntitySmartScene,
-					IsOn:     isActive,
-					BridgeID: bridge.Info.ID,
+			sceneNodes = append(sceneNodes, sceneNode{
+				name: name,
+				node: &panels.TreeNode{
+					ID:          nodeID(bridge.Info.ID, id),
+					Label:       name,
+					GroupSuffix: groupSuffix,
+					Depth:       1,
+					Item: &panels.EntityItem{
+						ID:       id,
+						Name:     name,
+						Type:     panels.EntitySmartScene,
+						IsOn:     isActive,
+						BridgeID: bridge.Info.ID,
+					},
 				},
 			})
 		}
+
+		// Sort scenes by name within this bridge
+		sort.Slice(sceneNodes, func(i, j int) bool {
+			return sceneNodes[i].name < sceneNodes[j].name
+		})
+
+		// Add sorted scenes to bridge node
+		for _, sn := range sceneNodes {
+			bridgeNode.Children = append(bridgeNode.Children, sn.node)
+		}
+
+		bridgeNodes = append(bridgeNodes, bridgeNode)
 	}
 
-	// Sort by name
-	sort.Slice(nodes, func(i, j int) bool {
-		return nodes[i].Item.Name < nodes[j].Item.Name
-	})
-
-	m.tree.SetRoots(nodes)
+	m.tree.SetRoots(bridgeNodes)
 }
 
 // getLightBrightnessAndColor extracts brightness and color from a light.
