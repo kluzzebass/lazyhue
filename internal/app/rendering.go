@@ -1726,7 +1726,7 @@ func (m *Model) buildLightSettingsRows(light hueclient.LightGet, device *hueclie
 						if room.Id != nil {
 							roomID = *room.Id
 						}
-						options = append(options, field.Option{Label: roomName, Value: i + 1})
+						options = append(options, field.Option{Label: roomName, Value: i + 1, Color: m.styles.Theme.EntityRoom})
 						if roomID == currentRoomID {
 							selectedIndex = i + 1
 						}
@@ -1771,16 +1771,16 @@ func (m *Model) buildLightSettingsRows(light hueclient.LightGet, device *hueclie
 						// Build options and selected map for checkbox component
 						var options []field.Option
 						selected := make(map[int]bool)
-						for i, zone := range allZones {
+						for i, z := range allZones {
 							zoneID := ""
 							zoneName := "Unknown"
-							if zone.Id != nil {
-								zoneID = *zone.Id
+							if z.Id != nil {
+								zoneID = *z.Id
 							}
-							if zone.Metadata != nil && zone.Metadata.Name != nil {
-								zoneName = *zone.Metadata.Name
+							if z.Metadata != nil && z.Metadata.Name != nil {
+								zoneName = *z.Metadata.Name
 							}
-							options = append(options, field.Option{Label: zoneName, Value: i})
+							options = append(options, field.Option{Label: zoneName, Value: i, Color: m.styles.Theme.EntityZone})
 							if lightZoneIDs[zoneID] {
 								selected[i] = true
 							}
@@ -2421,12 +2421,14 @@ func (m *Model) buildRoomGridRows(room hueclient.RoomGet, isZone bool, state *hu
 
 	// Lights section
 	if len(lights) > 0 {
-		lightsHeader := field.NewHeaderComponent("lights-header", fmt.Sprintf("Lights (%d)", len(lights)), &m.styles, m.zones)
+		lightsHeaderText := fmt.Sprintf("Lights %s%d%s", m.styles.Dimmed.Render("["), len(lights), m.styles.Dimmed.Render("]"))
+		lightsHeader := field.NewHeaderComponent("lights-header", lightsHeaderText, &m.styles, m.zones)
 		rows = append(rows, gridlayout.GridRow{
 			Type:    gridlayout.RowTypeSection,
 			Section: lightsHeader,
 		})
 
+		lightStyle := lipgloss.NewStyle().Foreground(m.styles.Theme.EntityLight)
 		for _, light := range lights {
 			name := state.GetLightName(light)
 			isOn := panels.IsLightOn(light)
@@ -2450,7 +2452,7 @@ func (m *Model) buildRoomGridRows(room hueclient.RoomGet, isZone bool, state *hu
 			if len(detailParts) > 0 {
 				suffix = " " + m.styles.Dimmed.Render(strings.Join(detailParts, ", "))
 			}
-			rows = append(rows, gridlayout.NewListItemRow(indicator, name+suffix))
+			rows = append(rows, gridlayout.NewListItemRow(indicator, lightStyle.Render(name)+suffix))
 		}
 	}
 
@@ -2481,13 +2483,15 @@ func (m *Model) buildRoomGridRows(room hueclient.RoomGet, isZone bool, state *hu
 		}
 
 		if len(nonLightDevices) > 0 {
-			devicesHeader := field.NewHeaderComponent("devices-header", fmt.Sprintf("Devices (%d)", len(nonLightDevices)), &m.styles, m.zones)
+			devicesHeaderText := fmt.Sprintf("Devices %s%d%s", m.styles.Dimmed.Render("["), len(nonLightDevices), m.styles.Dimmed.Render("]"))
+			devicesHeader := field.NewHeaderComponent("devices-header", devicesHeaderText, &m.styles, m.zones)
 			rows = append(rows, gridlayout.GridRow{
 				Type:    gridlayout.RowTypeSection,
 				Section: devicesHeader,
 			})
+			deviceStyle := lipgloss.NewStyle().Foreground(m.styles.Theme.EntityDevice)
 			for _, name := range nonLightDevices {
-				rows = append(rows, gridlayout.NewListItemRow("•", name))
+				rows = append(rows, gridlayout.NewListItemRow("•", deviceStyle.Render(name)))
 			}
 		}
 	}
@@ -2495,13 +2499,15 @@ func (m *Model) buildRoomGridRows(room hueclient.RoomGet, isZone bool, state *hu
 	// Scenes
 	scenes := state.RoomScenes(roomID)
 	if len(scenes) > 0 {
-		scenesHeader := field.NewHeaderComponent("scenes-header", fmt.Sprintf("Scenes (%d)", len(scenes)), &m.styles, m.zones)
+		scenesHeaderText := fmt.Sprintf("Scenes %s%d%s", m.styles.Dimmed.Render("["), len(scenes), m.styles.Dimmed.Render("]"))
+		scenesHeader := field.NewHeaderComponent("scenes-header", scenesHeaderText, &m.styles, m.zones)
 		rows = append(rows, gridlayout.GridRow{
 			Type:    gridlayout.RowTypeSection,
 			Section: scenesHeader,
 		})
+		sceneStyle := lipgloss.NewStyle().Foreground(m.styles.Theme.EntityScene)
 		for _, scene := range scenes {
-			rows = append(rows, gridlayout.NewListItemRow("•", scene.SceneName("")))
+			rows = append(rows, gridlayout.NewListItemRow("•", sceneStyle.Render(scene.SceneName(""))))
 		}
 	}
 
@@ -2600,16 +2606,19 @@ func (m *Model) buildSceneGridRows(scene hueclient.SceneGet, state *hue.BridgeSt
 	if scene.Group != nil && scene.Group.Rid != nil && state != nil {
 		groupName := ""
 		groupType := "unknown"
+		var groupStyle lipgloss.Style
 		if scene.Group.Rtype != nil {
 			groupType = string(*scene.Group.Rtype)
 		}
 		if room, ok := state.GetRoom(*scene.Group.Rid); ok {
 			groupName = state.GetRoomName(room)
+			groupStyle = lipgloss.NewStyle().Foreground(m.styles.Theme.EntityRoom)
 		} else if zone, ok := state.GetZone(*scene.Group.Rid); ok {
-			groupName = state.GetRoomName(zone) + " (zone)"
+			groupName = zone.RoomName("")
+			groupStyle = lipgloss.NewStyle().Foreground(m.styles.Theme.EntityZone)
 		}
 		if groupName != "" {
-			rows = append(rows, gridlayout.NewInfoRow("Group", groupName, infoLabelWidth))
+			rows = append(rows, gridlayout.NewStyledInfoRow("Group", groupStyle.Render(groupName), infoLabelWidth, lipgloss.NewStyle()))
 		}
 		rows = append(rows, gridlayout.NewStyledInfoRow("Group Type", groupType, infoLabelWidth, m.styles.Dimmed))
 	}
@@ -2624,12 +2633,14 @@ func (m *Model) buildSceneGridRows(scene hueclient.SceneGet, state *hue.BridgeSt
 
 	// Actions
 	if scene.Actions != nil && len(*scene.Actions) > 0 {
-		actionsHeader := field.NewHeaderComponent("actions-header", fmt.Sprintf("Actions (%d)", len(*scene.Actions)), &m.styles, m.zones)
+		actionsHeaderText := fmt.Sprintf("Actions %s%d%s", m.styles.Dimmed.Render("["), len(*scene.Actions), m.styles.Dimmed.Render("]"))
+		actionsHeader := field.NewHeaderComponent("actions-header", actionsHeaderText, &m.styles, m.zones)
 		rows = append(rows, gridlayout.GridRow{
 			Type:    gridlayout.RowTypeSection,
 			Section: actionsHeader,
 		})
 
+		actionLightStyle := lipgloss.NewStyle().Foreground(m.styles.Theme.EntityLight)
 		for _, action := range *scene.Actions {
 			targetName := "unknown"
 			if action.Target != nil && action.Target.Rid != nil {
@@ -2663,7 +2674,7 @@ func (m *Model) buildSceneGridRows(scene hueclient.SceneGet, state *hue.BridgeSt
 				}
 			}
 
-			rows = append(rows, gridlayout.NewListItemRow("•", targetName+m.styles.Dimmed.Render(actionDesc)))
+			rows = append(rows, gridlayout.NewListItemRow("•", actionLightStyle.Render(targetName)+m.styles.Dimmed.Render(actionDesc)))
 		}
 	}
 
@@ -2760,7 +2771,7 @@ func (m *Model) buildDeviceGridRows(device hueclient.DeviceGet, state *hue.Bridg
 			if room.Id != nil {
 				roomID = *room.Id
 			}
-			options = append(options, field.Option{Label: roomName, Value: i + 1})
+			options = append(options, field.Option{Label: roomName, Value: i + 1, Color: m.styles.Theme.EntityRoom})
 			if roomID == currentRoomID {
 				selectedIndex = i + 1
 			}
@@ -3166,12 +3177,14 @@ func (m *Model) buildEntertainmentGridRows(cfg hue.EntertainmentConfiguration, s
 
 	// Lights section
 	if len(cfg.Lights) > 0 {
-		lightsHeader := field.NewHeaderComponent("lights-header", fmt.Sprintf("Lights (%d)", len(cfg.Lights)), &m.styles, m.zones)
+		cfgLightsHeaderText := fmt.Sprintf("Lights %s%d%s", m.styles.Dimmed.Render("["), len(cfg.Lights), m.styles.Dimmed.Render("]"))
+		lightsHeader := field.NewHeaderComponent("lights-header", cfgLightsHeaderText, &m.styles, m.zones)
 		rows = append(rows, gridlayout.GridRow{
 			Type:    gridlayout.RowTypeSection,
 			Section: lightsHeader,
 		})
 
+		cfgLightStyle := lipgloss.NewStyle().Foreground(m.styles.Theme.EntityLight)
 		for _, light := range cfg.Lights {
 			if light.Service != nil && light.Service.RID != "" {
 				lightName := light.Service.RID
@@ -3180,14 +3193,15 @@ func (m *Model) buildEntertainmentGridRows(cfg hue.EntertainmentConfiguration, s
 						lightName = state.GetLightName(l)
 					}
 				}
-				rows = append(rows, gridlayout.NewListItemRow("•", lightName))
+				rows = append(rows, gridlayout.NewListItemRow("•", cfgLightStyle.Render(lightName)))
 			}
 		}
 	}
 
 	// Channels section
 	if len(cfg.Channels) > 0 {
-		channelsHeader := field.NewHeaderComponent("channels-header", fmt.Sprintf("Channels (%d)", len(cfg.Channels)), &m.styles, m.zones)
+		channelsHeaderText := fmt.Sprintf("Channels %s%d%s", m.styles.Dimmed.Render("["), len(cfg.Channels), m.styles.Dimmed.Render("]"))
+		channelsHeader := field.NewHeaderComponent("channels-header", channelsHeaderText, &m.styles, m.zones)
 		rows = append(rows, gridlayout.GridRow{
 			Type:    gridlayout.RowTypeSection,
 			Section: channelsHeader,
@@ -3218,7 +3232,8 @@ func (m *Model) buildRoomsCategoryGridRows(data panels.RoomsCategoryData, state 
 	var rows []gridlayout.GridRow
 
 	// Header with count
-	header := field.NewHeaderComponent("rooms-header", fmt.Sprintf("Rooms (%d)", len(data.Rooms)), &m.styles, m.zones)
+	roomsHeaderText := fmt.Sprintf("Rooms %s%d%s", m.styles.Dimmed.Render("["), len(data.Rooms), m.styles.Dimmed.Render("]"))
+	header := field.NewHeaderComponent("rooms-header", roomsHeaderText, &m.styles, m.zones)
 	rows = append(rows, gridlayout.GridRow{
 		Type:    gridlayout.RowTypeSection,
 		Section: header,
@@ -3240,6 +3255,7 @@ func (m *Model) buildRoomsCategoryGridRows(data panels.RoomsCategoryData, state 
 	rows = append(rows, gridlayout.NewEmptyRow())
 
 	// List each room
+	roomStyle := lipgloss.NewStyle().Foreground(m.styles.Theme.EntityRoom)
 	for _, room := range data.Rooms {
 		name := "Unknown"
 		if room.Metadata != nil && room.Metadata.Name != nil {
@@ -3256,7 +3272,7 @@ func (m *Model) buildRoomsCategoryGridRows(data panels.RoomsCategoryData, state 
 			indicator = ui.RenderBrightnessIndicatorFromHex(brightness, indicatorColor)
 		}
 
-		rows = append(rows, gridlayout.NewListItemRow(indicator, name))
+		rows = append(rows, gridlayout.NewListItemRow(indicator, roomStyle.Render(name)))
 	}
 
 	return rows
@@ -3267,7 +3283,8 @@ func (m *Model) buildZonesCategoryGridRows(data panels.ZonesCategoryData, state 
 	var rows []gridlayout.GridRow
 
 	// Header with count
-	header := field.NewHeaderComponent("zones-header", fmt.Sprintf("Zones (%d)", len(data.Zones)), &m.styles, m.zones)
+	zonesHeaderText := fmt.Sprintf("Zones %s%d%s", m.styles.Dimmed.Render("["), len(data.Zones), m.styles.Dimmed.Render("]"))
+	header := field.NewHeaderComponent("zones-header", zonesHeaderText, &m.styles, m.zones)
 	rows = append(rows, gridlayout.GridRow{
 		Type:    gridlayout.RowTypeSection,
 		Section: header,
@@ -3276,7 +3293,7 @@ func (m *Model) buildZonesCategoryGridRows(data panels.ZonesCategoryData, state 
 	// Count on/off zones
 	onCount := 0
 	for _, zone := range data.Zones {
-		lights := state.RoomLights(zone)
+		lights := state.ZoneLights(zone)
 		for _, light := range lights {
 			if panels.IsLightOn(light) {
 				onCount++
@@ -3289,6 +3306,7 @@ func (m *Model) buildZonesCategoryGridRows(data panels.ZonesCategoryData, state 
 	rows = append(rows, gridlayout.NewEmptyRow())
 
 	// List each zone
+	zoneStyle := lipgloss.NewStyle().Foreground(m.styles.Theme.EntityZone)
 	for _, zone := range data.Zones {
 		name := "Unknown"
 		if zone.Metadata != nil && zone.Metadata.Name != nil {
@@ -3296,7 +3314,7 @@ func (m *Model) buildZonesCategoryGridRows(data panels.ZonesCategoryData, state 
 		}
 
 		// Get zone's lights and calculate state
-		lights := state.RoomLights(zone)
+		lights := state.ZoneLights(zone)
 		brightness, indicatorColor := hue.CalculateRoomAggregate(lights)
 
 		// Build indicator
@@ -3305,7 +3323,7 @@ func (m *Model) buildZonesCategoryGridRows(data panels.ZonesCategoryData, state 
 			indicator = ui.RenderBrightnessIndicatorFromHex(brightness, indicatorColor)
 		}
 
-		rows = append(rows, gridlayout.NewListItemRow(indicator, name))
+		rows = append(rows, gridlayout.NewListItemRow(indicator, zoneStyle.Render(name)))
 	}
 
 	return rows
@@ -3316,9 +3334,9 @@ func (m *Model) buildLightsCategoryGridRows(data panels.LightsCategoryData, _ *h
 	var rows []gridlayout.GridRow
 
 	// Header with parent context
-	headerText := fmt.Sprintf("Lights (%d)", len(data.Lights))
+	headerText := fmt.Sprintf("Lights %s%d%s", m.styles.Dimmed.Render("["), len(data.Lights), m.styles.Dimmed.Render("]"))
 	if data.ParentName != "" {
-		headerText = fmt.Sprintf("Lights in %s (%d)", data.ParentName, len(data.Lights))
+		headerText = fmt.Sprintf("Lights in %s %s%d%s", data.ParentName, m.styles.Dimmed.Render("["), len(data.Lights), m.styles.Dimmed.Render("]"))
 	}
 	header := field.NewHeaderComponent("lights-header", headerText, &m.styles, m.zones)
 	rows = append(rows, gridlayout.GridRow{
@@ -3362,7 +3380,8 @@ func (m *Model) buildLightsCategoryGridRows(data panels.LightsCategoryData, _ *h
 			indicator = ui.RenderBrightnessIndicatorFromHex(brightness, indicatorColor)
 		}
 
-		rows = append(rows, gridlayout.NewListItemRow(indicator, name))
+		catLightStyle := lipgloss.NewStyle().Foreground(m.styles.Theme.EntityLight)
+		rows = append(rows, gridlayout.NewListItemRow(indicator, catLightStyle.Render(name)))
 	}
 
 	return rows
@@ -3373,9 +3392,9 @@ func (m *Model) buildDevicesCategoryGridRows(data panels.DevicesCategoryData, st
 	var rows []gridlayout.GridRow
 
 	// Header with parent context
-	headerText := fmt.Sprintf("Devices (%d)", len(data.Devices))
+	headerText := fmt.Sprintf("Devices %s%d%s", m.styles.Dimmed.Render("["), len(data.Devices), m.styles.Dimmed.Render("]"))
 	if data.ParentName != "" {
-		headerText = fmt.Sprintf("Devices in %s (%d)", data.ParentName, len(data.Devices))
+		headerText = fmt.Sprintf("Devices in %s %s%d%s", data.ParentName, m.styles.Dimmed.Render("["), len(data.Devices), m.styles.Dimmed.Render("]"))
 	}
 	header := field.NewHeaderComponent("devices-header", headerText, &m.styles, m.zones)
 	rows = append(rows, gridlayout.GridRow{
@@ -3387,6 +3406,7 @@ func (m *Model) buildDevicesCategoryGridRows(data panels.DevicesCategoryData, st
 	rows = append(rows, gridlayout.NewEmptyRow())
 
 	// List each device
+	catDeviceStyle := lipgloss.NewStyle().Foreground(m.styles.Theme.EntityDevice)
 	for _, device := range data.Devices {
 		name := device.DeviceName("Unknown")
 
@@ -3399,7 +3419,7 @@ func (m *Model) buildDevicesCategoryGridRows(data panels.DevicesCategoryData, st
 			indicator = m.styles.Success.Render("●")
 		}
 
-		rows = append(rows, gridlayout.NewListItemRow(indicator, name))
+		rows = append(rows, gridlayout.NewListItemRow(indicator, catDeviceStyle.Render(name)))
 	}
 
 	return rows
@@ -3410,9 +3430,9 @@ func (m *Model) buildScenesCategoryGridRows(data panels.ScenesCategoryData, _ *h
 	var rows []gridlayout.GridRow
 
 	// Header with parent context
-	headerText := fmt.Sprintf("Scenes (%d)", len(data.Scenes))
+	headerText := fmt.Sprintf("Scenes %s%d%s", m.styles.Dimmed.Render("["), len(data.Scenes), m.styles.Dimmed.Render("]"))
 	if data.ParentName != "" {
-		headerText = fmt.Sprintf("Scenes in %s (%d)", data.ParentName, len(data.Scenes))
+		headerText = fmt.Sprintf("Scenes in %s %s%d%s", data.ParentName, m.styles.Dimmed.Render("["), len(data.Scenes), m.styles.Dimmed.Render("]"))
 	}
 	header := field.NewHeaderComponent("scenes-header", headerText, &m.styles, m.zones)
 	rows = append(rows, gridlayout.GridRow{
@@ -3424,9 +3444,10 @@ func (m *Model) buildScenesCategoryGridRows(data panels.ScenesCategoryData, _ *h
 	rows = append(rows, gridlayout.NewEmptyRow())
 
 	// List each scene
+	catSceneStyle := lipgloss.NewStyle().Foreground(m.styles.Theme.EntityScene)
 	for _, scene := range data.Scenes {
 		name := scene.SceneName("Unknown")
-		rows = append(rows, gridlayout.NewListItemRow("•", name))
+		rows = append(rows, gridlayout.NewListItemRow("•", catSceneStyle.Render(name)))
 	}
 
 	return rows
@@ -3488,21 +3509,27 @@ func (m *Model) buildSmartSceneGridRows(scene hueclient.SmartSceneGet, state *hu
 	// Group (room/zone)
 	if scene.Group.Rid != nil && state != nil {
 		groupName := ""
+		groupType := "unknown"
+		var groupStyle lipgloss.Style
 		if scene.Group.Rtype != nil {
+			groupType = string(*scene.Group.Rtype)
 			switch *scene.Group.Rtype {
 			case hueclient.ResourceIdentifierRtypeRoom:
 				if room, ok := state.GetRoom(*scene.Group.Rid); ok {
 					groupName = state.GetRoomName(room)
+					groupStyle = lipgloss.NewStyle().Foreground(m.styles.Theme.EntityRoom)
 				}
 			case hueclient.ResourceIdentifierRtypeZone:
 				if zone, ok := state.GetZone(*scene.Group.Rid); ok {
 					groupName = zone.RoomName("Unknown")
+					groupStyle = lipgloss.NewStyle().Foreground(m.styles.Theme.EntityZone)
 				}
 			}
 		}
 		if groupName != "" {
-			rows = append(rows, gridlayout.NewInfoRow("Group", groupName, infoLabelWidth))
+			rows = append(rows, gridlayout.NewStyledInfoRow("Group", groupStyle.Render(groupName), infoLabelWidth, lipgloss.NewStyle()))
 		}
+		rows = append(rows, gridlayout.NewStyledInfoRow("Group Type", groupType, infoLabelWidth, m.styles.Dimmed))
 	}
 
 	// Transition duration (convert from ms to seconds)
@@ -3535,9 +3562,9 @@ func (m *Model) buildSmartScenesCategoryGridRows(data panels.SmartScenesCategory
 	var rows []gridlayout.GridRow
 
 	// Header with parent context
-	headerText := fmt.Sprintf("Smart Scenes (%d)", len(data.SmartScenes))
+	headerText := fmt.Sprintf("Smart Scenes %s%d%s", m.styles.Dimmed.Render("["), len(data.SmartScenes), m.styles.Dimmed.Render("]"))
 	if data.ParentName != "" {
-		headerText = fmt.Sprintf("Smart Scenes on %s (%d)", data.ParentName, len(data.SmartScenes))
+		headerText = fmt.Sprintf("Smart Scenes on %s %s%d%s", data.ParentName, m.styles.Dimmed.Render("["), len(data.SmartScenes), m.styles.Dimmed.Render("]"))
 	}
 	header := field.NewHeaderComponent("smartscenes-header", headerText, &m.styles, m.zones)
 	rows = append(rows, gridlayout.GridRow{
@@ -3549,16 +3576,17 @@ func (m *Model) buildSmartScenesCategoryGridRows(data panels.SmartScenesCategory
 	rows = append(rows, gridlayout.NewEmptyRow())
 
 	// List each smart scene with status
+	smartSceneStyle := lipgloss.NewStyle().Foreground(m.styles.Theme.EntityScene)
 	for _, scene := range data.SmartScenes {
 		name := "Unknown"
 		if scene.Metadata.Name != nil {
 			name = *scene.Metadata.Name
 		}
-		statusIndicator := "○" // inactive
+		statusIndicator := m.styles.Dimmed.Render("○") // inactive
 		if scene.State == "active" {
-			statusIndicator = "●" // active
+			statusIndicator = m.styles.Success.Render("●") // active
 		}
-		rows = append(rows, gridlayout.NewListItemRow(statusIndicator, name))
+		rows = append(rows, gridlayout.NewListItemRow(statusIndicator, smartSceneStyle.Render(name)))
 	}
 
 	return rows
@@ -3569,7 +3597,8 @@ func (m *Model) buildEntertainmentCategoryGridRows(data panels.EntertainmentCate
 	var rows []gridlayout.GridRow
 
 	// Header with count
-	header := field.NewHeaderComponent("entertainment-header", fmt.Sprintf("Entertainment Areas (%d)", len(data.Configurations)), &m.styles, m.zones)
+	entHeaderText := fmt.Sprintf("Entertainment Areas %s%d%s", m.styles.Dimmed.Render("["), len(data.Configurations), m.styles.Dimmed.Render("]"))
+	header := field.NewHeaderComponent("entertainment-header", entHeaderText, &m.styles, m.zones)
 	rows = append(rows, gridlayout.GridRow{
 		Type:    gridlayout.RowTypeSection,
 		Section: header,
@@ -3579,8 +3608,9 @@ func (m *Model) buildEntertainmentCategoryGridRows(data panels.EntertainmentCate
 	rows = append(rows, gridlayout.NewEmptyRow())
 
 	// List each entertainment configuration
+	entStyle := lipgloss.NewStyle().Foreground(m.styles.Theme.EntityEntertainment)
 	for _, cfg := range data.Configurations {
-		rows = append(rows, gridlayout.NewListItemRow("•", cfg.Name))
+		rows = append(rows, gridlayout.NewListItemRow("•", entStyle.Render(cfg.Name)))
 	}
 
 	return rows

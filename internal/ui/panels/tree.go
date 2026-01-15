@@ -175,13 +175,18 @@ func (d TreeDelegate) Render(w io.Writer, m list.Model, index int, item list.Ite
 
 	suffix := ""
 	if node.GroupSuffix != "" {
-		// Group (room/zone) suffix in secondary color
-		groupStyle := lipgloss.NewStyle().Foreground(d.Styles.Theme.Secondary)
-		suffix += " " + groupStyle.Render(node.GroupSuffix)
+		// Group (room/zone) suffix - dimmed brackets, entity color content
+		// GroupSuffix is "(RoomName)" so strip the parens and re-add as brackets with styling
+		content := strings.TrimPrefix(strings.TrimSuffix(node.GroupSuffix, ")"), "(")
+		groupStyle := lipgloss.NewStyle().Foreground(d.Styles.Theme.EntityRoom)
+		suffix += " " + d.Styles.Dimmed.Render("[") + groupStyle.Render(content) + d.Styles.Dimmed.Render("]")
 	}
 	if node.BridgeSuffix != "" {
-		// Bridge suffix dimmed
-		suffix += " " + d.Styles.Dimmed.Render(node.BridgeSuffix)
+		// Bridge suffix - dimmed brackets, entity color content
+		// BridgeSuffix is "[BridgeName]" so strip the brackets and re-add with styling
+		content := strings.TrimPrefix(strings.TrimSuffix(node.BridgeSuffix, "]"), "[")
+		bridgeStyle := lipgloss.NewStyle().Foreground(d.Styles.Theme.EntityBridge)
+		suffix += " " + d.Styles.Dimmed.Render("[") + bridgeStyle.Render(content) + d.Styles.Dimmed.Render("]")
 	}
 	if isSelected {
 		label = d.Styles.Selected.Render(label) + countSuffix

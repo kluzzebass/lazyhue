@@ -11,6 +11,12 @@ import (
 	"github.com/kluzzebass/lazyhue/internal/ui/panels"
 )
 
+// nodeID creates a unique tree node ID by combining bridge ID and entity ID.
+// This ensures click zones don't conflict across bridges.
+func nodeID(bridgeID, entityID string) string {
+	return bridgeID + ":" + entityID
+}
+
 // getBridgeDisplayName returns the best available display name for a bridge.
 // It prefers the device metadata name (updated via API) over the discovery name.
 func getBridgeDisplayName(bridge *hue.Bridge, state *hue.BridgeState) string {
@@ -132,7 +138,7 @@ func (m *Model) buildBridgeChildren(bridgeNode *panels.TreeNode, state *hue.Brid
 			brightness, indicatorColor := hue.CalculateRoomAggregate(lights)
 
 			roomNode := &panels.TreeNode{
-				ID:       roomID,
+				ID:       nodeID(bridgeID, roomID),
 				Label:    name,
 				Depth:    2,
 				Expanded: false,
@@ -181,15 +187,18 @@ func (m *Model) buildBridgeChildren(bridgeNode *panels.TreeNode, state *hue.Brid
 			// Lights subsection
 			if len(lights) > 0 {
 				lightsNode := &panels.TreeNode{
-					ID:       roomID + ":lights",
+					ID:       nodeID(bridgeID, roomID+":lights"),
 					Label:    fmt.Sprintf("Lights (%d)", len(lights)),
 					Depth:    3,
 					Expanded: false,
 					Item: &panels.EntityItem{
-						ID:       roomID + ":lights",
-						Name:     fmt.Sprintf("Lights in %s", name),
-						Type:     panels.EntityLightsCategory,
-						BridgeID: bridgeID,
+						ID:             roomID + ":lights",
+						Name:           fmt.Sprintf("Lights in %s", name),
+						Type:           panels.EntityLightsCategory,
+						IsOn:           brightness > 0,
+						Brightness:     brightness,
+						IndicatorColor: indicatorColor,
+						BridgeID:       bridgeID,
 						RawPtr: panels.LightsCategoryData{
 							ParentName: name,
 							Lights:     lights,
@@ -208,7 +217,7 @@ func (m *Model) buildBridgeChildren(bridgeNode *panels.TreeNode, state *hue.Brid
 					// Store a copy of the light in RawPtr for later access
 					lightCopy := light
 					lightsNode.Children = append(lightsNode.Children, &panels.TreeNode{
-						ID:    lightID,
+						ID:    nodeID(bridgeID, lightID),
 						Label: lightName,
 						Depth: 4,
 						Item: &panels.EntityItem{
@@ -229,7 +238,7 @@ func (m *Model) buildBridgeChildren(bridgeNode *panels.TreeNode, state *hue.Brid
 			// Devices subsection
 			if len(nonLightDevices) > 0 {
 				devicesNode := &panels.TreeNode{
-					ID:       roomID + ":devices",
+					ID:       nodeID(bridgeID, roomID+":devices"),
 					Label:    fmt.Sprintf("Devices (%d)", len(nonLightDevices)),
 					Depth:    3,
 					Expanded: false,
@@ -255,7 +264,7 @@ func (m *Model) buildBridgeChildren(bridgeNode *panels.TreeNode, state *hue.Brid
 					hasMotion, isDetecting := state.GetDeviceMotionState(device)
 					isOn := hasMotion && isDetecting
 					devicesNode.Children = append(devicesNode.Children, &panels.TreeNode{
-						ID:    deviceID,
+						ID:    nodeID(bridgeID, deviceID),
 						Label: deviceName,
 						Depth: 4,
 						Item: &panels.EntityItem{
@@ -273,7 +282,7 @@ func (m *Model) buildBridgeChildren(bridgeNode *panels.TreeNode, state *hue.Brid
 			// Scenes subsection
 			if len(scenes) > 0 {
 				scenesNode := &panels.TreeNode{
-					ID:       roomID + ":scenes",
+					ID:       nodeID(bridgeID, roomID+":scenes"),
 					Label:    fmt.Sprintf("Scenes (%d)", len(scenes)),
 					Depth:    3,
 					Expanded: false,
@@ -296,7 +305,7 @@ func (m *Model) buildBridgeChildren(bridgeNode *panels.TreeNode, state *hue.Brid
 						sceneID = *scene.Id
 					}
 					scenesNode.Children = append(scenesNode.Children, &panels.TreeNode{
-						ID:    sceneID,
+						ID:    nodeID(bridgeID, sceneID),
 						Label: sceneName,
 						Depth: 4,
 						Item: &panels.EntityItem{
@@ -314,7 +323,7 @@ func (m *Model) buildBridgeChildren(bridgeNode *panels.TreeNode, state *hue.Brid
 			smartScenes := state.RoomSmartScenes(roomID)
 			if len(smartScenes) > 0 {
 				smartScenesNode := &panels.TreeNode{
-					ID:       roomID + ":smart_scenes",
+					ID:       nodeID(bridgeID, roomID+":smart_scenes"),
 					Label:    fmt.Sprintf("Smart Scenes (%d)", len(smartScenes)),
 					Depth:    3,
 					Expanded: false,
@@ -338,7 +347,7 @@ func (m *Model) buildBridgeChildren(bridgeNode *panels.TreeNode, state *hue.Brid
 					}
 					isActive := scene.State == "active"
 					smartScenesNode.Children = append(smartScenesNode.Children, &panels.TreeNode{
-						ID:    sceneID,
+						ID:    nodeID(bridgeID, sceneID),
 						Label: sceneName,
 						Depth: 4,
 						Item: &panels.EntityItem{
@@ -391,13 +400,13 @@ func (m *Model) buildBridgeChildren(bridgeNode *panels.TreeNode, state *hue.Brid
 			}
 
 			// Get lights for this zone
-			lights := state.RoomLights(zone)
+			lights := state.ZoneLights(zone)
 
 			// Calculate aggregate brightness and color from zone lights
 			brightness, indicatorColor := hue.CalculateRoomAggregate(lights)
 
 			zoneNode := &panels.TreeNode{
-				ID:       zoneID,
+				ID:       nodeID(bridgeID, zoneID),
 				Label:    name,
 				Depth:    2,
 				Expanded: false,
@@ -414,48 +423,62 @@ func (m *Model) buildBridgeChildren(bridgeNode *panels.TreeNode, state *hue.Brid
 				Children: make([]*panels.TreeNode, 0),
 			}
 
-			// Add lights in zone
-			if zone.Children != nil {
-				for _, child := range *zone.Children {
-					if child.Rtype != nil && *child.Rtype == "device" && child.Rid != nil {
-						device, found := state.GetDevice(*child.Rid)
-						if found && device.Metadata != nil && device.Metadata.Name != nil && device.Services != nil {
-							for _, svc := range *device.Services {
-								if svc.Rtype != nil && *svc.Rtype == "light" && svc.Rid != nil {
-									light, lightFound := state.GetLight(*svc.Rid)
-									if lightFound {
-										isOn := light.On != nil && light.On.On != nil && *light.On.On
-										brightness, indicatorColor := getLightBrightnessAndColor(light)
-										// Store a copy of the light in RawPtr for later access
-										lightCopy := light
-										zoneNode.Children = append(zoneNode.Children, &panels.TreeNode{
-											ID:    *svc.Rid,
-											Label: *device.Metadata.Name,
-											Depth: 3,
-											Item: &panels.EntityItem{
-												ID:             *svc.Rid,
-												Name:           *device.Metadata.Name,
-												Type:           panels.EntityLight,
-												IsOn:           isOn,
-												Brightness:     brightness,
-												IndicatorColor: indicatorColor,
-												RawPtr:         lightCopy,
-												BridgeID:       bridgeID,
-											},
-										})
-									}
-								}
-							}
-						}
-					}
+			// Lights subsection for zone (like rooms have)
+			if len(lights) > 0 {
+				lightsNode := &panels.TreeNode{
+					ID:       nodeID(bridgeID, zoneID+":lights"),
+					Label:    fmt.Sprintf("Lights (%d)", len(lights)),
+					Depth:    3,
+					Expanded: false,
+					Item: &panels.EntityItem{
+						ID:             zoneID + ":lights",
+						Name:           fmt.Sprintf("Lights in %s", name),
+						Type:           panels.EntityLightsCategory,
+						IsOn:           brightness > 0,
+						Brightness:     brightness,
+						IndicatorColor: indicatorColor,
+						BridgeID:       bridgeID,
+						RawPtr: panels.LightsCategoryData{
+							ParentName: name,
+							Lights:     lights,
+						},
+					},
+					Children: make([]*panels.TreeNode, 0, len(lights)),
 				}
+				for _, light := range lights {
+					lightID := ""
+					if light.Id != nil {
+						lightID = *light.Id
+					}
+					lightName := state.GetLightName(light)
+					isOn := light.On != nil && light.On.On != nil && *light.On.On
+					lightBrightness, lightIndicatorColor := getLightBrightnessAndColor(light)
+					// Store a copy of the light in RawPtr for later access
+					lightCopy := light
+					lightsNode.Children = append(lightsNode.Children, &panels.TreeNode{
+						ID:    nodeID(bridgeID, lightID),
+						Label: lightName,
+						Depth: 4,
+						Item: &panels.EntityItem{
+							ID:             lightID,
+							Name:           lightName,
+							Type:           panels.EntityLight,
+							IsOn:           isOn,
+							Brightness:     lightBrightness,
+							IndicatorColor: lightIndicatorColor,
+							RawPtr:         lightCopy,
+							BridgeID:       bridgeID,
+						},
+					})
+				}
+				zoneNode.Children = append(zoneNode.Children, lightsNode)
 			}
 
 			// Scenes subsection for zone
 			zoneScenes := state.ZoneScenes(zoneID)
 			if len(zoneScenes) > 0 {
 				scenesNode := &panels.TreeNode{
-					ID:       zoneID + ":scenes",
+					ID:       nodeID(bridgeID, zoneID+":scenes"),
 					Label:    fmt.Sprintf("Scenes (%d)", len(zoneScenes)),
 					Depth:    3,
 					Expanded: false,
@@ -478,7 +501,7 @@ func (m *Model) buildBridgeChildren(bridgeNode *panels.TreeNode, state *hue.Brid
 						sceneID = *scene.Id
 					}
 					scenesNode.Children = append(scenesNode.Children, &panels.TreeNode{
-						ID:    sceneID,
+						ID:    nodeID(bridgeID, sceneID),
 						Label: sceneName,
 						Depth: 4,
 						Item: &panels.EntityItem{
@@ -496,7 +519,7 @@ func (m *Model) buildBridgeChildren(bridgeNode *panels.TreeNode, state *hue.Brid
 			zoneSmartScenes := state.ZoneSmartScenes(zoneID)
 			if len(zoneSmartScenes) > 0 {
 				smartScenesNode := &panels.TreeNode{
-					ID:       zoneID + ":smart_scenes",
+					ID:       nodeID(bridgeID, zoneID+":smart_scenes"),
 					Label:    fmt.Sprintf("Smart Scenes (%d)", len(zoneSmartScenes)),
 					Depth:    3,
 					Expanded: false,
@@ -520,7 +543,7 @@ func (m *Model) buildBridgeChildren(bridgeNode *panels.TreeNode, state *hue.Brid
 					}
 					isActive := scene.State == "active"
 					smartScenesNode.Children = append(smartScenesNode.Children, &panels.TreeNode{
-						ID:    sceneID,
+						ID:    nodeID(bridgeID, sceneID),
 						Label: sceneName,
 						Depth: 4,
 						Item: &panels.EntityItem{
@@ -574,7 +597,7 @@ func (m *Model) buildBridgeChildren(bridgeNode *panels.TreeNode, state *hue.Brid
 			name := ent.EntertainmentName("Unknown")
 
 			entItemNode := &panels.TreeNode{
-				ID:       ent.ID,
+				ID:       nodeID(bridgeID, ent.ID),
 				Label:    name,
 				Depth:    2,
 				Expanded: false,
@@ -599,7 +622,7 @@ func (m *Model) buildBridgeChildren(bridgeNode *panels.TreeNode, state *hue.Brid
 						// Store a copy of the light in RawPtr for later access
 						lightCopy := light
 						entItemNode.Children = append(entItemNode.Children, &panels.TreeNode{
-							ID:    lightEntry.Service.RID,
+							ID:    nodeID(bridgeID, lightEntry.Service.RID),
 							Label: lightName,
 							Depth: 3,
 							Item: &panels.EntityItem{
@@ -674,7 +697,7 @@ func (m *Model) buildLightsTree(_ *hue.BridgeState) {
 			// Store a copy of the light in RawPtr for later access
 			lightCopy := light
 			nodes = append(nodes, &panels.TreeNode{
-				ID:           *light.Id,
+				ID:           nodeID(bridge.Info.ID, *light.Id),
 				Label:        name,
 				GroupSuffix:  groupSuffix,
 				BridgeSuffix: "[" + bridgeName + "]",
@@ -782,7 +805,7 @@ func (m *Model) buildDevicesTree(_ *hue.BridgeState) {
 			}
 
 			nodes = append(nodes, &panels.TreeNode{
-				ID:           id,
+				ID:           nodeID(bridge.Info.ID, id),
 				Label:        name,
 				GroupSuffix:  groupSuffix,
 				BridgeSuffix: "[" + bridgeName + "]",
@@ -848,7 +871,7 @@ func (m *Model) buildScenesTree(_ *hue.BridgeState) {
 			}
 
 			nodes = append(nodes, &panels.TreeNode{
-				ID:           id,
+				ID:           nodeID(bridge.Info.ID, id),
 				Label:        name,
 				GroupSuffix:  groupSuffix,
 				BridgeSuffix: "[" + bridgeName + "]",

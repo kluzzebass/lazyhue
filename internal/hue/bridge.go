@@ -297,26 +297,42 @@ func (b *Bridge) applyResourceUpdate(update ResourceUpdate) bool {
 		return false
 
 	case "room":
+		changed := false
 		if update.Metadata != nil {
 			var archetype *string
 			if update.Metadata.Archetype != nil {
 				arch := string(*update.Metadata.Archetype)
 				archetype = &arch
 			}
-			return b.state.ApplyRoomMetadata(update.ID, update.Metadata.Name, archetype)
+			if b.state.ApplyRoomMetadata(update.ID, update.Metadata.Name, archetype) {
+				changed = true
+			}
 		}
-		return false
+		if update.Children != nil {
+			if b.state.ApplyRoomChildren(update.ID, *update.Children) {
+				changed = true
+			}
+		}
+		return changed
 
 	case "zone":
+		changed := false
 		if update.Metadata != nil {
 			var archetype *string
 			if update.Metadata.Archetype != nil {
 				arch := string(*update.Metadata.Archetype)
 				archetype = &arch
 			}
-			return b.state.ApplyZoneMetadata(update.ID, update.Metadata.Name, archetype)
+			if b.state.ApplyZoneMetadata(update.ID, update.Metadata.Name, archetype) {
+				changed = true
+			}
 		}
-		return false
+		if update.Services != nil {
+			if b.state.ApplyZoneServices(update.ID, *update.Services) {
+				changed = true
+			}
+		}
+		return changed
 
 	default:
 		// Unknown resource type - will be picked up by fallback polling

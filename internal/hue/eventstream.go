@@ -80,6 +80,16 @@ type ResourceUpdate struct {
 		Name      *string `json:"name,omitempty"`
 		Archetype *string `json:"archetype,omitempty"`
 	} `json:"metadata,omitempty"`
+	// Children for room/zone updates (devices/services)
+	Children *[]struct {
+		Rid   string `json:"rid"`
+		Rtype string `json:"rtype"`
+	} `json:"children,omitempty"`
+	// Services for zone updates (lights)
+	Services *[]struct {
+		Rid   string `json:"rid"`
+		Rtype string `json:"rtype"`
+	} `json:"services,omitempty"`
 	// Button event data
 	Button *struct {
 		LastEvent string `json:"last_event"` // "initial_press", "repeat", "short_release", "long_release", "double_short_release"

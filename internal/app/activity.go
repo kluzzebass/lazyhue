@@ -1445,7 +1445,7 @@ func (e *RoomEvent) Parse(bridgeID, bridgeName, eventType string, data json.RawM
 }
 
 func (e *RoomEvent) Render(styles *ui.Styles, width int) string {
-	return renderEvent(styles, width, e.baseEvent, "Room \""+e.Name+"\"", e.Details, "", 0, false)
+	return renderEvent(styles, width, e.baseEvent, e.Name, e.Details, "", 0, false)
 }
 
 // ZoneEvent represents a zone update event.
@@ -1505,7 +1505,7 @@ func (e *ZoneEvent) Parse(bridgeID, bridgeName, eventType string, data json.RawM
 }
 
 func (e *ZoneEvent) Render(styles *ui.Styles, width int) string {
-	return renderEvent(styles, width, e.baseEvent, "Zone \""+e.Name+"\"", e.Details, "", 0, false)
+	return renderEvent(styles, width, e.baseEvent, e.Name, e.Details, "", 0, false)
 }
 
 // BridgeHomeEvent represents a bridge_home update event.

@@ -2,9 +2,11 @@ package field
 
 import (
 	"fmt"
+	"image/color"
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea/v2"
+	"github.com/charmbracelet/lipgloss/v2"
 	"github.com/kluzzebass/lazyhue/internal/ui"
 	"github.com/kluzzebass/lazyhue/internal/ui/component"
 	zone "github.com/lrstanley/bubblezone/v2"
@@ -248,16 +250,24 @@ func (s *SelectComponent) ViewControl() string {
 }
 
 func (s *SelectComponent) renderClosedControl() string {
-	// Get current option label
+	// Get current option label and color
 	currentLabel := "---"
+	var currentColor color.Color
 	for _, opt := range s.Options {
 		if opt.Value == s.Value {
 			currentLabel = opt.Label
+			currentColor = opt.Color
 			break
 		}
 	}
 
-	control := fmt.Sprintf("[%s] ▼", currentLabel)
+	// Apply color if set
+	styledLabel := currentLabel
+	if currentColor != nil {
+		styledLabel = lipgloss.NewStyle().Foreground(currentColor).Render(currentLabel)
+	}
+
+	control := fmt.Sprintf("[%s] ▼", styledLabel)
 
 	if s.Zones != nil {
 		return s.Zones.Mark(s.ZoneID(), control)
@@ -279,7 +289,7 @@ func (s *SelectComponent) renderDropdownControl() string {
 		end = len(s.Options)
 	}
 
-	// Find max option label width
+	// Find max option label width (use visual width for styled text)
 	maxLen := 0
 	for _, opt := range s.Options {
 		if len(opt.Label) > maxLen {
@@ -305,8 +315,15 @@ func (s *SelectComponent) renderDropdownControl() string {
 		if i == s.Cursor {
 			prefix = "> "
 		}
-		label := opt.Label + strings.Repeat(" ", maxLen-len(opt.Label))
-		optionLine := fmt.Sprintf("│%s%s│", prefix, label)
+
+		// Apply color if set, then pad to maxLen
+		styledLabel := opt.Label
+		if opt.Color != nil {
+			styledLabel = lipgloss.NewStyle().Foreground(opt.Color).Render(opt.Label)
+		}
+		// Pad based on original label length (not styled length)
+		padding := strings.Repeat(" ", maxLen-len(opt.Label))
+		optionLine := fmt.Sprintf("│%s%s%s│", prefix, styledLabel, padding)
 
 		// Mark each option with a zone
 		if s.Zones != nil {
@@ -349,16 +366,24 @@ func (s *SelectComponent) View() string {
 }
 
 func (s *SelectComponent) renderClosed(labelStr string) string {
-	// Get current option label
+	// Get current option label and color
 	currentLabel := "---"
+	var currentColor color.Color
 	for _, opt := range s.Options {
 		if opt.Value == s.Value {
 			currentLabel = opt.Label
+			currentColor = opt.Color
 			break
 		}
 	}
 
-	line := fmt.Sprintf("  %s  [%s] ▼", labelStr, currentLabel)
+	// Apply color if set
+	styledLabel := currentLabel
+	if currentColor != nil {
+		styledLabel = lipgloss.NewStyle().Foreground(currentColor).Render(currentLabel)
+	}
+
+	line := fmt.Sprintf("  %s  [%s] ▼", labelStr, styledLabel)
 
 	if s.Zones != nil {
 		return s.Zones.Mark(s.ZoneID(), line)
@@ -407,8 +432,15 @@ func (s *SelectComponent) renderDropdown(labelStr string) string {
 		if i == s.Cursor {
 			prefix = "> "
 		}
-		label := opt.Label + strings.Repeat(" ", maxLen-len(opt.Label))
-		optionLine := fmt.Sprintf("%s│%s%s│", boxIndent, prefix, label)
+
+		// Apply color if set, then pad to maxLen
+		styledLabel := opt.Label
+		if opt.Color != nil {
+			styledLabel = lipgloss.NewStyle().Foreground(opt.Color).Render(opt.Label)
+		}
+		// Pad based on original label length (not styled length)
+		padding := strings.Repeat(" ", maxLen-len(opt.Label))
+		optionLine := fmt.Sprintf("%s│%s%s%s│", boxIndent, prefix, styledLabel, padding)
 
 		// Mark each option with a zone
 		if s.Zones != nil {

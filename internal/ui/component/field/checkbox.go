@@ -5,10 +5,19 @@ import (
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea/v2"
+	"github.com/charmbracelet/lipgloss/v2"
 	"github.com/kluzzebass/lazyhue/internal/ui"
 	"github.com/kluzzebass/lazyhue/internal/ui/component"
 	zone "github.com/lrstanley/bubblezone/v2"
 )
+
+// applyOptionColor applies color to a label if set.
+func applyOptionColor(opt Option) string {
+	if opt.Color != nil {
+		return lipgloss.NewStyle().Foreground(opt.Color).Render(opt.Label)
+	}
+	return opt.Label
+}
 
 // CheckboxValue represents the value of a checkbox group.
 type CheckboxValue struct {
@@ -244,7 +253,7 @@ func (c *CheckboxComponent) renderVerticalControl() string {
 			indicator = "[x]"
 		}
 
-		line := fmt.Sprintf("%s %s", indicator, opt.Label)
+		line := fmt.Sprintf("%s %s", indicator, applyOptionColor(opt))
 
 		// Mark each option with a zone
 		if c.Zones != nil {
@@ -265,7 +274,7 @@ func (c *CheckboxComponent) renderHorizontalControl() string {
 		if c.Selected[opt.Value] {
 			indicator = "[x]"
 		}
-		optStr := fmt.Sprintf("%s %s", indicator, opt.Label)
+		optStr := fmt.Sprintf("%s %s", indicator, applyOptionColor(opt))
 
 		// Mark each option with a zone
 		if c.Zones != nil {
@@ -309,13 +318,14 @@ func (c *CheckboxComponent) renderVertical() string {
 			indicator = "[x]"
 		}
 
+		styledLabel := applyOptionColor(opt)
 		var line string
 		if i == 0 {
-			line = fmt.Sprintf("  %s  %s %s", labelStr, indicator, opt.Label)
+			line = fmt.Sprintf("  %s  %s %s", labelStr, indicator, styledLabel)
 		} else {
 			// Indent subsequent rows to align with first option
 			indent := strings.Repeat(" ", 2+c.MaxLabelWidth+2)
-			line = fmt.Sprintf("%s%s %s", indent, indicator, opt.Label)
+			line = fmt.Sprintf("%s%s %s", indent, indicator, styledLabel)
 		}
 
 		// Mark each option with a zone
@@ -345,7 +355,7 @@ func (c *CheckboxComponent) renderHorizontal() string {
 		if c.Selected[opt.Value] {
 			indicator = "[x]"
 		}
-		optStr := fmt.Sprintf("%s %s", indicator, opt.Label)
+		optStr := fmt.Sprintf("%s %s", indicator, applyOptionColor(opt))
 
 		// Mark each option with a zone
 		if c.Zones != nil {

@@ -1,6 +1,8 @@
 package field
 
 import (
+	"image/color"
+
 	"github.com/kluzzebass/lazyhue/internal/ui"
 	"github.com/kluzzebass/lazyhue/internal/ui/component"
 	zone "github.com/lrstanley/bubblezone/v2"
@@ -91,4 +93,5 @@ type ControlRenderer interface {
 type Option struct {
 	Label string
 	Value int
+	Color color.Color // Optional foreground color for the label (e.g., entity colors)
 }

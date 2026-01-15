@@ -885,6 +885,35 @@ func (s *BridgeState) ApplyRoomMetadata(id string, name *string, archetype *stri
 	return updated
 }
 
+// ApplyRoomChildren applies a children update (devices) to a room.
+func (s *BridgeState) ApplyRoomChildren(id string, children []struct {
+	Rid   string `json:"rid"`
+	Rtype string `json:"rtype"`
+}) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	room, ok := s.Rooms[id]
+	if !ok {
+		return false
+	}
+
+	// Convert to ResourceIdentifier slice
+	newChildren := make([]hueclient.ResourceIdentifier, len(children))
+	for i, c := range children {
+		rid := c.Rid
+		rtype := hueclient.ResourceIdentifierRtype(c.Rtype)
+		newChildren[i] = hueclient.ResourceIdentifier{
+			Rid:   &rid,
+			Rtype: &rtype,
+		}
+	}
+
+	room.Children = &newChildren
+	s.Rooms[id] = room
+	return true
+}
+
 // UpdateZones replaces the zones cache.
 func (s *BridgeState) UpdateZones(zones map[string]hueclient.RoomGet) {
 	s.mu.Lock()
@@ -919,6 +948,35 @@ func (s *BridgeState) ApplyZoneMetadata(id string, name *string, archetype *stri
 		s.Zones[id] = zone
 	}
 	return updated
+}
+
+// ApplyZoneServices applies a services update (lights) to a zone.
+func (s *BridgeState) ApplyZoneServices(id string, services []struct {
+	Rid   string `json:"rid"`
+	Rtype string `json:"rtype"`
+}) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	zone, ok := s.Zones[id]
+	if !ok {
+		return false
+	}
+
+	// Convert to ResourceIdentifier slice
+	newServices := make([]hueclient.ResourceIdentifier, len(services))
+	for i, svc := range services {
+		rid := svc.Rid
+		rtype := hueclient.ResourceIdentifierRtype(svc.Rtype)
+		newServices[i] = hueclient.ResourceIdentifier{
+			Rid:   &rid,
+			Rtype: &rtype,
+		}
+	}
+
+	zone.Services = &newServices
+	s.Zones[id] = zone
+	return true
 }
 
 // UpdateGroupedLights replaces the grouped lights cache.
