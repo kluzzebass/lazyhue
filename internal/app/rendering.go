@@ -450,6 +450,9 @@ func (m *Model) updateLogContent() {
 		contentWidth = 1
 	}
 
+	// Check if user was at the bottom before updating content
+	wasAtBottom := m.logViewport.AtBottom()
+
 	for i, activity := range m.activities {
 		line := activity.Render(&m.styles, contentWidth)
 		content.WriteString(line)
@@ -458,8 +461,11 @@ func (m *Model) updateLogContent() {
 		}
 	}
 	m.logViewport.SetContent(content.String())
-	// Scroll to bottom
-	m.logViewport.LineDown(len(m.activities))
+
+	// Only auto-scroll to bottom if user was already at the bottom
+	if wasAtBottom {
+		m.logViewport.GotoBottom()
+	}
 }
 
 // updateDetailContent updates the detail viewport content based on the selected node.
