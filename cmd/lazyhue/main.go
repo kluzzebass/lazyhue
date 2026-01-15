@@ -12,6 +12,7 @@ import (
 
 	"github.com/kluzzebass/lazyhue/internal/app"
 	"github.com/kluzzebass/lazyhue/internal/config"
+	"github.com/kluzzebass/lazyhue/internal/debug"
 	"github.com/kluzzebass/lazyhue/internal/ui/component"
 )
 
@@ -28,6 +29,15 @@ func main() {
 	}
 	if logFile != nil {
 		defer logFile.Close()
+	}
+
+	// Initialize debug logger (uses same path as component logger)
+	if *debugLog != "" {
+		if err := debug.Init(*debugLog); err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: could not initialize debug logging: %v\n", err)
+		} else {
+			defer debug.Close()
+		}
 	}
 
 	// Initialize zone manager for mouse support

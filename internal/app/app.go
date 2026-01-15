@@ -590,7 +590,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			state = bridge.GetState()
 			bridgeName = bridge.Info.Name
 		}
-		event := parseEventFromBridgeCallback(msg.bridgeID, bridgeName, msg.resourceType, msg.resourceID, msg.eventType, state)
+		event := parseEventFromBridgeCallback(msg.bridgeID, bridgeName, msg.resourceType, msg.resourceID, msg.eventType, msg.receivedAt, state)
 		m.activities = append(m.activities, event)
 		m.updateLogContent()
 

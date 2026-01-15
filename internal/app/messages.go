@@ -1,6 +1,8 @@
 package app
 
 import (
+	"time"
+
 	"github.com/kluzzebass/lazyhue/internal/hue"
 )
 
@@ -27,6 +29,7 @@ type (
 		resourceType string
 		resourceID   string
 		eventType    string
+		receivedAt   time.Time // When the event was received from the bridge
 	}
 
 	// errMsg wraps errors.

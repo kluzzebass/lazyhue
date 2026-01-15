@@ -2,6 +2,7 @@ package app
 
 import (
 	"encoding/json"
+	"time"
 
 	"github.com/kluzzebass/lazyhue/internal/hue"
 )
@@ -9,7 +10,7 @@ import (
 // parseEventFromBridgeCallback creates an Event from the bridge callback parameters.
 // This is a helper function that works with the current bridge callback signature
 // which doesn't pass raw event data. The event is created and enriched with state data.
-func parseEventFromBridgeCallback(bridgeID, bridgeName, resourceType, resourceID, eventType string, state *hue.BridgeState) Event {
+func parseEventFromBridgeCallback(bridgeID, bridgeName, resourceType, resourceID, eventType string, receivedAt time.Time, state *hue.BridgeState) Event {
 	// Create a mock json.RawMessage for the event data
 	// Since we don't have raw data from the callback, we create a minimal structure
 	// The actual data will come from state lookup
@@ -109,6 +110,11 @@ func parseEventFromBridgeCallback(bridgeID, bridgeName, resourceType, resourceID
 		// Fallback to unhandled event
 		evt := &UnhandledEvent{}
 		event, _ = evt.Parse(bridgeID, bridgeName, eventType, data, state)
+	}
+
+	// Set the received timestamp from the bridge callback
+	if setter, ok := event.(interface{ SetTimestamp(time.Time) }); ok {
+		setter.SetTimestamp(receivedAt)
 	}
 
 	return event

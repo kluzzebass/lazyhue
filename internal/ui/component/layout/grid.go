@@ -248,7 +248,27 @@ func (g *Grid) Init() tea.Cmd {
 
 // Update handles events for the grid.
 func (g *Grid) Update(msg tea.Msg) (component.Component, tea.Cmd) {
-	// Route to focused cell
+	// BlinkTickMsg needs to be routed to ALL cells (not just focused)
+	// because blinking components need updates even when not focused
+	if _, isBlink := msg.(field.BlinkTickMsg); isBlink {
+		var cmds []tea.Cmd
+		for _, row := range g.rows {
+			if row.Type != RowTypeNormal {
+				continue
+			}
+			for _, cell := range row.Cells {
+				if cell.Component != nil {
+					_, cmd := cell.Component.Update(msg)
+					if cmd != nil {
+						cmds = append(cmds, cmd)
+					}
+				}
+			}
+		}
+		return g, tea.Batch(cmds...)
+	}
+
+	// Route other messages to focused cell
 	if g.focusRow >= 0 && g.focusRow < len(g.rows) {
 		row := g.rows[g.focusRow]
 		if row.Type == RowTypeNormal && g.focusCol >= 0 && g.focusCol < len(row.Cells) {

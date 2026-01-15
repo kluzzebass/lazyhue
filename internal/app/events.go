@@ -82,6 +82,7 @@ func (m *Model) startSSEListener(ctx context.Context, bridge *hue.Bridge) {
 			resourceType: resourceType,
 			resourceID:   resourceID,
 			eventType:    eventType,
+			receivedAt:   time.Now(),
 		}:
 		case <-ctx.Done():
 			return

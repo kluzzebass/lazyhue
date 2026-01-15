@@ -215,6 +215,7 @@ func (b *Bridge) handleEvents(container EventContainer) {
 	for _, event := range container.Events {
 		updates, err := ParseResourceUpdates(event)
 		if err != nil {
+			debug.Log("ParseResourceUpdates error for %s event: %v", event.Type, err)
 			continue
 		}
 
@@ -281,9 +282,15 @@ func (b *Bridge) applyResourceUpdate(update ResourceUpdate) bool {
 		return false
 
 	case "scene":
-		if update.Status != nil && update.Status.Active != "" {
-			debug.Log("Scene %s status: %s", update.ID, update.Status.Active)
-			return b.state.ApplySceneStatus(update.ID, update.Status.Active)
+		if len(update.Status) > 0 {
+			// Try to parse status as an object with "active" field
+			var statusObj struct {
+				Active string `json:"active"`
+			}
+			if err := json.Unmarshal(update.Status, &statusObj); err == nil && statusObj.Active != "" {
+				debug.Log("Scene %s status: %s", update.ID, statusObj.Active)
+				return b.state.ApplySceneStatus(update.ID, statusObj.Active)
+			}
 		}
 		if update.Metadata != nil && update.Metadata.Name != nil {
 			return b.state.ApplySceneMetadata(update.ID, update.Metadata.Name)
@@ -449,6 +456,36 @@ func (b *Bridge) applyResourceAdd(update ResourceUpdate) bool {
 			if gl.Id != nil {
 				b.state.AddGroupedLight(*gl.Id, gl)
 				debug.Log("Added new grouped_light %s to cache", *gl.Id)
+				return true
+			}
+		}
+		return false
+
+	case "light":
+		resp, err := client.GetLightWithResponse(ctx, update.ID)
+		if err != nil || resp.JSON200 == nil || resp.JSON200.Data == nil {
+			debug.Log("Failed to fetch new light %s: %v", update.ID, err)
+			return false
+		}
+		for _, light := range *resp.JSON200.Data {
+			if light.Id != nil {
+				b.state.AddLight(*light.Id, light)
+				debug.Log("Added new light %s to cache", *light.Id)
+				return true
+			}
+		}
+		return false
+
+	case "device":
+		resp, err := client.GetDeviceWithResponse(ctx, update.ID)
+		if err != nil || resp.JSON200 == nil || resp.JSON200.Data == nil {
+			debug.Log("Failed to fetch new device %s: %v", update.ID, err)
+			return false
+		}
+		for _, device := range *resp.JSON200.Data {
+			if device.Id != nil {
+				b.state.AddDevice(*device.Id, device)
+				debug.Log("Added new device %s to cache", *device.Id)
 				return true
 			}
 		}

@@ -5,6 +5,7 @@ set -euo pipefail
 # Requires: fswatch (brew install fswatch)
 
 bin="build/lazyhue"
+logfile="lazyhue.log"
 
 build() {
   go build -o "$bin" ./cmd/lazyhue
@@ -13,7 +14,7 @@ build() {
 pid=
 
 start() {
-  "$bin" &
+  "$bin" --debug-log "$logfile" &
   pid=$!
 }
 

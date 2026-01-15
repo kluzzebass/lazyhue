@@ -1,11 +1,15 @@
 package hue
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"time"
 
+	"github.com/kluzzebass/lazyhue/internal/debug"
 	"github.com/kluzzebass/lazyhue/internal/hueclient"
 )
 
@@ -312,6 +316,171 @@ func (b *Bridge) SetLightEffect(lightID string, effect hueclient.SupportedEffect
 		b.logError(errMsg)
 		return errors.New(errMsg)
 	}
+	return nil
+}
+
+// gradientModePutBody is the request body for updating gradient mode (requires points too).
+type gradientModePutBody struct {
+	Gradient *gradientModePut `json:"gradient,omitempty"`
+}
+
+type gradientModePut struct {
+	Mode   *hueclient.SupportedGradientMode `json:"mode,omitempty"`
+	Points []gradientPointPut               `json:"points,omitempty"`
+}
+
+// SetLightGradientMode sets a light's gradient mode.
+// The API requires points to be included when changing mode.
+func (b *Bridge) SetLightGradientMode(lightID string, mode hueclient.SupportedGradientMode) error {
+	b.mu.RLock()
+	client := b.client
+	b.mu.RUnlock()
+
+	if client == nil {
+		return ErrAuthFailed
+	}
+
+	// Get current points from state
+	light, ok := b.state.GetLight(lightID)
+	if !ok {
+		return errors.New("light not found")
+	}
+
+	lightName := b.state.GetLightName(light)
+
+	// Build wrapped points from current state
+	var wrappedPoints []gradientPointPut
+	if light.Gradient != nil && light.Gradient.Points != nil {
+		for _, c := range *light.Gradient.Points {
+			wrappedPoints = append(wrappedPoints, gradientPointPut{Color: &c})
+		}
+	}
+
+	// Optimistic update
+	b.state.SetLightGradientMode(lightID, mode)
+
+	b.logRequest(fmt.Sprintf("%s: gradient mode %s", lightName, mode))
+
+	// Build request body with mode and current points
+	reqBody := gradientModePutBody{
+		Gradient: &gradientModePut{
+			Mode:   &mode,
+			Points: wrappedPoints,
+		},
+	}
+	bodyBytes, err := json.Marshal(reqBody)
+	if err != nil {
+		b.logError(fmt.Sprintf("%s: gradient mode failed: %v", lightName, err))
+		return err
+	}
+
+	debug.Log("Gradient mode request for %s: %s", lightID, string(bodyBytes))
+
+	resp, err := client.UpdateLightWithBody(context.Background(), lightID, "application/json", bytes.NewReader(bodyBytes))
+	if err != nil {
+		b.logError(fmt.Sprintf("%s: gradient mode failed: %v", lightName, err))
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 400 {
+		respBody, _ := io.ReadAll(resp.Body)
+		debug.Log("Gradient mode error for %s: %s", lightID, string(respBody))
+		errMsg := fmt.Sprintf("%s: gradient mode failed: HTTP %d", lightName, resp.StatusCode)
+		b.logError(errMsg)
+		return errors.New(errMsg)
+	}
+	return nil
+}
+
+// gradientPointPut wraps a Color in a "color" field for the PUT API.
+// The Hue API expects: { "color": { "xy": { "x": ..., "y": ... } } }
+type gradientPointPut struct {
+	Color *hueclient.Color `json:"color,omitempty"`
+}
+
+// gradientPut is a custom gradient structure for PUT requests.
+type gradientPut struct {
+	Points []gradientPointPut `json:"points,omitempty"`
+}
+
+// lightGradientPutBody is the request body for updating gradient points.
+type lightGradientPutBody struct {
+	Gradient *gradientPut `json:"gradient,omitempty"`
+}
+
+// SetLightGradientPoints sets a light's gradient points (array of XY colors).
+// Rapid calls are debounced - state is updated immediately, but API call is delayed.
+func (b *Bridge) SetLightGradientPoints(lightID string, points []hueclient.Color) error {
+	b.mu.RLock()
+	client := b.client
+	b.mu.RUnlock()
+
+	if client == nil {
+		return ErrAuthFailed
+	}
+
+	// Optimistic update
+	b.state.SetLightGradientPoints(lightID, points)
+
+	// Debounce the actual API call (use same mechanism as color)
+	b.debounceMu.Lock()
+	debounceKey := "gradient:" + lightID
+	if timer, ok := b.colorDebounce[debounceKey]; ok {
+		timer.Stop()
+	}
+
+	lightName := "Unknown"
+	if light, ok := b.state.GetLight(lightID); ok {
+		lightName = b.state.GetLightName(light)
+	}
+
+	// Convert points to the wrapped format expected by the PUT API
+	wrappedPoints := make([]gradientPointPut, len(points))
+	for i := range points {
+		wrappedPoints[i] = gradientPointPut{Color: &points[i]}
+	}
+
+	b.colorDebounce[debounceKey] = time.AfterFunc(50*time.Millisecond, func() {
+		b.mu.RLock()
+		client := b.client
+		b.mu.RUnlock()
+
+		if client != nil {
+			b.logRequest(fmt.Sprintf("%s: gradient points (%d)", lightName, len(wrappedPoints)))
+
+			// Build custom request body with properly wrapped gradient points
+			reqBody := lightGradientPutBody{
+				Gradient: &gradientPut{Points: wrappedPoints},
+			}
+			bodyBytes, err := json.Marshal(reqBody)
+			if err != nil {
+				b.logError(fmt.Sprintf("%s: gradient points failed: %v", lightName, err))
+				return
+			}
+
+			debug.Log("Gradient points request for %s: %s", lightID, string(bodyBytes))
+
+			resp, err := client.UpdateLightWithBody(context.Background(), lightID, "application/json", bytes.NewReader(bodyBytes))
+			if err != nil {
+				b.logError(fmt.Sprintf("%s: gradient points failed: %v", lightName, err))
+			} else {
+				defer resp.Body.Close()
+				if resp.StatusCode >= 400 {
+					respBody, _ := io.ReadAll(resp.Body)
+					debug.Log("Gradient points error for %s: %s", lightID, string(respBody))
+					b.logError(fmt.Sprintf("%s: gradient points failed: HTTP %d", lightName, resp.StatusCode))
+				}
+			}
+		}
+
+		// Clean up timer
+		b.debounceMu.Lock()
+		delete(b.colorDebounce, debounceKey)
+		b.debounceMu.Unlock()
+	})
+	b.debounceMu.Unlock()
+
 	return nil
 }
 

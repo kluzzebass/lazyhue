@@ -63,6 +63,10 @@ func (e *baseEvent) Time() time.Time {
 	return e.timestamp
 }
 
+func (e *baseEvent) SetTimestamp(t time.Time) {
+	e.timestamp = t
+}
+
 // LightEvent represents a light resource event.
 type LightEvent struct {
 	baseEvent
@@ -122,6 +126,9 @@ func (e *LightEvent) Parse(bridgeID, bridgeName, eventType string, data json.Raw
 					e.Details = "off"
 				}
 			}
+		} else {
+			// Light not in cache - show truncated ID
+			e.Name = update.ID[:8] + "…"
 		}
 	}
 
@@ -242,6 +249,9 @@ func (e *GroupedLightEvent) Parse(bridgeID, bridgeName, eventType string, data j
 					e.Details = "off"
 				}
 			}
+		} else {
+			// Grouped light not in cache - show truncated ID
+			e.Name = update.ID[:8] + "…"
 		}
 	}
 
@@ -289,6 +299,9 @@ func (e *SceneEvent) Parse(bridgeID, bridgeName, eventType string, data json.Raw
 					e.Details = "deactivated"
 				}
 			}
+		} else {
+			// Scene not in cache - show truncated ID
+			e.Name = update.ID[:8] + "…"
 		}
 	}
 
@@ -785,8 +798,14 @@ func (e *SmartSceneEvent) Parse(bridgeID, bridgeName, eventType string, data jso
 		eventType:    eventType,
 		timestamp:    time.Now(),
 	}
-	if update.SmartSceneState != nil {
-		e.Details = update.SmartSceneState.Active
+	if len(update.State) > 0 {
+		// Try to parse state as an object with "active" field
+		var stateObj struct {
+			Active string `json:"active"`
+		}
+		if err := json.Unmarshal(update.State, &stateObj); err == nil && stateObj.Active != "" {
+			e.Details = stateObj.Active
+		}
 	}
 	if update.Metadata != nil && update.Metadata.Name != nil {
 		e.Name = *update.Metadata.Name
@@ -1316,7 +1335,7 @@ func (e *DeviceEvent) Parse(bridgeID, bridgeName, eventType string, data json.Ra
 	}
 
 	if e.Name == "" {
-		e.Name = update.ID
+		e.Name = update.ID[:8] + "…"
 	}
 
 	e.Details = eventType
@@ -1426,7 +1445,7 @@ func (e *RoomEvent) Parse(bridgeID, bridgeName, eventType string, data json.RawM
 	}
 
 	if e.Name == "" {
-		e.Name = update.ID
+		e.Name = update.ID[:8] + "…"
 	}
 
 	// Set details based on event type
@@ -1486,7 +1505,7 @@ func (e *ZoneEvent) Parse(bridgeID, bridgeName, eventType string, data json.RawM
 	}
 
 	if e.Name == "" {
-		e.Name = update.ID
+		e.Name = update.ID[:8] + "…"
 	}
 
 	// Set details based on event type
@@ -1588,7 +1607,7 @@ func getResourceTypeColor(styles *ui.Styles, resourceType string) color.Color {
 }
 
 func renderEvent(styles *ui.Styles, width int, base baseEvent, name, details, indicatorColor string, brightness float64, isOn bool) string {
-	timeStr := base.timestamp.Format("15:04:05")
+	timeStr := base.timestamp.Format("15:04:05.000000") // Microsecond precision to debug duplicates
 	typeStyle := lipgloss.NewStyle().Foreground(styles.Theme.Success)
 	typeIndicator := typeStyle.Render("e")
 

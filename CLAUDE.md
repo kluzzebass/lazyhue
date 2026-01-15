@@ -87,6 +87,52 @@ layout.HSplit(
 )
 ```
 
+## Hue API Workarounds
+
+### Gradient PUT Requests
+
+The generated `hueclient` types are incorrect for gradient PUT operations. The Hue API expects a different structure for PUT than what it returns in GET.
+
+**Problem 1: Gradient points need a `color` wrapper**
+
+GET returns:
+```json
+{ "gradient": { "points": [{ "xy": { "x": 0.5, "y": 0.5 } }] } }
+```
+
+PUT expects:
+```json
+{ "gradient": { "points": [{ "color": { "xy": { "x": 0.5, "y": 0.5 } } }] } }
+```
+
+**Problem 2: Gradient mode changes require points**
+
+You cannot send just the mode - the API returns HTTP 400 `missing: ['points']`. You must include the current points when changing mode.
+
+**Solution** (in `internal/hue/actions.go`):
+
+Custom structs wrap the data correctly:
+```go
+type gradientPointPut struct {
+    Color *hueclient.Color `json:"color,omitempty"`
+}
+
+type gradientPut struct {
+    Points []gradientPointPut `json:"points,omitempty"`
+}
+
+type lightGradientPutBody struct {
+    Gradient *gradientPut `json:"gradient,omitempty"`
+}
+```
+
+Use `UpdateLightWithBody()` with raw JSON instead of the generated types:
+```go
+body := lightGradientPutBody{...}
+jsonBody, _ := json.Marshal(body)
+_, err := b.client.UpdateLightWithBody(ctx, lightID, "application/json", bytes.NewReader(jsonBody))
+```
+
 ## Component Architecture (MANDATORY)
 
 **CRITICAL: All UI elements MUST use the component architecture.** Do NOT fall back into old patterns of complex if/else/switch/case statements for event handling in app.go.

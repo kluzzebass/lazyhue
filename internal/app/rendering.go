@@ -1002,29 +1002,33 @@ func (m *Model) buildLightGridRows(light hueclient.LightGet) {
 	// 1. Controls section - instant adjustments (power, brightness, color, effects, identify)
 	rows = append(rows, m.buildControlsRows(light)...)
 
-	// 2. Settings section - persistent configuration (name, power-on behavior)
+	// 2. Gradient section - interactive color gradient editing (if supported)
+	lightID := ""
+	if light.Id != nil {
+		lightID = *light.Id
+	}
+	rows = append(rows, m.buildGradientRows(light, lightID)...)
+
+	// 3. Settings section - persistent configuration (name, power-on behavior)
 	rows = append(rows, m.buildLightSettingsRows(light, device)...)
 
-	// 3. State Info section - current readings
+	// 4. State Info section - current readings
 	rows = append(rows, m.buildStateRows(light)...)
 
-	// 4. Product Info section
+	// 5. Product Info section
 	rows = append(rows, m.buildProductInfoRows(device)...)
 
-	// 5. Classification section
+	// 6. Classification section
 	rows = append(rows, m.buildClassificationRows(light, device)...)
 
-	// 6. Dynamics section
+	// 7. Dynamics section
 	rows = append(rows, m.buildDynamicsRows(light)...)
 
-	// 7. Capabilities section
+	// 8. Capabilities section
 	rows = append(rows, m.buildCapabilitiesRows(light)...)
 
-	// 8. Effects list section
+	// 9. Effects list section
 	rows = append(rows, m.buildEffectsListRows(light)...)
-
-	// 9. Gradient section
-	rows = append(rows, m.buildGradientRows(light)...)
 
 	// 10. Signaling section
 	rows = append(rows, m.buildSignalingRows(light)...)
@@ -1437,6 +1441,31 @@ func (m *Model) handleNewFieldChange(msg field.FieldChangedMsg) {
 		}
 		if v, ok := msg.Value.(field.SliderValue); ok {
 			err = bridge.SetGroupedLightBrightness(glID, float64(v.Value))
+		}
+	} else if strings.HasPrefix(msg.FieldID, "gradient-mode:") {
+		// Gradient mode selection
+		gradientLightID := strings.TrimPrefix(msg.FieldID, "gradient-mode:")
+		if v, ok := msg.Value.(field.SelectValue); ok {
+			state := bridge.GetState()
+			if state != nil {
+				if light, ok := state.GetLight(gradientLightID); ok {
+					if light.Gradient != nil && light.Gradient.ModeValues != nil {
+						modes := *light.Gradient.ModeValues
+						if v.Index >= 0 && v.Index < len(modes) {
+							m.status = fmt.Sprintf("Gradient mode: %s", formatGradientMode(modes[v.Index]))
+							err = bridge.SetLightGradientMode(gradientLightID, modes[v.Index])
+						}
+					}
+				}
+			}
+		}
+	} else if strings.HasPrefix(msg.FieldID, "gradient-points:") {
+		// Gradient points changed
+		gradientLightID := strings.TrimPrefix(msg.FieldID, "gradient-points:")
+		if v, ok := msg.Value.(field.GradientValue); ok {
+			points := convertToAPIPoints(v.Points)
+			m.status = fmt.Sprintf("Gradient points: %d", len(points))
+			err = bridge.SetLightGradientPoints(gradientLightID, points)
 		}
 	} else {
 		// Handle regular fields
@@ -2130,7 +2159,7 @@ func (m *Model) buildEffectsListRows(light hueclient.LightGet) []gridlayout.Grid
 }
 
 // buildGradientRows builds rows for the gradient section.
-func (m *Model) buildGradientRows(light hueclient.LightGet) []gridlayout.GridRow {
+func (m *Model) buildGradientRows(light hueclient.LightGet, lightID string) []gridlayout.GridRow {
 	if light.Gradient == nil {
 		return nil
 	}
@@ -2144,17 +2173,104 @@ func (m *Model) buildGradientRows(light hueclient.LightGet) []gridlayout.GridRow
 		Section: header,
 	})
 
-	if light.Gradient.Mode != nil {
-		rows = append(rows, gridlayout.NewInfoRow("Mode", string(*light.Gradient.Mode), infoLabelWidth))
+	// Mode selector (if ModeValues available)
+	if light.Gradient.ModeValues != nil && len(*light.Gradient.ModeValues) > 0 {
+		options := make([]field.Option, len(*light.Gradient.ModeValues))
+		currentIndex := 0
+		for i, mode := range *light.Gradient.ModeValues {
+			options[i] = field.Option{Label: formatGradientMode(mode), Value: i}
+			if light.Gradient.Mode != nil && *light.Gradient.Mode == mode {
+				currentIndex = i
+			}
+		}
+		modeSelect := field.NewSelectComponent(
+			"gradient-mode:"+lightID, "Mode", currentIndex, options,
+			&m.styles, m.zones,
+		)
+		rows = append(rows, gridlayout.GridRow{
+			Type: gridlayout.RowTypeNormal,
+			Cells: []gridlayout.GridCell{
+				{Component: gridlayout.NewLabelWithWidth("Mode", infoLabelWidth)},
+				{Component: modeSelect},
+			},
+		})
+	} else if light.Gradient.Mode != nil {
+		// Read-only mode display if no mode values available
+		rows = append(rows, gridlayout.NewInfoRow("Mode", formatGradientMode(*light.Gradient.Mode), infoLabelWidth))
 	}
+
+	// Pixel count info
 	if light.Gradient.PixelCount != nil {
 		rows = append(rows, gridlayout.NewInfoRow("Pixels", fmt.Sprintf("%d", *light.Gradient.PixelCount), infoLabelWidth))
 	}
+
+	// Max points capability info
+	if light.Gradient.PointsCapable != nil {
+		rows = append(rows, gridlayout.NewInfoRow("Max Points", fmt.Sprintf("%d", *light.Gradient.PointsCapable), infoLabelWidth))
+	}
+
+	// Gradient editor
 	if light.Gradient.Points != nil && len(*light.Gradient.Points) > 0 {
-		rows = append(rows, gridlayout.NewInfoRow("Points", fmt.Sprintf("%d", len(*light.Gradient.Points)), infoLabelWidth))
+		maxPoints := 5 // default
+		if light.Gradient.PointsCapable != nil {
+			maxPoints = *light.Gradient.PointsCapable
+		}
+
+		points := convertGradientPoints(*light.Gradient.Points)
+		editor := field.NewGradientEditorComponent(
+			"gradient-points:"+lightID, "Colors", points, maxPoints,
+			&m.styles, m.zones,
+		)
+		rows = append(rows, gridlayout.GridRow{
+			Type: gridlayout.RowTypeNormal,
+			Cells: []gridlayout.GridCell{
+				{Component: gridlayout.NewLabelWithWidth("Colors", infoLabelWidth)},
+				{Component: editor},
+			},
+		})
 	}
 
 	return rows
+}
+
+// formatGradientMode converts a gradient mode to a display-friendly string.
+func formatGradientMode(mode hueclient.SupportedGradientMode) string {
+	switch mode {
+	case hueclient.InterpolatedPalette:
+		return "Interpolated"
+	case hueclient.InterpolatedPaletteMirrored:
+		return "Mirrored"
+	case hueclient.RandomPixelated:
+		return "Pixelated"
+	default:
+		return string(mode)
+	}
+}
+
+// convertGradientPoints converts hueclient colors to field gradient points.
+func convertGradientPoints(colors []hueclient.Color) []field.GradientPoint {
+	points := make([]field.GradientPoint, 0, len(colors))
+	for _, c := range colors {
+		if c.Xy != nil && c.Xy.X != nil && c.Xy.Y != nil {
+			points = append(points, field.GradientPoint{
+				X: float64(*c.Xy.X),
+				Y: float64(*c.Xy.Y),
+			})
+		}
+	}
+	return points
+}
+
+// convertToAPIPoints converts field gradient points to hueclient colors.
+func convertToAPIPoints(points []field.GradientPoint) []hueclient.Color {
+	colors := make([]hueclient.Color, len(points))
+	for i, pt := range points {
+		x, y := float32(pt.X), float32(pt.Y)
+		colors[i] = hueclient.Color{
+			Xy: &hueclient.GamutPosition{X: &x, Y: &y},
+		}
+	}
+	return colors
 }
 
 // buildSignalingRows builds rows for the signaling section.

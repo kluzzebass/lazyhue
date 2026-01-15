@@ -1148,6 +1148,26 @@ func (s *BridgeState) AddGroupedLight(id string, gl hueclient.GroupedLightGet) {
 	s.GroupedLights[id] = gl
 }
 
+// AddLight adds a light to the cache.
+func (s *BridgeState) AddLight(id string, light hueclient.LightGet) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.Lights == nil {
+		s.Lights = make(map[string]hueclient.LightGet)
+	}
+	s.Lights[id] = light
+}
+
+// AddDevice adds a device to the cache.
+func (s *BridgeState) AddDevice(id string, device hueclient.DeviceGet) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.Devices == nil {
+		s.Devices = make(map[string]hueclient.DeviceGet)
+	}
+	s.Devices[id] = device
+}
+
 // UpdateMotionSensors replaces the motion sensors cache.
 func (s *BridgeState) UpdateMotionSensors(sensors map[string]hueclient.MotionGet) {
 	s.mu.Lock()
@@ -1781,6 +1801,32 @@ func (s *BridgeState) SetLightEffect(id string, effect hueclient.SupportedEffect
 		if light.Effects != nil {
 			light.Effects.Effect = &effect
 			light.Effects.Status = &effect
+			s.Lights[id] = light
+		}
+	}
+}
+
+// SetLightGradientMode optimistically updates a light's gradient mode in the cache.
+func (s *BridgeState) SetLightGradientMode(id string, mode hueclient.SupportedGradientMode) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if light, ok := s.Lights[id]; ok {
+		if light.Gradient != nil {
+			light.Gradient.Mode = &mode
+			s.Lights[id] = light
+		}
+	}
+}
+
+// SetLightGradientPoints optimistically updates a light's gradient points in the cache.
+func (s *BridgeState) SetLightGradientPoints(id string, points []hueclient.Color) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if light, ok := s.Lights[id]; ok {
+		if light.Gradient != nil {
+			light.Gradient.Points = &points
 			s.Lights[id] = light
 		}
 	}

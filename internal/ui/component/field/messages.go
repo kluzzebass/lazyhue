@@ -47,6 +47,16 @@ type ButtonValue struct {
 	Pressed bool
 }
 
+// GradientPoint represents a single point in a gradient.
+type GradientPoint struct {
+	X, Y float64 // CIE xy color space
+}
+
+// GradientValue is the value type for gradient editor fields.
+type GradientValue struct {
+	Points []GradientPoint
+}
+
 // StartCaptureMsg is sent when a field wants to capture mouse events.
 // This is used for drag operations on sliders and color wheels.
 type StartCaptureMsg struct {

@@ -71,10 +71,9 @@ type ResourceUpdate struct {
 	LightLevel *struct {
 		LightLevel int `json:"light_level"`
 	} `json:"light_level,omitempty"`
-	// Scene status - can be a string or an object
-	Status *struct {
-		Active string `json:"active"` // "inactive", "static", "dynamic_palette"
-	} `json:"status,omitempty"`
+	// Scene status - can be a string or an object depending on resource type
+	// Using json.RawMessage to handle both cases
+	Status json.RawMessage `json:"status,omitempty"`
 	// Metadata for device/room/zone/scene renames
 	Metadata *struct {
 		Name      *string `json:"name,omitempty"`
@@ -130,10 +129,9 @@ type ResourceUpdate struct {
 	Geolocation *struct {
 		IsConfigured bool `json:"is_configured"`
 	} `json:"is_configured,omitempty"`
-	// Smart scene state
-	SmartSceneState *struct {
-		Active string `json:"active"` // "active", "inactive"
-	} `json:"state,omitempty"`
+	// Smart scene state - can be a string or an object depending on resource type
+	// Using json.RawMessage to handle both cases
+	State json.RawMessage `json:"state,omitempty"`
 }
 
 // EventStream manages the SSE connection to a bridge.
@@ -295,7 +293,6 @@ func (es *EventStream) connect(ctx context.Context) error {
 }
 
 func (es *EventStream) processEvent(id, data string) {
-	debug.Log("EventStream event id=%s", id)
 
 	// Parse the event container (it's an array of events)
 	var events []BridgeEvent
