@@ -13,15 +13,17 @@ const (
 	EntityZone
 	EntityLight
 	EntityScene
+	EntitySmartScene
 	EntityDevice
 	EntityEntertainment
 	EntityBridge
-	EntityLightsCategory        // Aggregate for "Lights" folder
-	EntityDevicesCategory       // Aggregate for "Devices" folder
-	EntityScenesCategory        // Aggregate for "Scenes" folder
-	EntityRoomsCategory         // Aggregate for "Rooms" folder
-	EntityZonesCategory         // Aggregate for "Zones" folder
-	EntityEntertainmentCategory // Aggregate for "Entertainment Areas" folder
+	EntityLightsCategory         // Aggregate for "Lights" folder
+	EntityDevicesCategory        // Aggregate for "Devices" folder
+	EntityScenesCategory         // Aggregate for "Scenes" folder
+	EntitySmartScenesCategory    // Aggregate for "Smart Scenes" folder
+	EntityRoomsCategory          // Aggregate for "Rooms" folder
+	EntityZonesCategory          // Aggregate for "Zones" folder
+	EntityEntertainmentCategory  // Aggregate for "Entertainment Areas" folder
 )
 
 // String returns a human-readable name for the entity type.
@@ -35,6 +37,8 @@ func (t EntityType) String() string {
 		return "Light"
 	case EntityScene:
 		return "Scene"
+	case EntitySmartScene:
+		return "Smart Scene"
 	case EntityDevice:
 		return "Device"
 	case EntityEntertainment:
@@ -47,6 +51,8 @@ func (t EntityType) String() string {
 		return "Devices"
 	case EntityScenesCategory:
 		return "Scenes"
+	case EntitySmartScenesCategory:
+		return "Smart Scenes"
 	case EntityRoomsCategory:
 		return "Rooms"
 	case EntityZonesCategory:
@@ -74,6 +80,12 @@ type DevicesCategoryData struct {
 type ScenesCategoryData struct {
 	ParentName string
 	Scenes     []hueclient.SceneGet
+}
+
+// SmartScenesCategoryData holds aggregate data for a smart scenes category folder.
+type SmartScenesCategoryData struct {
+	ParentName  string
+	SmartScenes []hueclient.SmartSceneGet
 }
 
 // RoomsCategoryData holds aggregate data for a rooms category folder.

@@ -2,6 +2,7 @@ package hue
 
 import (
 	"sort"
+	"strings"
 	"sync"
 
 	"github.com/kluzzebass/lazyhue/internal/hueclient"
@@ -269,6 +270,7 @@ type BridgeState struct {
 	Rooms                       map[string]hueclient.RoomGet
 	Zones                       map[string]hueclient.RoomGet // Zones use the same type as Rooms
 	Scenes                      map[string]hueclient.SceneGet
+	SmartScenes                 map[string]hueclient.SmartSceneGet
 	GroupedLights               map[string]hueclient.GroupedLightGet
 	Devices                     map[string]hueclient.DeviceGet
 	MotionSensors               map[string]hueclient.MotionGet
@@ -292,6 +294,7 @@ func NewBridgeState() *BridgeState {
 		Rooms:                       make(map[string]hueclient.RoomGet),
 		Zones:                       make(map[string]hueclient.RoomGet),
 		Scenes:                      make(map[string]hueclient.SceneGet),
+		SmartScenes:                 make(map[string]hueclient.SmartSceneGet),
 		GroupedLights:               make(map[string]hueclient.GroupedLightGet),
 		Devices:                     make(map[string]hueclient.DeviceGet),
 		MotionSensors:               make(map[string]hueclient.MotionGet),
@@ -349,6 +352,122 @@ func (s *BridgeState) GetDevice(id string) (hueclient.DeviceGet, bool) {
 	defer s.mu.RUnlock()
 	d, ok := s.Devices[id]
 	return d, ok
+}
+
+// DeleteScene removes a scene from the state.
+func (s *BridgeState) DeleteScene(id string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.Scenes, id)
+}
+
+// GetSmartScene returns a smart scene by ID.
+func (s *BridgeState) GetSmartScene(id string) (hueclient.SmartSceneGet, bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	sc, ok := s.SmartScenes[id]
+	return sc, ok
+}
+
+// GetSmartSceneName returns the name of a smart scene.
+func (s *BridgeState) GetSmartSceneName(scene hueclient.SmartSceneGet) string {
+	if scene.Metadata.Name != nil {
+		return *scene.Metadata.Name
+	}
+	return "Unknown"
+}
+
+// UpdateSmartScenes replaces the smart scenes cache.
+func (s *BridgeState) UpdateSmartScenes(scenes map[string]hueclient.SmartSceneGet) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.SmartScenes = scenes
+}
+
+// DeleteSmartScene removes a smart scene from the state.
+func (s *BridgeState) DeleteSmartScene(id string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.SmartScenes, id)
+}
+
+// RemoveSmartScene removes a smart scene and returns whether it existed.
+func (s *BridgeState) RemoveSmartScene(id string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if _, ok := s.SmartScenes[id]; ok {
+		delete(s.SmartScenes, id)
+		return true
+	}
+	return false
+}
+
+// AddSmartScene adds a smart scene to the state.
+func (s *BridgeState) AddSmartScene(id string, scene hueclient.SmartSceneGet) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.SmartScenes[id] = scene
+}
+
+// AllSmartScenes returns all smart scenes, sorted by name.
+func (s *BridgeState) AllSmartScenes() []hueclient.SmartSceneGet {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	scenes := make([]hueclient.SmartSceneGet, 0, len(s.SmartScenes))
+	for _, sc := range s.SmartScenes {
+		scenes = append(scenes, sc)
+	}
+	sort.Slice(scenes, func(i, j int) bool {
+		nameI := ""
+		nameJ := ""
+		if scenes[i].Metadata.Name != nil {
+			nameI = *scenes[i].Metadata.Name
+		}
+		if scenes[j].Metadata.Name != nil {
+			nameJ = *scenes[j].Metadata.Name
+		}
+		return strings.ToLower(nameI) < strings.ToLower(nameJ)
+	})
+	return scenes
+}
+
+// DeleteDevice removes a device and its associated resources from the state.
+func (s *BridgeState) DeleteDevice(id string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	device, ok := s.Devices[id]
+	if !ok {
+		return
+	}
+
+	// Remove associated services (lights, sensors, etc.)
+	if device.Services != nil {
+		for _, svc := range *device.Services {
+			if svc.Rid == nil {
+				continue
+			}
+			rid := *svc.Rid
+			if svc.Rtype != nil {
+				switch *svc.Rtype {
+				case hueclient.ResourceIdentifierRtypeLight:
+					delete(s.Lights, rid)
+				case hueclient.ResourceIdentifierRtypeMotion:
+					delete(s.MotionSensors, rid)
+				case hueclient.ResourceIdentifierRtypeTemperature:
+					delete(s.Temperatures, rid)
+				case hueclient.ResourceIdentifierRtypeLightLevel:
+					delete(s.LightLevels, rid)
+				case hueclient.ResourceIdentifierRtypeDevicePower:
+					delete(s.DevicePowers, rid)
+				}
+			}
+		}
+	}
+
+	delete(s.Devices, id)
 }
 
 // GetAllDevices returns a copy of all devices.

@@ -413,6 +413,49 @@ func (m *Model) buildBridgeChildren(bridgeNode *panels.TreeNode, state *hue.Brid
 		bridgeNode.Children = append(bridgeNode.Children, zonesNode)
 	}
 
+	// Smart scenes category
+	smartScenes := state.AllSmartScenes()
+	if len(smartScenes) > 0 {
+		smartScenesNode := &panels.TreeNode{
+			ID:       bridgeNode.ID + ":smart_scenes",
+			Label:    fmt.Sprintf("Smart Scenes (%d)", len(smartScenes)),
+			Depth:    1,
+			Expanded: false,
+			Item: &panels.EntityItem{
+				ID:       bridgeNode.ID + ":smart_scenes",
+				Name:     "Smart Scenes",
+				Type:     panels.EntitySmartScenesCategory,
+				BridgeID: bridgeID,
+				RawPtr: panels.SmartScenesCategoryData{
+					ParentName:  bridgeNode.Label,
+					SmartScenes: smartScenes,
+				},
+			},
+			Children: make([]*panels.TreeNode, 0, len(smartScenes)),
+		}
+		for _, scene := range smartScenes {
+			sceneID := ""
+			sceneName := state.GetSmartSceneName(scene)
+			if scene.Id != nil {
+				sceneID = *scene.Id
+			}
+			isActive := scene.State == "active"
+			smartScenesNode.Children = append(smartScenesNode.Children, &panels.TreeNode{
+				ID:    sceneID,
+				Label: sceneName,
+				Depth: 2,
+				Item: &panels.EntityItem{
+					ID:       sceneID,
+					Name:     sceneName,
+					Type:     panels.EntitySmartScene,
+					IsOn:     isActive,
+					BridgeID: bridgeID,
+				},
+			})
+		}
+		bridgeNode.Children = append(bridgeNode.Children, smartScenesNode)
+	}
+
 	// Entertainment configurations category
 	entConfigs := state.AllEntertainmentConfigurations()
 	if len(entConfigs) > 0 {

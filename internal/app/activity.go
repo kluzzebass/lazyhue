@@ -789,6 +789,11 @@ func (e *SmartSceneEvent) Parse(bridgeID, bridgeName, eventType string, data jso
 	}
 	if update.Metadata != nil && update.Metadata.Name != nil {
 		e.Name = *update.Metadata.Name
+	} else if state != nil {
+		// Fall back to looking up the name from state
+		if scene, ok := state.GetSmartScene(update.ID); ok {
+			e.Name = state.GetSmartSceneName(scene)
+		}
 	}
 	return e, nil
 }

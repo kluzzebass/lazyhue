@@ -71,12 +71,12 @@ func (d TreeDelegate) getEntityColor(entityType EntityType) color.Color {
 		return d.Styles.Theme.EntityZone
 	case EntityDevice:
 		return d.Styles.Theme.EntityDevice
-	case EntityScene:
+	case EntityScene, EntitySmartScene:
 		return d.Styles.Theme.EntityScene
 	case EntityEntertainment:
 		return d.Styles.Theme.EntityEntertainment
 	// Category folders use neutral white
-	case EntityLightsCategory, EntityDevicesCategory, EntityScenesCategory,
+	case EntityLightsCategory, EntityDevicesCategory, EntityScenesCategory, EntitySmartScenesCategory,
 		EntityRoomsCategory, EntityZonesCategory, EntityEntertainmentCategory:
 		return d.Styles.Theme.TextBright
 	default:

@@ -1037,3 +1037,127 @@ func (b *Bridge) SetLightPowerupPreset(lightID string, preset hueclient.PowerupP
 	})
 	return err
 }
+
+// DeleteScene deletes a scene from the bridge.
+func (b *Bridge) DeleteScene(sceneID string) error {
+	b.mu.RLock()
+	client := b.client
+	b.mu.RUnlock()
+
+	if client == nil {
+		return ErrAuthFailed
+	}
+
+	sceneName := "Unknown"
+	if scene, ok := b.state.GetScene(sceneID); ok {
+		sceneName = b.state.GetSceneName(scene)
+	}
+
+	b.logRequest(fmt.Sprintf("Deleting scene: %s", sceneName))
+
+	// Remove from state immediately (optimistic)
+	b.state.DeleteScene(sceneID)
+
+	_, err := client.DeleteScene(context.Background(), sceneID)
+	return err
+}
+
+// DeleteDevice removes a device from the bridge (factory reset).
+func (b *Bridge) DeleteDevice(deviceID string) error {
+	b.mu.RLock()
+	client := b.client
+	b.mu.RUnlock()
+
+	if client == nil {
+		return ErrAuthFailed
+	}
+
+	deviceName := "Unknown"
+	if device, ok := b.state.GetDevice(deviceID); ok {
+		deviceName = b.state.GetDeviceName(device)
+	}
+
+	b.logRequest(fmt.Sprintf("Deleting device: %s", deviceName))
+
+	// Remove from state immediately (optimistic)
+	b.state.DeleteDevice(deviceID)
+
+	_, err := client.DeleteDevice(context.Background(), deviceID)
+	return err
+}
+
+// ActivateSmartScene activates a smart (automation) scene.
+func (b *Bridge) ActivateSmartScene(sceneID string) error {
+	b.mu.RLock()
+	client := b.client
+	b.mu.RUnlock()
+
+	if client == nil {
+		return ErrAuthFailed
+	}
+
+	sceneName := "Unknown"
+	if scene, ok := b.state.GetSmartScene(sceneID); ok {
+		sceneName = b.state.GetSmartSceneName(scene)
+	}
+
+	b.logRequest(fmt.Sprintf("Activating smart scene: %s", sceneName))
+
+	action := hueclient.SmartSceneOptionalRecallActionActivate
+	_, err := client.UpdateSmartScene(context.Background(), sceneID, hueclient.UpdateSmartSceneJSONRequestBody{
+		Recall: &hueclient.SmartSceneOptionalRecall{
+			Action: &action,
+		},
+	})
+	return err
+}
+
+// DeactivateSmartScene deactivates a smart (automation) scene.
+func (b *Bridge) DeactivateSmartScene(sceneID string) error {
+	b.mu.RLock()
+	client := b.client
+	b.mu.RUnlock()
+
+	if client == nil {
+		return ErrAuthFailed
+	}
+
+	sceneName := "Unknown"
+	if scene, ok := b.state.GetSmartScene(sceneID); ok {
+		sceneName = b.state.GetSmartSceneName(scene)
+	}
+
+	b.logRequest(fmt.Sprintf("Deactivating smart scene: %s", sceneName))
+
+	action := hueclient.SmartSceneOptionalRecallActionDeactivate
+	_, err := client.UpdateSmartScene(context.Background(), sceneID, hueclient.UpdateSmartSceneJSONRequestBody{
+		Recall: &hueclient.SmartSceneOptionalRecall{
+			Action: &action,
+		},
+	})
+	return err
+}
+
+// DeleteSmartScene deletes a smart scene from the bridge.
+func (b *Bridge) DeleteSmartScene(sceneID string) error {
+	b.mu.RLock()
+	client := b.client
+	b.mu.RUnlock()
+
+	if client == nil {
+		return ErrAuthFailed
+	}
+
+	sceneName := "Unknown"
+	if scene, ok := b.state.GetSmartScene(sceneID); ok {
+		sceneName = b.state.GetSmartSceneName(scene)
+	}
+
+	b.logRequest(fmt.Sprintf("Deleting smart scene: %s", sceneName))
+
+	// Remove from state immediately (optimistic)
+	b.state.DeleteSmartScene(sceneID)
+
+	_, err := client.DeleteSmartScene(context.Background(), sceneID)
+	return err
+}

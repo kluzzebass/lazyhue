@@ -339,6 +339,8 @@ func (b *Bridge) applyResourceDelete(update ResourceUpdate) bool {
 		return b.state.RemoveZone(update.ID)
 	case "scene":
 		return b.state.RemoveScene(update.ID)
+	case "smart_scene":
+		return b.state.RemoveSmartScene(update.ID)
 	case "device":
 		return b.state.RemoveDevice(update.ID)
 	case "grouped_light":
@@ -401,6 +403,21 @@ func (b *Bridge) applyResourceAdd(update ResourceUpdate) bool {
 			if scene.Id != nil {
 				b.state.AddScene(*scene.Id, scene)
 				debug.Log("Added new scene %s to cache", *scene.Id)
+				return true
+			}
+		}
+		return false
+
+	case "smart_scene":
+		resp, err := client.GetSmartSceneWithResponse(ctx, update.ID)
+		if err != nil || resp.JSON200 == nil || resp.JSON200.Data == nil {
+			debug.Log("Failed to fetch new smart_scene %s: %v", update.ID, err)
+			return false
+		}
+		for _, scene := range *resp.JSON200.Data {
+			if scene.Id != nil {
+				b.state.AddSmartScene(*scene.Id, scene)
+				debug.Log("Added new smart_scene %s to cache", *scene.Id)
 				return true
 			}
 		}
@@ -476,6 +493,8 @@ func (b *Bridge) SyncAll(ctx context.Context) error {
 	if err := b.SyncScenes(ctx); err != nil {
 		return err
 	}
+	// Smart scenes (non-fatal if they fail - older bridges may not support them)
+	_ = b.SyncSmartScenes(ctx)
 	if err := b.SyncDevices(ctx); err != nil {
 		return err
 	}
@@ -539,6 +558,7 @@ func (b *Bridge) SyncAllBulk(ctx context.Context) error {
 	zones := make(map[string]hueclient.RoomGet)
 	groupedLights := make(map[string]hueclient.GroupedLightGet)
 	scenes := make(map[string]hueclient.SceneGet)
+	smartScenes := make(map[string]hueclient.SmartSceneGet)
 	devices := make(map[string]hueclient.DeviceGet)
 	motions := make(map[string]hueclient.MotionGet)
 	temperatures := make(map[string]hueclient.TemperatureGet)
@@ -584,6 +604,11 @@ func (b *Bridge) SyncAllBulk(ctx context.Context) error {
 			if err := json.Unmarshal(raw, &scene); err == nil && scene.Id != nil {
 				scenes[*scene.Id] = scene
 			}
+		case "smart_scene":
+			var smartScene hueclient.SmartSceneGet
+			if err := json.Unmarshal(raw, &smartScene); err == nil && smartScene.Id != nil {
+				smartScenes[*smartScene.Id] = smartScene
+			}
 		case "device":
 			var device hueclient.DeviceGet
 			if err := json.Unmarshal(raw, &device); err == nil && device.Id != nil {
@@ -628,6 +653,7 @@ func (b *Bridge) SyncAllBulk(ctx context.Context) error {
 	b.state.UpdateZones(zones)
 	b.state.UpdateGroupedLights(groupedLights)
 	b.state.UpdateScenes(scenes)
+	b.state.UpdateSmartScenes(smartScenes)
 	b.state.UpdateDevices(devices)
 	b.state.UpdateMotionSensors(motions)
 	b.state.UpdateTemperatures(temperatures)
@@ -806,6 +832,36 @@ func (b *Bridge) SyncScenes(ctx context.Context) error {
 	}
 
 	b.state.UpdateScenes(scenes)
+	return nil
+}
+
+// SyncSmartScenes fetches only smart scenes from the bridge.
+func (b *Bridge) SyncSmartScenes(ctx context.Context) error {
+	b.mu.RLock()
+	client := b.client
+	b.mu.RUnlock()
+
+	if client == nil {
+		return ErrAuthFailed
+	}
+
+	resp, err := client.GetSmartScenesWithResponse(ctx)
+	if err != nil {
+		return err
+	}
+
+	if resp.JSON200 == nil || resp.JSON200.Data == nil {
+		return nil
+	}
+
+	smartScenes := make(map[string]hueclient.SmartSceneGet)
+	for _, scene := range *resp.JSON200.Data {
+		if scene.Id != nil {
+			smartScenes[*scene.Id] = scene
+		}
+	}
+
+	b.state.UpdateSmartScenes(smartScenes)
 	return nil
 }
 

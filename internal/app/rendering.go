@@ -624,6 +624,27 @@ func (m *Model) updateDetailContent() {
 			}
 		}
 
+	case panels.EntitySmartScene:
+		m.selectedLightID = ""
+		var scene hueclient.SmartSceneGet
+		var ok bool
+		if node.Item.RawPtr != nil {
+			if s, typeOk := node.Item.RawPtr.(hueclient.SmartSceneGet); typeOk {
+				scene = s
+				ok = true
+			}
+		}
+		if !ok && state != nil {
+			scene, ok = state.GetSmartScene(node.Item.ID)
+		}
+		if ok {
+			rows := m.buildSmartSceneGridRows(scene, state, bridgeID)
+			m.lightGrid.SetRows(rows)
+			if len(m.lightGrid.Children()) > 0 {
+				content.WriteString(m.lightGrid.View())
+			}
+		}
+
 	case panels.EntityDevice:
 		m.selectedLightID = ""
 		var device hueclient.DeviceGet
@@ -718,6 +739,16 @@ func (m *Model) updateDetailContent() {
 		m.selectedLightID = ""
 		if data, ok := node.Item.RawPtr.(panels.ScenesCategoryData); ok {
 			rows := m.buildScenesCategoryGridRows(data, state)
+			m.lightGrid.SetRows(rows)
+			if len(m.lightGrid.Children()) > 0 {
+				content.WriteString(m.lightGrid.View())
+			}
+		}
+
+	case panels.EntitySmartScenesCategory:
+		m.selectedLightID = ""
+		if data, ok := node.Item.RawPtr.(panels.SmartScenesCategoryData); ok {
+			rows := m.buildSmartScenesCategoryGridRows(data, state)
 			m.lightGrid.SetRows(rows)
 			if len(m.lightGrid.Children()) > 0 {
 				content.WriteString(m.lightGrid.View())
@@ -1175,6 +1206,72 @@ func (m *Model) handleNewFieldChange(msg field.FieldChangedMsg) {
 			if err == nil {
 				m.status = "Scene activated"
 			}
+		}
+	} else if strings.HasPrefix(msg.FieldID, "scene-delete:") {
+		sceneID := strings.TrimPrefix(msg.FieldID, "scene-delete:")
+		if _, ok := msg.Value.(field.ButtonValue); ok {
+			m.status = "Deleting scene..."
+			err = bridge.DeleteScene(sceneID)
+			if err == nil {
+				m.status = "Scene deleted"
+				// Rebuild tree to reflect the deletion
+				m.rebuildTreeForActiveTab()
+			}
+			if err != nil {
+				m.status = fmt.Sprintf("Error: %v", err)
+			}
+			return
+		}
+	} else if strings.HasPrefix(msg.FieldID, "device-delete:") {
+		deviceID := strings.TrimPrefix(msg.FieldID, "device-delete:")
+		if _, ok := msg.Value.(field.ButtonValue); ok {
+			m.status = "Deleting device..."
+			err = bridge.DeleteDevice(deviceID)
+			if err == nil {
+				m.status = "Device deleted"
+				// Rebuild tree to reflect the deletion
+				m.rebuildTreeForActiveTab()
+			}
+			if err != nil {
+				m.status = fmt.Sprintf("Error: %v", err)
+			}
+			return
+		}
+	} else if strings.HasPrefix(msg.FieldID, "smartscene-toggle:") {
+		sceneID := strings.TrimPrefix(msg.FieldID, "smartscene-toggle:")
+		if v, ok := msg.Value.(field.ToggleValue); ok {
+			if v.On {
+				m.status = "Activating smart scene..."
+				err = bridge.ActivateSmartScene(sceneID)
+				if err == nil {
+					m.status = "Smart scene activated"
+				}
+			} else {
+				m.status = "Deactivating smart scene..."
+				err = bridge.DeactivateSmartScene(sceneID)
+				if err == nil {
+					m.status = "Smart scene deactivated"
+				}
+			}
+			if err != nil {
+				m.status = fmt.Sprintf("Error: %v", err)
+			}
+			return
+		}
+	} else if strings.HasPrefix(msg.FieldID, "smartscene-delete:") {
+		sceneID := strings.TrimPrefix(msg.FieldID, "smartscene-delete:")
+		if _, ok := msg.Value.(field.ButtonValue); ok {
+			m.status = "Deleting smart scene..."
+			err = bridge.DeleteSmartScene(sceneID)
+			if err == nil {
+				m.status = "Smart scene deleted"
+				// Rebuild tree to reflect the deletion
+				m.rebuildTreeForActiveTab()
+			}
+			if err != nil {
+				m.status = fmt.Sprintf("Error: %v", err)
+			}
+			return
 		}
 	} else if strings.HasPrefix(msg.FieldID, "motion-enabled:") {
 		motionID := strings.TrimPrefix(msg.FieldID, "motion-enabled:")
@@ -2243,6 +2340,18 @@ func (m *Model) buildSceneGridRows(scene hueclient.SceneGet, state *hue.BridgeSt
 				{Component: activateBtn},
 			},
 		})
+
+		deleteBtn := field.NewButtonComponent(
+			"scene-delete:"+sceneID, "Delete", "Delete",
+			&m.styles, m.zones,
+		)
+		rows = append(rows, gridlayout.GridRow{
+			Type: gridlayout.RowTypeNormal,
+			Cells: []gridlayout.GridCell{
+				{Component: gridlayout.NewLabelWithWidth("Delete", infoLabelWidth)},
+				{Component: deleteBtn},
+			},
+		})
 	}
 
 	// 2. Settings section (name)
@@ -2398,6 +2507,18 @@ func (m *Model) buildDeviceGridRows(device hueclient.DeviceGet, state *hue.Bridg
 			Cells: []gridlayout.GridCell{
 				{Component: gridlayout.NewLabelWithWidth("Identify", infoLabelWidth)},
 				{Component: identifyBtn},
+			},
+		})
+
+		deleteBtn := field.NewButtonComponent(
+			"device-delete:"+deviceID, "Delete", "Delete",
+			&m.styles, m.zones,
+		)
+		rows = append(rows, gridlayout.GridRow{
+			Type: gridlayout.RowTypeNormal,
+			Cells: []gridlayout.GridCell{
+				{Component: gridlayout.NewLabelWithWidth("Delete", infoLabelWidth)},
+				{Component: deleteBtn},
 			},
 		})
 	}
@@ -3071,6 +3192,149 @@ func (m *Model) buildScenesCategoryGridRows(data panels.ScenesCategoryData, _ *h
 	for _, scene := range data.Scenes {
 		name := scene.SceneName("Unknown")
 		rows = append(rows, gridlayout.NewListItemRow("•", name))
+	}
+
+	return rows
+}
+
+// buildSmartSceneGridRows builds the detail grid rows for a smart scene.
+func (m *Model) buildSmartSceneGridRows(scene hueclient.SmartSceneGet, state *hue.BridgeState, bridgeID string) []gridlayout.GridRow {
+	var rows []gridlayout.GridRow
+
+	sceneID := ""
+	if scene.Id != nil {
+		sceneID = *scene.Id
+	}
+
+	// 1. Controls section - activate/deactivate toggle and delete
+	controlsHeader := field.NewHeaderComponent("controls-header", "Controls", &m.styles, m.zones)
+	rows = append(rows, gridlayout.GridRow{
+		Type:    gridlayout.RowTypeSection,
+		Section: controlsHeader,
+	})
+
+	if sceneID != "" {
+		// Activate/Deactivate toggle
+		isActive := scene.State == "active"
+		toggle := field.NewToggleComponent(
+			"smartscene-toggle:"+sceneID, "Active", isActive,
+			&m.styles, m.zones,
+		)
+		rows = append(rows, gridlayout.GridRow{
+			Type: gridlayout.RowTypeNormal,
+			Cells: []gridlayout.GridCell{
+				{Component: gridlayout.NewLabelWithWidth("Active", infoLabelWidth)},
+				{Component: toggle},
+			},
+		})
+
+		deleteBtn := field.NewButtonComponent(
+			"smartscene-delete:"+sceneID, "Delete", "Delete",
+			&m.styles, m.zones,
+		)
+		rows = append(rows, gridlayout.GridRow{
+			Type: gridlayout.RowTypeNormal,
+			Cells: []gridlayout.GridCell{
+				{Component: gridlayout.NewLabelWithWidth("Delete", infoLabelWidth)},
+				{Component: deleteBtn},
+			},
+		})
+	}
+
+	// 2. Info section
+	infoHeader := field.NewHeaderComponent("info-header", "Info", &m.styles, m.zones)
+	rows = append(rows, gridlayout.GridRow{
+		Type:    gridlayout.RowTypeSection,
+		Section: infoHeader,
+	})
+
+	// Name
+	if scene.Metadata.Name != nil {
+		rows = append(rows, gridlayout.NewInfoRow("Name", *scene.Metadata.Name, infoLabelWidth))
+	}
+
+	// State
+	stateStr := string(scene.State)
+	stateStyle := m.styles.Dimmed
+	if scene.State == "active" {
+		stateStyle = m.styles.Success
+	}
+	rows = append(rows, gridlayout.NewStyledInfoRow("State", stateStr, infoLabelWidth, stateStyle))
+
+	// Group (room/zone)
+	if scene.Group.Rid != nil && state != nil {
+		groupName := ""
+		if scene.Group.Rtype != nil {
+			switch *scene.Group.Rtype {
+			case hueclient.ResourceIdentifierRtypeRoom:
+				if room, ok := state.GetRoom(*scene.Group.Rid); ok {
+					groupName = state.GetRoomName(room)
+				}
+			case hueclient.ResourceIdentifierRtypeZone:
+				if zone, ok := state.GetZone(*scene.Group.Rid); ok {
+					groupName = zone.RoomName("Unknown")
+				}
+			}
+		}
+		if groupName != "" {
+			rows = append(rows, gridlayout.NewInfoRow("Group", groupName, infoLabelWidth))
+		}
+	}
+
+	// Transition duration (convert from ms to seconds)
+	if scene.TransitionDuration > 0 {
+		durationSec := float64(scene.TransitionDuration) / 1000.0
+		rows = append(rows, gridlayout.NewInfoRow("Transition", fmt.Sprintf("%.1fs", durationSec), infoLabelWidth))
+	}
+
+	// Active timeslot
+	if scene.ActiveTimeslot != nil {
+		slotInfo := fmt.Sprintf("Slot %d (%s)", scene.ActiveTimeslot.TimeslotId, string(scene.ActiveTimeslot.Weekday))
+		rows = append(rows, gridlayout.NewInfoRow("Active Slot", slotInfo, infoLabelWidth))
+	}
+
+	// Week timeslots summary
+	if len(scene.WeekTimeslots) > 0 {
+		rows = append(rows, gridlayout.NewInfoRow("Days Configured", fmt.Sprintf("%d", len(scene.WeekTimeslots)), infoLabelWidth))
+	}
+
+	if scene.Id != nil {
+		rows = append(rows, gridlayout.NewEmptyRow())
+		rows = append(rows, gridlayout.NewInfoRow("ID", *scene.Id, infoLabelWidth))
+	}
+
+	return rows
+}
+
+// buildSmartScenesCategoryGridRows builds a list of all smart scenes in a category.
+func (m *Model) buildSmartScenesCategoryGridRows(data panels.SmartScenesCategoryData, _ *hue.BridgeState) []gridlayout.GridRow {
+	var rows []gridlayout.GridRow
+
+	// Header with parent context
+	headerText := fmt.Sprintf("Smart Scenes (%d)", len(data.SmartScenes))
+	if data.ParentName != "" {
+		headerText = fmt.Sprintf("Smart Scenes on %s (%d)", data.ParentName, len(data.SmartScenes))
+	}
+	header := field.NewHeaderComponent("smartscenes-header", headerText, &m.styles, m.zones)
+	rows = append(rows, gridlayout.GridRow{
+		Type:    gridlayout.RowTypeSection,
+		Section: header,
+	})
+
+	rows = append(rows, gridlayout.NewInfoRow("Total", fmt.Sprintf("%d", len(data.SmartScenes)), infoLabelWidth))
+	rows = append(rows, gridlayout.NewEmptyRow())
+
+	// List each smart scene with status
+	for _, scene := range data.SmartScenes {
+		name := "Unknown"
+		if scene.Metadata.Name != nil {
+			name = *scene.Metadata.Name
+		}
+		statusIndicator := "○" // inactive
+		if scene.State == "active" {
+			statusIndicator = "●" // active
+		}
+		rows = append(rows, gridlayout.NewListItemRow(statusIndicator, name))
 	}
 
 	return rows
