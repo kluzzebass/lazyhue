@@ -84,6 +84,11 @@ type ResourceUpdate struct {
 	Button *struct {
 		LastEvent string `json:"last_event"` // "initial_press", "repeat", "short_release", "long_release", "double_short_release"
 	} `json:"button,omitempty"`
+	// Device power (battery) event data
+	PowerState *struct {
+		BatteryLevel *int    `json:"battery_level,omitempty"`
+		BatteryState *string `json:"battery_state,omitempty"` // "normal", "low", "critical"
+	} `json:"power_state,omitempty"`
 }
 
 // EventStream manages the SSE connection to a bridge.

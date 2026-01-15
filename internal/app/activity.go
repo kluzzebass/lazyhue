@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
+	"strings"
 	"time"
 
 	"github.com/charmbracelet/lipgloss/v2"
@@ -411,6 +412,61 @@ func formatButtonEvent(event string) string {
 }
 
 func (e *ButtonEvent) Render(styles *ui.Styles, width int) string {
+	return renderEvent(styles, width, e.baseEvent, e.Name, e.Details, "", 0, false)
+}
+
+// DevicePowerEvent represents a device power (battery) event.
+type DevicePowerEvent struct {
+	baseEvent
+	Name    string
+	Details string
+}
+
+func (e *DevicePowerEvent) Parse(bridgeID, bridgeName, eventType string, data json.RawMessage, state *hue.BridgeState) (Event, error) {
+	var updates []hue.ResourceUpdate
+	if err := json.Unmarshal(data, &updates); err != nil {
+		return nil, fmt.Errorf("parse device_power event: %w", err)
+	}
+
+	if len(updates) == 0 {
+		return nil, fmt.Errorf("no updates in device_power event")
+	}
+
+	update := updates[0]
+	e.baseEvent = baseEvent{
+		bridgeID:     bridgeID,
+		bridgeName:   bridgeName,
+		resourceType: "device_power",
+		resourceID:   update.ID,
+		eventType:    eventType,
+		timestamp:    time.Now(),
+	}
+
+	// Get battery info from the update
+	if update.PowerState != nil {
+		var parts []string
+		if update.PowerState.BatteryLevel != nil {
+			parts = append(parts, fmt.Sprintf("%d%%", *update.PowerState.BatteryLevel))
+		}
+		if update.PowerState.BatteryState != nil && *update.PowerState.BatteryState != "normal" {
+			parts = append(parts, *update.PowerState.BatteryState)
+		}
+		if len(parts) > 0 {
+			e.Details = strings.Join(parts, " ")
+		}
+	}
+
+	// Get device name from owner
+	if state != nil && update.Owner != nil {
+		if device, ok := state.GetDevice(update.Owner.Rid); ok {
+			e.Name = device.DeviceName("")
+		}
+	}
+
+	return e, nil
+}
+
+func (e *DevicePowerEvent) Render(styles *ui.Styles, width int) string {
 	return renderEvent(styles, width, e.baseEvent, e.Name, e.Details, "", 0, false)
 }
 

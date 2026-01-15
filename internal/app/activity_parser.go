@@ -37,6 +37,9 @@ func parseEventFromBridgeCallback(bridgeID, bridgeName, resourceType, resourceID
 	case "button":
 		evt := &ButtonEvent{}
 		event, err = evt.Parse(bridgeID, bridgeName, eventType, data, state)
+	case "device_power":
+		evt := &DevicePowerEvent{}
+		event, err = evt.Parse(bridgeID, bridgeName, eventType, data, state)
 	case "temperature":
 		evt := &TemperatureEvent{}
 		event, err = evt.Parse(bridgeID, bridgeName, eventType, data, state)
