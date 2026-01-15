@@ -1599,10 +1599,11 @@ func renderEvent(styles *ui.Styles, width int, base baseEvent, name, details, in
 		indicator = styles.Dimmed.Render("○") + " "
 	}
 
-	// Bridge name fully dimmed
+	// Bridge name with entity color, dimmed brackets
 	bridgeStr := ""
 	if base.bridgeName != "" {
-		bridgeStr = styles.Dimmed.Render("["+base.bridgeName+"]") + " "
+		bridgeStyle := lipgloss.NewStyle().Foreground(styles.Theme.EntityBridge)
+		bridgeStr = styles.Dimmed.Render("[") + bridgeStyle.Render(base.bridgeName) + styles.Dimmed.Render("]") + " "
 	}
 
 	// Entity name with entity color (the actual name like "Office Shelf Corner")
