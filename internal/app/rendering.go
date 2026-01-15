@@ -1253,36 +1253,6 @@ func (m *Model) handleNewFieldChange(msg field.FieldChangedMsg) {
 				m.status = "Scene activated"
 			}
 		}
-	} else if strings.HasPrefix(msg.FieldID, "scene-delete:") {
-		sceneID := strings.TrimPrefix(msg.FieldID, "scene-delete:")
-		if _, ok := msg.Value.(field.ButtonValue); ok {
-			m.status = "Deleting scene..."
-			err = bridge.DeleteScene(sceneID)
-			if err == nil {
-				m.status = "Scene deleted"
-				// Rebuild tree to reflect the deletion
-				m.rebuildTreeForActiveTab()
-			}
-			if err != nil {
-				m.status = fmt.Sprintf("Error: %v", err)
-			}
-			return
-		}
-	} else if strings.HasPrefix(msg.FieldID, "device-delete:") {
-		deviceID := strings.TrimPrefix(msg.FieldID, "device-delete:")
-		if _, ok := msg.Value.(field.ButtonValue); ok {
-			m.status = "Deleting device..."
-			err = bridge.DeleteDevice(deviceID)
-			if err == nil {
-				m.status = "Device deleted"
-				// Rebuild tree to reflect the deletion
-				m.rebuildTreeForActiveTab()
-			}
-			if err != nil {
-				m.status = fmt.Sprintf("Error: %v", err)
-			}
-			return
-		}
 	} else if strings.HasPrefix(msg.FieldID, "smartscene-toggle:") {
 		sceneID := strings.TrimPrefix(msg.FieldID, "smartscene-toggle:")
 		if v, ok := msg.Value.(field.ToggleValue); ok {
@@ -1298,21 +1268,6 @@ func (m *Model) handleNewFieldChange(msg field.FieldChangedMsg) {
 				if err == nil {
 					m.status = "Smart scene deactivated"
 				}
-			}
-			if err != nil {
-				m.status = fmt.Sprintf("Error: %v", err)
-			}
-			return
-		}
-	} else if strings.HasPrefix(msg.FieldID, "smartscene-delete:") {
-		sceneID := strings.TrimPrefix(msg.FieldID, "smartscene-delete:")
-		if _, ok := msg.Value.(field.ButtonValue); ok {
-			m.status = "Deleting smart scene..."
-			err = bridge.DeleteSmartScene(sceneID)
-			if err == nil {
-				m.status = "Smart scene deleted"
-				// Rebuild tree to reflect the deletion
-				m.rebuildTreeForActiveTab()
 			}
 			if err != nil {
 				m.status = fmt.Sprintf("Error: %v", err)
@@ -2399,18 +2354,6 @@ func (m *Model) buildSceneGridRows(scene hueclient.SceneGet, state *hue.BridgeSt
 				{Component: activateBtn},
 			},
 		})
-
-		deleteBtn := field.NewButtonComponent(
-			"scene-delete:"+sceneID, "Delete", "Delete",
-			&m.styles, m.zones,
-		)
-		rows = append(rows, gridlayout.GridRow{
-			Type: gridlayout.RowTypeNormal,
-			Cells: []gridlayout.GridCell{
-				{Component: gridlayout.NewLabelWithWidth("Delete", infoLabelWidth)},
-				{Component: deleteBtn},
-			},
-		})
 	}
 
 	// 2. Settings section (name)
@@ -2566,18 +2509,6 @@ func (m *Model) buildDeviceGridRows(device hueclient.DeviceGet, state *hue.Bridg
 			Cells: []gridlayout.GridCell{
 				{Component: gridlayout.NewLabelWithWidth("Identify", infoLabelWidth)},
 				{Component: identifyBtn},
-			},
-		})
-
-		deleteBtn := field.NewButtonComponent(
-			"device-delete:"+deviceID, "Delete", "Delete",
-			&m.styles, m.zones,
-		)
-		rows = append(rows, gridlayout.GridRow{
-			Type: gridlayout.RowTypeNormal,
-			Cells: []gridlayout.GridCell{
-				{Component: gridlayout.NewLabelWithWidth("Delete", infoLabelWidth)},
-				{Component: deleteBtn},
 			},
 		})
 	}
@@ -3287,18 +3218,7 @@ func (m *Model) buildSmartSceneGridRows(scene hueclient.SmartSceneGet, state *hu
 			},
 		})
 
-		deleteBtn := field.NewButtonComponent(
-			"smartscene-delete:"+sceneID, "Delete", "Delete",
-			&m.styles, m.zones,
-		)
-		rows = append(rows, gridlayout.GridRow{
-			Type: gridlayout.RowTypeNormal,
-			Cells: []gridlayout.GridCell{
-				{Component: gridlayout.NewLabelWithWidth("Delete", infoLabelWidth)},
-				{Component: deleteBtn},
-			},
-		})
-	}
+		}
 
 	// 2. Info section
 	infoHeader := field.NewHeaderComponent("info-header", "Info", &m.styles, m.zones)

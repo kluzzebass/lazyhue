@@ -1532,9 +1532,12 @@ func (m *Model) startEntityDeleteConfirmation() tea.Cmd {
 		return nil
 	}
 
-	// Only rooms and zones can be deleted
-	if item.Type != panels.EntityRoom && item.Type != panels.EntityZone {
-		m.status = "Only rooms and zones can be deleted"
+	// Only certain entity types can be deleted
+	switch item.Type {
+	case panels.EntityRoom, panels.EntityZone, panels.EntityScene, panels.EntitySmartScene, panels.EntityDevice:
+		// These can be deleted
+	default:
+		m.status = fmt.Sprintf("%s cannot be deleted", item.Type.String())
 		return nil
 	}
 
@@ -1597,6 +1600,12 @@ func (m *Model) confirmEntityDelete() tea.Cmd {
 		err = bridge.DeleteRoom(m.deleteEntityID)
 	case panels.EntityZone:
 		err = bridge.DeleteZone(m.deleteEntityID)
+	case panels.EntityScene:
+		err = bridge.DeleteScene(m.deleteEntityID)
+	case panels.EntitySmartScene:
+		err = bridge.DeleteSmartScene(m.deleteEntityID)
+	case panels.EntityDevice:
+		err = bridge.DeleteDevice(m.deleteEntityID)
 	default:
 		m.status = fmt.Sprintf("Cannot delete %s", m.deleteEntityType.String())
 		m.confirmingDeleteEntity = false
