@@ -75,14 +75,13 @@ func startDiscoveryTicker() tea.Cmd {
 // The bridge handles the SSE connection internally, we just set the callback.
 func (m *Model) startSSEListener(ctx context.Context, bridge *hue.Bridge) {
 	// Set event callback to forward events to our channel
-	bridge.OnEvent(func(bridgeID, resourceType, resourceID, eventType string) {
+	bridge.OnEvent(func(bridgeID string, update hue.ResourceUpdate, eventType string) {
 		select {
 		case m.eventChan <- bridgeEventMsg{
-			bridgeID:     bridgeID,
-			resourceType: resourceType,
-			resourceID:   resourceID,
-			eventType:    eventType,
-			receivedAt:   time.Now(),
+			bridgeID:   bridgeID,
+			update:     update,
+			eventType:  eventType,
+			receivedAt: time.Now(),
 		}:
 		case <-ctx.Done():
 			return

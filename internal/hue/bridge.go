@@ -52,7 +52,7 @@ type Bridge struct {
 	state       *BridgeState
 	eventStream *EventStream
 	eventCancel context.CancelFunc
-	onEvent func(bridgeID, resourceType, resourceID, eventType string) // Callback when events are received
+	onEvent func(bridgeID string, update ResourceUpdate, eventType string) // Callback when events are received
 	onRequest func(bridgeID, message string)                           // Callback when API requests are made
 	onError   func(bridgeID, message string)                           // Callback when API errors occur
 	mu          sync.RWMutex
@@ -123,8 +123,8 @@ func (b *Bridge) Connect(apiKey string) error {
 }
 
 // OnEvent sets a callback for when the bridge receives SSE events.
-// The callback receives bridgeID, resourceType, resourceID, and eventType.
-func (b *Bridge) OnEvent(fn func(bridgeID, resourceType, resourceID, eventType string)) {
+// The callback receives bridgeID, the full ResourceUpdate, and eventType.
+func (b *Bridge) OnEvent(fn func(bridgeID string, update ResourceUpdate, eventType string)) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	b.onEvent = fn
@@ -234,7 +234,7 @@ func (b *Bridge) handleEvents(container EventContainer) {
 
 			// Notify listener for all events, even unhandled ones
 			if callback != nil {
-				callback(b.Info.ID, update.Type, update.ID, string(event.Type))
+				callback(b.Info.ID, update, string(event.Type))
 			}
 		}
 	}

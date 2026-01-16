@@ -351,7 +351,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			state = bridge.GetState()
 			bridgeName = bridge.Info.Name
 		}
-		event := parseEventFromBridgeCallback(msg.bridgeID, bridgeName, msg.resourceType, msg.resourceID, msg.eventType, msg.receivedAt, state)
+		event := parseEventFromUpdate(msg.bridgeID, bridgeName, msg.update, msg.eventType, msg.receivedAt, state)
 		m.activities = append(m.activities, event)
 		m.updateLogContent()
 
@@ -370,11 +370,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					selectedID := node.Item.ID
 					// Check if event matches selected entity
 					shouldUpdate := false
-					switch msg.resourceType {
+					switch msg.update.Type {
 					case "light":
-						shouldUpdate = msg.resourceID == m.selectedLightID || msg.resourceID == selectedID
+						shouldUpdate = msg.update.ID == m.selectedLightID || msg.update.ID == selectedID
 					case "room", "zone", "scene", "device", "grouped_light":
-						shouldUpdate = msg.resourceID == selectedID
+						shouldUpdate = msg.update.ID == selectedID
 					}
 					if shouldUpdate {
 						m.updateDetailContent()

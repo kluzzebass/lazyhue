@@ -7,19 +7,29 @@ import (
 	"github.com/kluzzebass/lazyhue/internal/hue"
 )
 
-// parseEventFromBridgeCallback creates an Event from the bridge callback parameters.
-// This is a helper function that works with the current bridge callback signature
-// which doesn't pass raw event data. The event is created and enriched with state data.
-func parseEventFromBridgeCallback(bridgeID, bridgeName, resourceType, resourceID, eventType string, receivedAt time.Time, state *hue.BridgeState) Event {
-	// Create a mock json.RawMessage for the event data
-	// Since we don't have raw data from the callback, we create a minimal structure
-	// The actual data will come from state lookup
-	data := json.RawMessage(`[{"id":"` + resourceID + `","type":"` + resourceType + `"}]`)
+// parseEventFromUpdate creates an Event from a ResourceUpdate.
+// The update contains all the actual event data from the SSE stream.
+func parseEventFromUpdate(bridgeID, bridgeName string, update hue.ResourceUpdate, eventType string, receivedAt time.Time, state *hue.BridgeState) Event {
+	// Serialize the update to JSON for the Parse methods
+	// This preserves all the event data (owner, button info, etc.)
+	data, err := json.Marshal([]hue.ResourceUpdate{update})
+	if err != nil {
+		// Fallback to unhandled event
+		evt := &UnhandledEvent{}
+		evt.baseEvent = baseEvent{
+			bridgeID:     bridgeID,
+			bridgeName:   bridgeName,
+			resourceType: update.Type,
+			resourceID:   update.ID,
+			eventType:    eventType,
+			timestamp:    receivedAt,
+		}
+		return evt
+	}
 
 	var event Event
-	var err error
 
-	switch resourceType {
+	switch update.Type {
 	case "light":
 		evt := &LightEvent{}
 		event, err = evt.Parse(bridgeID, bridgeName, eventType, data, state)
@@ -89,18 +99,18 @@ func parseEventFromBridgeCallback(bridgeID, bridgeName, resourceType, resourceID
 	// Device-owned simple events (show device name + event type)
 	case "bell_button", "camera_motion", "speaker":
 		evt := &SimpleDeviceEvent{}
-		event, err = evt.ParseWithType(bridgeID, bridgeName, resourceType, eventType, data, state)
+		event, err = evt.ParseWithType(bridgeID, bridgeName, update.Type, eventType, data, state)
 	// Named simple events (show metadata name + event type)
 	case "entertainment", "entertainment_configuration", "behavior_script", "behavior_instance",
 		"geofence_client", "service_group":
 		evt := &SimpleNamedEvent{}
-		event, err = evt.ParseWithType(bridgeID, bridgeName, resourceType, eventType, data, state)
+		event, err = evt.ParseWithType(bridgeID, bridgeName, update.Type, eventType, data, state)
 	// Simple events without specific data (show resource type + event type)
 	case "bridge", "homekit", "matter", "matter_fabric", "geolocation", "public_image",
 		"auth_v1", "motion_area_configuration", "motion_area_candidate", "zigbee_device_discovery",
 		"convenience_area_motion", "security_area_motion", "clip":
 		evt := &SimpleEvent{}
-		event, err = evt.ParseWithType(bridgeID, bridgeName, resourceType, eventType, data, state)
+		event, err = evt.ParseWithType(bridgeID, bridgeName, update.Type, eventType, data, state)
 	default:
 		evt := &UnhandledEvent{}
 		event, err = evt.Parse(bridgeID, bridgeName, eventType, data, state)
@@ -112,7 +122,7 @@ func parseEventFromBridgeCallback(bridgeID, bridgeName, resourceType, resourceID
 		event, _ = evt.Parse(bridgeID, bridgeName, eventType, data, state)
 	}
 
-	// Set the received timestamp from the bridge callback
+	// Set the received timestamp
 	if setter, ok := event.(interface{ SetTimestamp(time.Time) }); ok {
 		setter.SetTimestamp(receivedAt)
 	}

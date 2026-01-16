@@ -25,11 +25,10 @@ type (
 
 	// bridgeEventMsg wraps SSE events from bridges.
 	bridgeEventMsg struct {
-		bridgeID     string
-		resourceType string
-		resourceID   string
-		eventType    string
-		receivedAt   time.Time // When the event was received from the bridge
+		bridgeID   string
+		update     hue.ResourceUpdate // Full event data
+		eventType  string
+		receivedAt time.Time // When the event was received from the bridge
 	}
 
 	// errMsg wraps errors.
