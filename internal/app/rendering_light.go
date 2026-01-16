@@ -310,7 +310,7 @@ func (m *Model) buildLightSettingsRows(light hueclient.LightGet, device *hueclie
 					}
 
 					roomSelect := field.NewSelectComponent(
-						"light-room:"+deviceID, "Room", selectedIndex, options,
+						FieldIDLightRoom(deviceID), "Room", selectedIndex, options,
 						&m.styles, m.zones,
 					)
 					rows = append(rows, gridlayout.GridRow{
@@ -365,7 +365,7 @@ func (m *Model) buildLightSettingsRows(light hueclient.LightGet, device *hueclie
 
 						// Add checkbox group for zones
 						zoneCheckbox := field.NewCheckboxComponent(
-							"light-zones:"+lightID, "Zones", selected, options, true,
+							FieldIDLightZones(lightID), "Zones", selected, options, true,
 							&m.styles, m.zones,
 						)
 						rows = append(rows, gridlayout.GridRow{
@@ -536,7 +536,7 @@ func (m *Model) buildControlsRows(light hueclient.LightGet) []gridlayout.GridRow
 			speed = int(light.EffectsV2.Status.Parameters.Speed * 100)
 		}
 		speedSlider := field.NewSliderComponent(
-			"effect-speed:"+light.Id, "Speed", speed, 0, 100, 1,
+			FieldIDEffectSpeed(light.Id), "Speed", speed, 0, 100, 1,
 			&m.styles, m.zones,
 		)
 		rows = append(rows, gridlayout.GridRow{
@@ -551,7 +551,7 @@ func (m *Model) buildControlsRows(light hueclient.LightGet) []gridlayout.GridRow
 	// Identify button (uses device ID from light owner)
 	if light.Owner.Rid != "" {
 		identifyBtn := field.NewButtonComponent(
-			"identify:"+light.Owner.Rid, "Identify", "Identify",
+			FieldIDIdentify(light.Owner.Rid), "Identify", "Identify",
 			&m.styles, m.zones,
 		)
 		rows = append(rows, gridlayout.GridRow{
@@ -759,7 +759,7 @@ func (m *Model) buildTimedEffectsListRows(light hueclient.LightGet) []gridlayout
 
 		// Stop button when effect is active
 		stopBtn := field.NewButtonComponent(
-			"timed-effect-stop:"+light.Id, "Stop", "Stop",
+			FieldIDTimedEffectStop(light.Id), "Stop", "Stop",
 			&m.styles, m.zones,
 		)
 		rows = append(rows, gridlayout.GridRow{
@@ -777,7 +777,7 @@ func (m *Model) buildTimedEffectsListRows(light hueclient.LightGet) []gridlayout
 		currentDuration = d
 	}
 	durationSlider := field.NewSliderComponent(
-		"timed-effect-duration:"+light.Id, "Duration",
+		FieldIDTimedEffectDuration(light.Id), "Duration",
 		currentDuration, 5, 120, 5,
 		&m.styles, m.zones,
 	)
@@ -797,7 +797,7 @@ func (m *Model) buildTimedEffectsListRows(light hueclient.LightGet) []gridlayout
 		}
 		displayName := formatTimedEffect(effectStr)
 		triggerBtn := field.NewButtonComponent(
-			"timed-effect-trigger:"+light.Id+":"+effectStr, displayName, displayName,
+			FieldIDTimedEffectTrigger(light.Id)+":"+effectStr, displayName, displayName,
 			&m.styles, m.zones,
 		)
 		rows = append(rows, gridlayout.GridRow{
@@ -852,7 +852,7 @@ func (m *Model) buildGradientRows(light hueclient.LightGet, lightID string) []gr
 			}
 		}
 		modeSelect := field.NewSelectComponent(
-			"gradient-mode:"+lightID, "Mode", currentIndex, options,
+			FieldIDGradientMode(lightID), "Mode", currentIndex, options,
 			&m.styles, m.zones,
 		)
 		rows = append(rows, gridlayout.GridRow{
@@ -886,7 +886,7 @@ func (m *Model) buildGradientRows(light hueclient.LightGet, lightID string) []gr
 
 		points := convertGradientPoints(light.Gradient.Points)
 		editor := field.NewGradientEditorComponent(
-			"gradient-points:"+lightID, "Colors", points, maxPoints,
+			FieldIDGradientPoints(lightID), "Colors", points, maxPoints,
 			&m.styles, m.zones,
 		)
 		rows = append(rows, gridlayout.GridRow{
@@ -963,7 +963,7 @@ func (m *Model) buildSignalingRows(light hueclient.LightGet) []gridlayout.GridRo
 
 			// Stop button when signal is active
 			stopBtn := field.NewButtonComponent(
-				"signal-stop:"+light.Id, "Stop", "Stop",
+				FieldIDSignalStop(light.Id), "Stop", "Stop",
 				&m.styles, m.zones,
 			)
 			rows = append(rows, gridlayout.GridRow{
@@ -982,7 +982,7 @@ func (m *Model) buildSignalingRows(light hueclient.LightGet) []gridlayout.GridRo
 		currentDuration = d
 	}
 	durationSlider := field.NewSliderComponent(
-		"signal-duration:"+light.Id, "Duration",
+		FieldIDSignalDuration(light.Id), "Duration",
 		currentDuration, 5, 60, 5,
 		&m.styles, m.zones,
 	)
@@ -1002,7 +1002,7 @@ func (m *Model) buildSignalingRows(light hueclient.LightGet) []gridlayout.GridRo
 		}
 		displayName := hue.SignalingModeDisplayName(sigStr)
 		triggerBtn := field.NewButtonComponent(
-			"signal-trigger:"+light.Id+":"+sigStr, displayName, displayName,
+			FieldIDSignalTrigger(light.Id)+":"+sigStr, displayName, displayName,
 			&m.styles, m.zones,
 		)
 		rows = append(rows, gridlayout.GridRow{

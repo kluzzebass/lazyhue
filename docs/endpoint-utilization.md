@@ -57,13 +57,13 @@ LazyHue fetches data from several endpoints but only uses a subset of the availa
 | `ProductData.*` | Manufacturer, model, software version |
 | `Services` | Linked resource references |
 | `Identify` | Identify button triggers flash |
+| `DeviceMode.Mode` | Switch mode display (pushbutton/rocker) |
+| `DeviceMode.Status` | Mode change status indicator |
 
 ### Available but NOT Used
 
 | Field | Description | Potential Feature |
 |-------|-------------|-------------------|
-| `DeviceMode` | Switch configuration modes | Show/configure switch type |
-| `DeviceMode.Mode` | `switch_dual_pushbutton`, `switch_dual_rocker`, etc. | Switch mode selector |
 | `Usertest` | Identification mode (LED flash for 120s) | Extended identify mode |
 
 ---
@@ -77,6 +77,8 @@ LazyHue fetches data from several endpoints but only uses a subset of the availa
 | `Metadata.Name` | Scene name display/edit |
 | `Group` | Parent room/zone |
 | `Actions` | Light states in scene |
+| `Actions.Action.Color` | Color palette display (visual swatches) |
+| `Actions.Action.ColorTemperature` | Color palette display (temperature swatches) |
 | `Speed` | Dynamic speed display |
 | `AutoDynamic` | Auto-dynamic flag |
 | `Status.Active` | Active state indicator |
@@ -86,9 +88,6 @@ LazyHue fetches data from several endpoints but only uses a subset of the availa
 | Field | Description | Potential Feature |
 |-------|-------------|-------------------|
 | `Palette` | Dynamic scene color palette | Color palette editor |
-| `Palette.Color` | Colors for dynamics | Visual palette display |
-| `Palette.ColorTemperature` | Temperature values | Temperature range display |
-| `Palette.Dimming` | Brightness levels | Brightness range display |
 | `Palette.EffectsV2` | Effect settings | Effect configuration |
 | `Metadata.Image` | Scene image reference | Scene thumbnail |
 | `Metadata.Appdata` | App-specific data | Custom metadata display |
@@ -103,17 +102,22 @@ LazyHue fetches data from several endpoints but only uses a subset of the availa
 |-------|-------|
 | `Metadata.Name` | Scene name |
 | `Group` | Parent room/zone |
-| `State` | Active/inactive state |
+| `State` | Active/inactive state with toggle control |
+| `ActiveTimeslot` | Current active slot display |
+| `ActiveTimeslot.Weekday` | Day of week indicator |
+| `ActiveTimeslot.TimeslotId` | Slot index indicator |
+| `WeekTimeslots` | Full weekly schedule visualization |
+| `WeekTimeslots.Recurrence` | Days of week display |
+| `WeekTimeslots.Timeslots` | Individual timeslot list |
+| `WeekTimeslots.Timeslots.StartTime` | Time/sunset display |
+| `WeekTimeslots.Timeslots.Target` | Target scene name resolution |
+| `TransitionDuration` | Transition time display |
 
 ### Available but NOT Used
 
 | Field | Description | Potential Feature |
 |-------|-------------|-------------------|
-| `ActiveTimeslot` | Currently active slot | Show current timeslot |
-| `ActiveTimeslot.Weekday` | Day of week | Day indicator |
-| `ActiveTimeslot.TimeslotId` | Slot index | Slot indicator |
-| `WeekTimeslots` | Full weekly schedule | Schedule visualization |
-| `TransitionDuration` | Timeslot transition time | Transition time display/edit |
+| `Recall` | Scene recall action | Direct activation control |
 
 ---
 
@@ -124,15 +128,53 @@ LazyHue fetches data from several endpoints but only uses a subset of the availa
 | Field | Usage |
 |-------|-------|
 | `Status` | Connection status (connected/disconnected) |
-| `MacAddress` | Device MAC address |
+| `MacAddress` | Device/bridge MAC address display |
 | `Channel.Value` | Zigbee channel number display |
 | `Channel.Status` | Channel change indicator |
+| `ExtendedPanId` | Network identifier in bridge details |
+
+### Available but NOT Used
+
+*All relevant fields are now utilized.*
+
+---
+
+## WiFi Connectivity (`WifiConnectivityGet`)
+
+*Bridge Pro only*
+
+### Currently Used
+
+| Field | Usage |
+|-------|-------|
+| `Status` | WiFi connection status in bridge details |
 
 ### Available but NOT Used
 
 | Field | Description | Potential Feature |
 |-------|-------------|-------------------|
-| `ExtendedPanId` | Network identifier | Network info display |
+| `HasSSID` | Whether SSID is configured | Configuration indicator |
+
+---
+
+## Button Endpoint (`ButtonGet`)
+
+### Currently Used
+
+| Field | Usage |
+|-------|-------|
+| `Metadata.ControlId` | Button number display |
+| `Button.LastEvent` | Last button event type |
+| `Button.ButtonReport.Event` | Real-time button event display |
+| `Button.ButtonReport.Updated` | Event timestamp ("5s ago" display) |
+| `Owner` | Links button to parent device |
+
+### Available but NOT Used
+
+| Field | Description | Potential Feature |
+|-------|-------------|-------------------|
+| `Button.EventValues` | Supported event types | Event capability display |
+| `Button.RepeatInterval` | Hold repeat timing | Configuration display |
 
 ---
 
@@ -166,10 +208,16 @@ LazyHue fetches data from several endpoints but only uses a subset of the availa
 7. ~~**Color Gamut Type**~~ - Show A/B/C classification in Capabilities section
 8. ~~**Signaling with custom duration**~~ - Slider control (5-60 seconds)
 9. ~~**TimedEffects with custom duration**~~ - Slider control (5-120 minutes)
+10. ~~**DeviceMode Display**~~ - Show switch mode (pushbutton/rocker) in device details
+11. ~~**Scene Color Palette**~~ - Visual color swatches from scene actions
+12. ~~**SmartScene Schedule**~~ - Full weekly schedule visualization with timeslots
+13. ~~**SmartScene Transition Duration**~~ - Display transition time
+14. ~~**Extended PAN ID**~~ - Display in bridge Network section
+15. ~~**WiFi Connectivity**~~ - Display WiFi status for Bridge Pro
+16. ~~**Bridge Zigbee Info**~~ - Channel and MAC address in bridge details
 
 ### Higher Effort (new UI)
 
-1. **Scene Palette Editor** - Visual palette configuration
-2. **SmartScene Schedule View** - Weekly timeslot visualization
-3. **ContentConfiguration** - Lightstrip pixel orientation
-4. **DeviceMode Configuration** - Switch type selection
+1. **Scene Palette Editor** - Visual palette configuration (editing, not just display)
+2. **ContentConfiguration** - Lightstrip pixel orientation
+3. **DeviceMode Configuration** - Switch type selection (currently display-only)

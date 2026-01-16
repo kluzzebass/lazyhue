@@ -24,8 +24,9 @@ func (m Model) Init() tea.Cmd {
 	return tea.Batch(
 		m.loadBridgesFromCredentials(),
 		discoverBridges(),        // Initial discovery
-		m.startStateSaveTicker(), // Periodic state saves
-		startDiscoveryTicker(),   // Periodic bridge discovery
+		m.startStateSaveTicker(),      // Periodic state saves
+		startDiscoveryTicker(),        // Periodic bridge discovery
+		startButtonTimeRefreshTicker(), // Periodic button time display refresh
 	)
 }
 
@@ -375,6 +376,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						shouldUpdate = msg.update.ID == m.selectedLightID || msg.update.ID == selectedID
 					case "room", "zone", "scene", "device", "grouped_light":
 						shouldUpdate = msg.update.ID == selectedID
+					case "button":
+						// Check if the button belongs to the currently selected device
+						if bridge.GetState() != nil {
+							ownerDeviceID := bridge.GetState().GetButtonOwnerDeviceID(msg.update.ID)
+							shouldUpdate = ownerDeviceID == selectedID
+						}
 					}
 					if shouldUpdate {
 						m.updateDetailContent()
@@ -435,6 +442,19 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Restart the ticker
 		cmds = append(cmds, startDiscoveryTicker())
 		return m, tea.Batch(cmds...)
+
+	case buttonTimeRefreshTickMsg:
+		// Refresh device detail panel to update button time displays
+		// Only refresh if viewing a device and not editing
+		if !m.lightGrid.IsEditing() {
+			if node := m.tree.SelectedNode(); node != nil && node.Item != nil {
+				if node.Item.Type == panels.EntityDevice {
+					m.updateDetailContent()
+				}
+			}
+		}
+		// Continue the ticker
+		return m, startButtonTimeRefreshTicker()
 
 	case bridgeBlinkTickMsg:
 		// Clear blink state for this bridge

@@ -62,6 +62,9 @@ type (
 	// pairingTickMsg is sent every second during pairing for countdown updates.
 	pairingTickMsg struct{}
 
+	// buttonTimeRefreshTickMsg triggers periodic refresh of button time displays.
+	buttonTimeRefreshTickMsg struct{}
+
 	// pairingSuccessMsg is sent when bridge pairing succeeds.
 	pairingSuccessMsg struct {
 		BridgeID string

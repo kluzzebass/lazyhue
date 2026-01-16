@@ -693,11 +693,11 @@ func (m *Model) handleNewFieldChange(msg field.FieldChangedMsg) {
 			}
 			return
 		}
-	} else if strings.HasPrefix(msg.FieldID, "device-room:") || strings.HasPrefix(msg.FieldID, "light-room:") {
+	} else if strings.HasPrefix(msg.FieldID, FieldPrefixDeviceRoom) || strings.HasPrefix(msg.FieldID, FieldPrefixLightRoom) {
 		// Handle both device and light room assignment (both use device ID)
-		deviceID := strings.TrimPrefix(msg.FieldID, "device-room:")
-		if strings.HasPrefix(msg.FieldID, "light-room:") {
-			deviceID = strings.TrimPrefix(msg.FieldID, "light-room:")
+		deviceID := strings.TrimPrefix(msg.FieldID, FieldPrefixDeviceRoom)
+		if strings.HasPrefix(msg.FieldID, FieldPrefixLightRoom) {
+			deviceID = strings.TrimPrefix(msg.FieldID, FieldPrefixLightRoom)
 		}
 		if v, ok := msg.Value.(field.SelectValue); ok {
 			bridgeState := bridge.GetState()
@@ -731,9 +731,9 @@ func (m *Model) handleNewFieldChange(msg field.FieldChangedMsg) {
 				return
 			}
 		}
-	} else if strings.HasPrefix(msg.FieldID, "light-zones:") {
+	} else if strings.HasPrefix(msg.FieldID, FieldPrefixLightZones) {
 		// Handle zone membership checkbox - format is "light-zones:{lightID}"
-		lightID := strings.TrimPrefix(msg.FieldID, "light-zones:")
+		lightID := strings.TrimPrefix(msg.FieldID, FieldPrefixLightZones)
 		if v, ok := msg.Value.(field.CheckboxValue); ok {
 			bridgeState := bridge.GetState()
 			if bridgeState != nil {
@@ -781,8 +781,8 @@ func (m *Model) handleNewFieldChange(msg field.FieldChangedMsg) {
 			}
 			return
 		}
-	} else if strings.HasPrefix(msg.FieldID, "room-create-scene:") {
-		roomID := strings.TrimPrefix(msg.FieldID, "room-create-scene:")
+	} else if strings.HasPrefix(msg.FieldID, FieldPrefixRoomCreateScene) {
+		roomID := strings.TrimPrefix(msg.FieldID, FieldPrefixRoomCreateScene)
 		if _, ok := msg.Value.(field.ButtonValue); ok {
 			// Get room name for the scene name
 			sceneName := "New Scene"
@@ -804,8 +804,8 @@ func (m *Model) handleNewFieldChange(msg field.FieldChangedMsg) {
 			}
 			return
 		}
-	} else if strings.HasPrefix(msg.FieldID, "zone-create-scene:") {
-		zoneID := strings.TrimPrefix(msg.FieldID, "zone-create-scene:")
+	} else if strings.HasPrefix(msg.FieldID, FieldPrefixZoneCreateScene) {
+		zoneID := strings.TrimPrefix(msg.FieldID, FieldPrefixZoneCreateScene)
 		if _, ok := msg.Value.(field.ButtonValue); ok {
 			// Get zone name for the scene name
 			sceneName := "New Scene"
@@ -849,9 +849,9 @@ func (m *Model) handleNewFieldChange(msg field.FieldChangedMsg) {
 			}
 			return
 		}
-	} else if strings.HasPrefix(msg.FieldID, "identify:") {
+	} else if strings.HasPrefix(msg.FieldID, FieldPrefixIdentify) {
 		// General identify handler for lights and devices
-		deviceID := strings.TrimPrefix(msg.FieldID, "identify:")
+		deviceID := strings.TrimPrefix(msg.FieldID, FieldPrefixIdentify)
 		if _, ok := msg.Value.(field.ButtonValue); ok {
 			m.status = "Identifying device..."
 			err = bridge.IdentifyDevice(deviceID)
@@ -862,9 +862,9 @@ func (m *Model) handleNewFieldChange(msg field.FieldChangedMsg) {
 			}
 			return
 		}
-	} else if strings.HasPrefix(msg.FieldID, "bridge-identify:") {
+	} else if strings.HasPrefix(msg.FieldID, FieldPrefixBridgeIdentify) {
 		// Bridge-specific identify handler
-		deviceID := strings.TrimPrefix(msg.FieldID, "bridge-identify:")
+		deviceID := strings.TrimPrefix(msg.FieldID, FieldPrefixBridgeIdentify)
 		if _, ok := msg.Value.(field.ButtonValue); ok {
 			m.status = "Identifying bridge..."
 			err = bridge.IdentifyDevice(deviceID)
@@ -875,8 +875,8 @@ func (m *Model) handleNewFieldChange(msg field.FieldChangedMsg) {
 			}
 			return
 		}
-	} else if strings.HasPrefix(msg.FieldID, "effect-speed:") {
-		lightID := strings.TrimPrefix(msg.FieldID, "effect-speed:")
+	} else if strings.HasPrefix(msg.FieldID, FieldPrefixEffectSpeed) {
+		lightID := strings.TrimPrefix(msg.FieldID, FieldPrefixEffectSpeed)
 		if v, ok := msg.Value.(field.SliderValue); ok {
 			speed := float32(v.Value) / 100.0
 			m.status = fmt.Sprintf("Effect speed: %d%%", v.Value)
@@ -886,8 +886,8 @@ func (m *Model) handleNewFieldChange(msg field.FieldChangedMsg) {
 			}
 			return
 		}
-	} else if strings.HasPrefix(msg.FieldID, "timed-effect-stop:") {
-		lightID := strings.TrimPrefix(msg.FieldID, "timed-effect-stop:")
+	} else if strings.HasPrefix(msg.FieldID, FieldPrefixTimedEffectStop) {
+		lightID := strings.TrimPrefix(msg.FieldID, FieldPrefixTimedEffectStop)
 		if _, ok := msg.Value.(field.ButtonValue); ok {
 			m.status = "Stopping timed effect..."
 			err = bridge.SetLightTimedEffect(lightID, hueclient.SupportedTimedEffectsNoEffect, 0)
@@ -898,16 +898,16 @@ func (m *Model) handleNewFieldChange(msg field.FieldChangedMsg) {
 			}
 			return
 		}
-	} else if strings.HasPrefix(msg.FieldID, "timed-effect-duration:") {
-		lightID := strings.TrimPrefix(msg.FieldID, "timed-effect-duration:")
+	} else if strings.HasPrefix(msg.FieldID, FieldPrefixTimedEffectDuration) {
+		lightID := strings.TrimPrefix(msg.FieldID, FieldPrefixTimedEffectDuration)
 		if v, ok := msg.Value.(field.SliderValue); ok {
 			m.timedEffectDurations[lightID] = v.Value
 			m.status = fmt.Sprintf("Timed effect duration: %d min", v.Value)
 			return
 		}
-	} else if strings.HasPrefix(msg.FieldID, "timed-effect-trigger:") {
+	} else if strings.HasPrefix(msg.FieldID, FieldPrefixTimedEffectTrigger) {
 		// Format: "timed-effect-trigger:lightID:effect"
-		rest := strings.TrimPrefix(msg.FieldID, "timed-effect-trigger:")
+		rest := strings.TrimPrefix(msg.FieldID, FieldPrefixTimedEffectTrigger)
 		parts := strings.SplitN(rest, ":", 2)
 		if len(parts) == 2 {
 			lightID := parts[0]
@@ -935,8 +935,8 @@ func (m *Model) handleNewFieldChange(msg field.FieldChangedMsg) {
 				return
 			}
 		}
-	} else if strings.HasPrefix(msg.FieldID, "signal-stop:") {
-		lightID := strings.TrimPrefix(msg.FieldID, "signal-stop:")
+	} else if strings.HasPrefix(msg.FieldID, FieldPrefixSignalStop) {
+		lightID := strings.TrimPrefix(msg.FieldID, FieldPrefixSignalStop)
 		if _, ok := msg.Value.(field.ButtonValue); ok {
 			m.status = "Stopping signal..."
 			err = bridge.SetLightSignaling(lightID, hueclient.NoSignal, 0)
@@ -947,16 +947,16 @@ func (m *Model) handleNewFieldChange(msg field.FieldChangedMsg) {
 			}
 			return
 		}
-	} else if strings.HasPrefix(msg.FieldID, "signal-duration:") {
-		lightID := strings.TrimPrefix(msg.FieldID, "signal-duration:")
+	} else if strings.HasPrefix(msg.FieldID, FieldPrefixSignalDuration) {
+		lightID := strings.TrimPrefix(msg.FieldID, FieldPrefixSignalDuration)
 		if v, ok := msg.Value.(field.SliderValue); ok {
 			m.signalDurations[lightID] = v.Value
 			m.status = fmt.Sprintf("Signal duration: %d sec", v.Value)
 			return
 		}
-	} else if strings.HasPrefix(msg.FieldID, "signal-trigger:") {
+	} else if strings.HasPrefix(msg.FieldID, FieldPrefixSignalTrigger) {
 		// Format: "signal-trigger:lightID:signal"
-		rest := strings.TrimPrefix(msg.FieldID, "signal-trigger:")
+		rest := strings.TrimPrefix(msg.FieldID, FieldPrefixSignalTrigger)
 		parts := strings.SplitN(rest, ":", 2)
 		if len(parts) == 2 {
 			lightID := parts[0]
@@ -991,8 +991,8 @@ func (m *Model) handleNewFieldChange(msg field.FieldChangedMsg) {
 			}
 			return
 		}
-	} else if strings.HasPrefix(msg.FieldID, "scene-recall:") {
-		sceneID := strings.TrimPrefix(msg.FieldID, "scene-recall:")
+	} else if strings.HasPrefix(msg.FieldID, FieldPrefixSceneRecall) {
+		sceneID := strings.TrimPrefix(msg.FieldID, FieldPrefixSceneRecall)
 		if _, ok := msg.Value.(field.ButtonValue); ok {
 			m.status = "Activating scene..."
 			err = bridge.RecallScene(sceneID)
@@ -1000,8 +1000,8 @@ func (m *Model) handleNewFieldChange(msg field.FieldChangedMsg) {
 				m.status = "Scene activated"
 			}
 		}
-	} else if strings.HasPrefix(msg.FieldID, "smartscene-toggle:") {
-		sceneID := strings.TrimPrefix(msg.FieldID, "smartscene-toggle:")
+	} else if strings.HasPrefix(msg.FieldID, FieldPrefixSmartSceneToggle) {
+		sceneID := strings.TrimPrefix(msg.FieldID, FieldPrefixSmartSceneToggle)
 		if v, ok := msg.Value.(field.ToggleValue); ok {
 			if v.On {
 				m.status = "Activating smart scene..."
@@ -1021,8 +1021,8 @@ func (m *Model) handleNewFieldChange(msg field.FieldChangedMsg) {
 			}
 			return
 		}
-	} else if strings.HasPrefix(msg.FieldID, "motion-enabled:") {
-		motionID := strings.TrimPrefix(msg.FieldID, "motion-enabled:")
+	} else if strings.HasPrefix(msg.FieldID, FieldPrefixMotionEnabled) {
+		motionID := strings.TrimPrefix(msg.FieldID, FieldPrefixMotionEnabled)
 		if v, ok := msg.Value.(field.ToggleValue); ok {
 			action := "disabled"
 			if v.On {
@@ -1035,8 +1035,8 @@ func (m *Model) handleNewFieldChange(msg field.FieldChangedMsg) {
 			}
 			return
 		}
-	} else if strings.HasPrefix(msg.FieldID, "motion-sensitivity:") {
-		motionID := strings.TrimPrefix(msg.FieldID, "motion-sensitivity:")
+	} else if strings.HasPrefix(msg.FieldID, FieldPrefixMotionSensitivity) {
+		motionID := strings.TrimPrefix(msg.FieldID, FieldPrefixMotionSensitivity)
 		if v, ok := msg.Value.(field.SliderValue); ok {
 			m.status = fmt.Sprintf("Motion sensitivity: %d", v.Value)
 			err = bridge.SetMotionSensorSensitivity(motionID, v.Value)
@@ -1045,8 +1045,8 @@ func (m *Model) handleNewFieldChange(msg field.FieldChangedMsg) {
 			}
 			return
 		}
-	} else if strings.HasPrefix(msg.FieldID, "temp-enabled:") {
-		tempID := strings.TrimPrefix(msg.FieldID, "temp-enabled:")
+	} else if strings.HasPrefix(msg.FieldID, FieldPrefixTempEnabled) {
+		tempID := strings.TrimPrefix(msg.FieldID, FieldPrefixTempEnabled)
 		if v, ok := msg.Value.(field.ToggleValue); ok {
 			action := "disabled"
 			if v.On {
@@ -1059,8 +1059,8 @@ func (m *Model) handleNewFieldChange(msg field.FieldChangedMsg) {
 			}
 			return
 		}
-	} else if strings.HasPrefix(msg.FieldID, "ll-enabled:") {
-		llID := strings.TrimPrefix(msg.FieldID, "ll-enabled:")
+	} else if strings.HasPrefix(msg.FieldID, FieldPrefixLightLevelEnabled) {
+		llID := strings.TrimPrefix(msg.FieldID, FieldPrefixLightLevelEnabled)
 		if v, ok := msg.Value.(field.ToggleValue); ok {
 			action := "disabled"
 			if v.On {
@@ -1073,31 +1073,31 @@ func (m *Model) handleNewFieldChange(msg field.FieldChangedMsg) {
 			}
 			return
 		}
-	} else if strings.HasPrefix(msg.FieldID, "room-power:") || strings.HasPrefix(msg.FieldID, "zone-power:") {
+	} else if strings.HasPrefix(msg.FieldID, FieldPrefixRoomPower) || strings.HasPrefix(msg.FieldID, FieldPrefixZonePower) {
 		// Room or zone grouped light power control
 		var glID string
-		if strings.HasPrefix(msg.FieldID, "room-power:") {
-			glID = strings.TrimPrefix(msg.FieldID, "room-power:")
+		if strings.HasPrefix(msg.FieldID, FieldPrefixRoomPower) {
+			glID = strings.TrimPrefix(msg.FieldID, FieldPrefixRoomPower)
 		} else {
-			glID = strings.TrimPrefix(msg.FieldID, "zone-power:")
+			glID = strings.TrimPrefix(msg.FieldID, FieldPrefixZonePower)
 		}
 		if v, ok := msg.Value.(field.ToggleValue); ok {
 			err = bridge.SetGroupedLightOn(glID, v.On)
 		}
-	} else if strings.HasPrefix(msg.FieldID, "room-brightness:") || strings.HasPrefix(msg.FieldID, "zone-brightness:") {
+	} else if strings.HasPrefix(msg.FieldID, FieldPrefixRoomBrightness) || strings.HasPrefix(msg.FieldID, FieldPrefixZoneBrightness) {
 		// Room or zone grouped light brightness control
 		var glID string
-		if strings.HasPrefix(msg.FieldID, "room-brightness:") {
-			glID = strings.TrimPrefix(msg.FieldID, "room-brightness:")
+		if strings.HasPrefix(msg.FieldID, FieldPrefixRoomBrightness) {
+			glID = strings.TrimPrefix(msg.FieldID, FieldPrefixRoomBrightness)
 		} else {
-			glID = strings.TrimPrefix(msg.FieldID, "zone-brightness:")
+			glID = strings.TrimPrefix(msg.FieldID, FieldPrefixZoneBrightness)
 		}
 		if v, ok := msg.Value.(field.SliderValue); ok {
 			err = bridge.SetGroupedLightBrightness(glID, float64(v.Value))
 		}
-	} else if strings.HasPrefix(msg.FieldID, "gradient-mode:") {
+	} else if strings.HasPrefix(msg.FieldID, FieldPrefixGradientMode) {
 		// Gradient mode selection
-		gradientLightID := strings.TrimPrefix(msg.FieldID, "gradient-mode:")
+		gradientLightID := strings.TrimPrefix(msg.FieldID, FieldPrefixGradientMode)
 		if v, ok := msg.Value.(field.SelectValue); ok {
 			state := bridge.GetState()
 			if state != nil {
@@ -1112,9 +1112,9 @@ func (m *Model) handleNewFieldChange(msg field.FieldChangedMsg) {
 				}
 			}
 		}
-	} else if strings.HasPrefix(msg.FieldID, "gradient-points:") {
+	} else if strings.HasPrefix(msg.FieldID, FieldPrefixGradientPoints) {
 		// Gradient points changed
-		gradientLightID := strings.TrimPrefix(msg.FieldID, "gradient-points:")
+		gradientLightID := strings.TrimPrefix(msg.FieldID, FieldPrefixGradientPoints)
 		if v, ok := msg.Value.(field.GradientValue); ok {
 			points := convertToAPIPoints(v.Points)
 			m.status = fmt.Sprintf("Gradient points: %d", len(points))

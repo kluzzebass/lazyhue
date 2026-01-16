@@ -27,7 +27,7 @@ func (m *Model) buildDeviceGridRows(device hueclient.DeviceGet, state *hue.Bridg
 
 	if deviceID != "" {
 		identifyBtn := field.NewButtonComponent(
-			"identify:"+deviceID, "Identify", "Identify",
+			FieldIDIdentify(deviceID), "Identify", "Identify",
 			&m.styles, m.zones,
 		)
 		rows = append(rows, gridlayout.GridRow{
@@ -60,6 +60,17 @@ func (m *Model) buildDeviceGridRows(device hueclient.DeviceGet, state *hue.Bridg
 		})
 	}
 
+	// Device mode (for switches - pushbutton vs rocker)
+	if device.DeviceMode != nil {
+		modeDisplay := formatDeviceMode(string(device.DeviceMode.Mode))
+		modeStyle := m.styles.Dimmed
+		if device.DeviceMode.Status == "changing" {
+			modeDisplay += " (changing)"
+			modeStyle = m.styles.Warning
+		}
+		rows = append(rows, gridlayout.NewStyledInfoRow("Mode", modeDisplay, infoLabelWidth, modeStyle))
+	}
+
 	// Room assignment dropdown
 	if state != nil && deviceID != "" {
 		currentRoom, hasRoom := state.GetDeviceRoom(deviceID)
@@ -90,7 +101,7 @@ func (m *Model) buildDeviceGridRows(device hueclient.DeviceGet, state *hue.Bridg
 		}
 
 		roomSelect := field.NewSelectComponent(
-			"device-room:"+deviceID, "Room", selectedIndex, options,
+			FieldIDDeviceRoom(deviceID), "Room", selectedIndex, options,
 			&m.styles, m.zones,
 		)
 		rows = append(rows, gridlayout.GridRow{
@@ -108,7 +119,7 @@ func (m *Model) buildDeviceGridRows(device hueclient.DeviceGet, state *hue.Bridg
 		if motionID, motion, found := state.GetDeviceMotionSensor(device); found {
 			enabled := motion.Enabled
 			motionToggle := field.NewToggleComponent(
-				"motion-enabled:"+motionID, "Motion Sensor", enabled,
+				FieldIDMotionEnabled(motionID), "Motion Sensor", enabled,
 				&m.styles, m.zones,
 			)
 			rows = append(rows, gridlayout.GridRow{
@@ -124,7 +135,7 @@ func (m *Model) buildDeviceGridRows(device hueclient.DeviceGet, state *hue.Bridg
 				sensitivity := motion.Sensitivity.Sensitivity
 				maxSensitivity := *motion.Sensitivity.SensitivityMax
 				sensitivitySlider := field.NewSliderComponent(
-					"motion-sensitivity:"+motionID, "Sensitivity",
+					FieldIDMotionSensitivity(motionID), "Sensitivity",
 					sensitivity, 0, maxSensitivity, 1,
 					&m.styles, m.zones,
 				)
@@ -142,7 +153,7 @@ func (m *Model) buildDeviceGridRows(device hueclient.DeviceGet, state *hue.Bridg
 		if tempID, tempSensor, found := state.GetDeviceTemperatureSensor(device); found {
 			enabled := tempSensor.Enabled
 			tempToggle := field.NewToggleComponent(
-				"temp-enabled:"+tempID, "Temp Sensor", enabled,
+				FieldIDTempEnabled(tempID), "Temp Sensor", enabled,
 				&m.styles, m.zones,
 			)
 			rows = append(rows, gridlayout.GridRow{
@@ -158,7 +169,7 @@ func (m *Model) buildDeviceGridRows(device hueclient.DeviceGet, state *hue.Bridg
 		if llID, llSensor, found := state.GetDeviceLightLevelSensor(device); found {
 			enabled := llSensor.Enabled
 			llToggle := field.NewToggleComponent(
-				"ll-enabled:"+llID, "Light Sensor", enabled,
+				FieldIDLightLevelEnabled(llID), "Light Sensor", enabled,
 				&m.styles, m.zones,
 			)
 			rows = append(rows, gridlayout.GridRow{
@@ -406,5 +417,21 @@ func formatButtonTime(t time.Time) string {
 		return fmt.Sprintf("(%dh ago)", int(since.Hours()))
 	default:
 		return fmt.Sprintf("(%dd ago)", int(since.Hours()/24))
+	}
+}
+
+// formatDeviceMode converts device mode values to human-readable strings.
+func formatDeviceMode(mode string) string {
+	switch mode {
+	case "switch_dual_pushbutton":
+		return "Dual Pushbutton"
+	case "switch_dual_rocker":
+		return "Dual Rocker"
+	case "switch_single_pushbutton":
+		return "Single Pushbutton"
+	case "switch_single_rocker":
+		return "Single Rocker"
+	default:
+		return mode
 	}
 }

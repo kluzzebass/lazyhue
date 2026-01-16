@@ -47,16 +47,17 @@ func (m *Model) buildRoomGridRows(room hueclient.RoomGet, isZone bool, state *hu
 		})
 
 		// Use different field ID prefix for rooms vs zones
-		fieldPrefix := "room-"
-		if isZone {
-			fieldPrefix = "zone-"
-		}
-
 		glID := gl.Id
 
 		// Power toggle
+		var powerFieldID string
+		if isZone {
+			powerFieldID = FieldIDZonePower(glID)
+		} else {
+			powerFieldID = FieldIDRoomPower(glID)
+		}
 		onValue := gl.On != nil && gl.On.On
-		toggle := field.NewToggleComponent(fieldPrefix+"power:"+glID, "Power", onValue, &m.styles, m.zones)
+		toggle := field.NewToggleComponent(powerFieldID, "Power", onValue, &m.styles, m.zones)
 		toggle.SetLabels("On", "Off")
 		rows = append(rows, gridlayout.GridRow{
 			Type: gridlayout.RowTypeNormal,
@@ -68,9 +69,15 @@ func (m *Model) buildRoomGridRows(room hueclient.RoomGet, isZone bool, state *hu
 
 		// Brightness slider
 		if gl.Dimming != nil {
+			var brightnessFieldID string
+			if isZone {
+				brightnessFieldID = FieldIDZoneBrightness(glID)
+			} else {
+				brightnessFieldID = FieldIDRoomBrightness(glID)
+			}
 			brightness := int(gl.Dimming.Brightness)
 			slider := field.NewBrightnessSliderComponent(
-				fieldPrefix+"brightness:"+glID, "Brightness", brightness,
+				brightnessFieldID, "Brightness", brightness,
 				&m.styles, m.zones,
 			)
 			rows = append(rows, gridlayout.GridRow{
@@ -83,8 +90,14 @@ func (m *Model) buildRoomGridRows(room hueclient.RoomGet, isZone bool, state *hu
 		}
 
 		// Create Scene button (captures current light states)
+		var createSceneFieldID string
+		if isZone {
+			createSceneFieldID = FieldIDZoneCreateScene(roomID)
+		} else {
+			createSceneFieldID = FieldIDRoomCreateScene(roomID)
+		}
 		createSceneBtn := field.NewButtonComponent(
-			fieldPrefix+"create-scene:"+roomID, "Create Scene", "Create Scene",
+			createSceneFieldID, "Create Scene", "Create Scene",
 			&m.styles, m.zones,
 		)
 		rows = append(rows, gridlayout.GridRow{
@@ -140,14 +153,16 @@ func (m *Model) buildRoomGridRows(room hueclient.RoomGet, isZone bool, state *hu
 			}
 		}
 
-		// Use different field ID prefix for rooms vs zones
-		fieldPrefix := "room-archetype:"
+		// Use different field ID for rooms vs zones
+		var archetypeFieldID string
 		if isZone {
-			fieldPrefix = "zone-archetype:"
+			archetypeFieldID = FieldIDZoneArchetype(roomID)
+		} else {
+			archetypeFieldID = FieldIDRoomArchetype(roomID)
 		}
 
 		selectComp := field.NewSelectComponent(
-			fieldPrefix+roomID, "Archetype", currentIndex, options,
+			archetypeFieldID, "Archetype", currentIndex, options,
 			&m.styles, m.zones,
 		)
 		rows = append(rows, gridlayout.GridRow{

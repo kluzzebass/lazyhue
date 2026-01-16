@@ -341,6 +341,25 @@ func (b *Bridge) applyResourceUpdate(update ResourceUpdate) bool {
 		}
 		return changed
 
+	case "button":
+		if update.Button != nil {
+			var lastEvent *string
+			if update.Button.LastEvent != "" {
+				lastEvent = &update.Button.LastEvent
+			}
+			// Convert SSE button report to hueclient type
+			var buttonReport *hueclient.BellButtonGetButtonButtonReport
+			if update.Button.ButtonReport != nil {
+				updated, _ := time.Parse(time.RFC3339, update.Button.ButtonReport.Updated)
+				buttonReport = &hueclient.BellButtonGetButtonButtonReport{
+					Event:   hueclient.Event(update.Button.ButtonReport.Event),
+					Updated: updated,
+				}
+			}
+			return b.state.ApplyButtonUpdate(update.ID, lastEvent, buttonReport)
+		}
+		return false
+
 	default:
 		// Unknown resource type - will be picked up by fallback polling
 		return false

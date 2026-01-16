@@ -71,6 +71,13 @@ func startDiscoveryTicker() tea.Cmd {
 	})
 }
 
+// startButtonTimeRefreshTicker returns a command that periodically refreshes button time displays.
+func startButtonTimeRefreshTicker() tea.Cmd {
+	return tea.Tick(5*time.Second, func(t time.Time) tea.Msg {
+		return buttonTimeRefreshTickMsg{}
+	})
+}
+
 // startSSEListener starts listening for SSE events from a bridge.
 // The bridge handles the SSE connection internally, we just set the callback.
 func (m *Model) startSSEListener(ctx context.Context, bridge *hue.Bridge) {

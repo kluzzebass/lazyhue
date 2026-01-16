@@ -54,6 +54,7 @@ A terminal UI for Philips Hue bridge management.
 - [x] Turn on/off explicitly (`o`/`O`)
 - [x] Brightness up/down (`+`/`-`)
 - [x] Scene activation (Enter on scene)
+- [x] Scene color palette display
 - [x] Gradient control for gradient-capable lights
 - [x] Effects control (candle, fire, prism, sparkle, etc.)
 - [x] EffectsV2 speed control slider
@@ -71,6 +72,18 @@ A terminal UI for Philips Hue bridge management.
 - [x] Device identify (flash) button
 - [x] Firmware update status display
 - [x] Zigbee channel display
+- [x] Device mode display for switches (pushbutton vs rocker)
+
+### Bridge Network Info
+- [x] WiFi connectivity status (Bridge Pro)
+- [x] Extended PAN ID display
+- [x] Bridge Zigbee channel display
+- [x] Bridge MAC address display
+
+### Smart Scene Display
+- [x] SmartScene active timeslot indicator
+- [x] SmartScene weekly schedule visualization
+- [x] SmartScene transition duration display
 
 ### Form System
 - [x] Generic form dialog with Save/Cancel
@@ -83,25 +96,6 @@ A terminal UI for Philips Hue bridge management.
 - [x] Select/dropdown fields
 - [x] Live mode (changes apply immediately)
 - [x] Edit mode (changes on Save)
-
----
-
-## 🎯 Quick Wins (API ready, needs UI)
-
-These features have API support already implemented or partially implemented:
-
-### Connectivity Status Display
-- [ ] Show WiFi connectivity status (code in `extended_client.go`)
-- [ ] Display extended PAN ID for network identification
-
-### Device Enhancements
-- [ ] Show device mode for switches (pushbutton vs rocker)
-
-### Scene Enhancements (data already fetched)
-- [ ] Display scene color palette for dynamic scenes
-- [ ] SmartScene active timeslot indicator
-- [ ] SmartScene weekly schedule visualization
-- [ ] SmartScene transition duration display
 
 ---
 

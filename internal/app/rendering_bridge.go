@@ -35,7 +35,7 @@ func (m *Model) buildBridgeGridRows(bridgeID string) []gridlayout.GridRow {
 			// Identify button
 			if deviceID != "" {
 				identifyBtn := field.NewButtonComponent(
-					"bridge-identify:"+deviceID, "Identify", "Identify",
+					FieldIDBridgeIdentify(deviceID), "Identify", "Identify",
 					&m.styles, m.zones,
 				)
 				rows = append(rows, gridlayout.GridRow{
@@ -96,6 +96,22 @@ func (m *Model) buildBridgeGridRows(bridgeID string) []gridlayout.GridRow {
 		rows = append(rows, gridlayout.NewInfoRow("Last Sync", bridge.LastSync.Format("15:04:05"), infoLabelWidth))
 	}
 
+	// WiFi connectivity (Bridge Pro only)
+	if state != nil {
+		wifiList := state.GetWifiConnectivity()
+		if len(wifiList) > 0 {
+			wifi := wifiList[0]
+			wifiStyle := m.styles.Dimmed
+			wifiStatus := wifi.Status
+			if wifi.Status == "connected" {
+				wifiStyle = m.styles.Success
+			} else if wifi.Status == "disconnected" {
+				wifiStyle = m.styles.Error
+			}
+			rows = append(rows, gridlayout.NewStyledInfoRow("WiFi", wifiStatus, infoLabelWidth, wifiStyle))
+		}
+	}
+
 	// Hardware section
 	if state != nil {
 		if bridgeDevice, ok := state.GetBridgeDevice(); ok {
@@ -150,6 +166,33 @@ func (m *Model) buildBridgeGridRows(bridgeID string) []gridlayout.GridRow {
 			}
 		}
 		rows = append(rows, gridlayout.NewInfoRow("Lights On", fmt.Sprintf("%d/%d", lightsOn, len(lights)), infoLabelWidth))
+	}
+
+	// Network section - Zigbee info
+	if state != nil {
+		if bridgeDevice, ok := state.GetBridgeDevice(); ok {
+			if zc, ok := state.GetDeviceZigbeeConnectivity(bridgeDevice); ok {
+				networkHeader := field.NewHeaderComponent("network-header", "Network", &m.styles, m.zones)
+				rows = append(rows, gridlayout.GridRow{
+					Type:    gridlayout.RowTypeSection,
+					Section: networkHeader,
+				})
+
+				if zc.ExtendedPanID != "" {
+					rows = append(rows, gridlayout.NewStyledInfoRow("Extended PAN ID", zc.ExtendedPanID, infoLabelWidth, m.styles.Dimmed))
+				}
+				if zc.Channel != nil && zc.Channel.Value != "" {
+					channelDisplay := zc.Channel.Value
+					if len(channelDisplay) > 8 && channelDisplay[:8] == "channel_" {
+						channelDisplay = channelDisplay[8:]
+					}
+					rows = append(rows, gridlayout.NewStyledInfoRow("Zigbee Channel", channelDisplay, infoLabelWidth, m.styles.Dimmed))
+				}
+				if zc.MacAddress != "" {
+					rows = append(rows, gridlayout.NewStyledInfoRow("MAC Address", zc.MacAddress, infoLabelWidth, m.styles.Dimmed))
+				}
+			}
+		}
 	}
 
 	// IDs section

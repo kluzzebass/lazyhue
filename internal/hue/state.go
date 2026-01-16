@@ -1063,6 +1063,40 @@ func (s *BridgeState) GetDeviceButtons(device hueclient.DeviceGet) []hueclient.B
 	return buttons
 }
 
+// ApplyButtonUpdate applies a button event update from SSE.
+// Returns true if the button was found and updated.
+func (s *BridgeState) ApplyButtonUpdate(buttonID string, lastEvent *string, buttonReport *hueclient.BellButtonGetButtonButtonReport) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	btn, ok := s.Buttons[buttonID]
+	if !ok {
+		return false
+	}
+
+	if lastEvent != nil {
+		evt := hueclient.Event(*lastEvent)
+		btn.Button.LastEvent = &evt
+	}
+	if buttonReport != nil {
+		btn.Button.ButtonReport = buttonReport
+	}
+
+	s.Buttons[buttonID] = btn
+	return true
+}
+
+// GetButtonOwnerDeviceID returns the device ID that owns a button.
+func (s *BridgeState) GetButtonOwnerDeviceID(buttonID string) string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	if btn, ok := s.Buttons[buttonID]; ok {
+		return btn.Owner.Rid
+	}
+	return ""
+}
+
 // UpdateEntertainmentConfigurations replaces entertainment configuration data.
 func (s *BridgeState) UpdateEntertainmentConfigurations(configs map[string]EntertainmentConfiguration) {
 	updateMap(s, &s.EntertainmentConfigurations, configs)
