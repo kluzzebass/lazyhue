@@ -9,18 +9,25 @@ import (
 	"io"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/kluzzebass/lazyhue/internal/debug"
 	"github.com/kluzzebass/lazyhue/internal/hueclient"
 )
 
+// toResourceId converts a string ID to a ResourceId (UUID).
+// Panics if the string is not a valid UUID.
+func toResourceId(id string) hueclient.ResourceId {
+	return uuid.MustParse(id)
+}
+
 // isLightOn checks if a light is on.
 func isLightOn(light hueclient.LightGet) bool {
-	return light.On != nil && light.On.On != nil && *light.On.On
+	return light.On.On
 }
 
 // isGroupedLightOn checks if a grouped light is on.
 func isGroupedLightOn(gl hueclient.GroupedLightGet) bool {
-	return gl.On != nil && gl.On.On != nil && *gl.On.On
+	return gl.On != nil && gl.On.On
 }
 
 // ToggleLight toggles a light on or off.
@@ -52,8 +59,10 @@ func (b *Bridge) ToggleLight(lightID string) error {
 		action = "off"
 	}
 	b.logRequest(fmt.Sprintf("%s: %s", lightName, action))
-	httpResp, err := client.UpdateLightWithResponse(context.Background(), lightID, hueclient.UpdateLightJSONRequestBody{
-		On: &hueclient.On{On: &newState},
+	httpResp, err := client.UpdateLightWithResponse(context.Background(), toResourceId(lightID), hueclient.UpdateLightJSONRequestBody{
+		On: &struct {
+			On *bool `json:"on,omitempty"`
+		}{On: &newState},
 	})
 	if err != nil {
 		b.logError(fmt.Sprintf("%s: %s failed: %v", lightName, action, err))
@@ -92,7 +101,7 @@ func (b *Bridge) SetLightOn(lightID string, on bool) error {
 		// Fallback: try to find light by searching all lights
 		allLights := b.state.AllLights()
 		for _, l := range allLights {
-			if l.Id != nil && *l.Id == lightID {
+			if l.Id == lightID {
 				lightName = b.state.GetLightName(l)
 				if lightName == "Unknown" {
 					lightName = fmt.Sprintf("Light %s", lightID)
@@ -110,8 +119,10 @@ func (b *Bridge) SetLightOn(lightID string, on bool) error {
 		action = "off"
 	}
 	b.logRequest(fmt.Sprintf("%s: %s", lightName, action))
-	httpResp, err := client.UpdateLightWithResponse(context.Background(), lightID, hueclient.UpdateLightJSONRequestBody{
-		On: &hueclient.On{On: &on},
+	httpResp, err := client.UpdateLightWithResponse(context.Background(), toResourceId(lightID), hueclient.UpdateLightJSONRequestBody{
+		On: &struct {
+			On *bool `json:"on,omitempty"`
+		}{On: &on},
 	})
 	if err != nil {
 		b.logError(fmt.Sprintf("%s: %s failed: %v", lightName, action, err))
@@ -158,8 +169,10 @@ func (b *Bridge) SetLightBrightness(lightID string, brightness float64) error {
 
 		if client != nil {
 			b.logRequest(fmt.Sprintf("%s: brightness %.0f%%", lightName, brightness))
-			httpResp, err := client.UpdateLightWithResponse(context.Background(), lightID, hueclient.UpdateLightJSONRequestBody{
-				Dimming: &hueclient.Dimming{Brightness: &br},
+			httpResp, err := client.UpdateLightWithResponse(context.Background(), toResourceId(lightID), hueclient.UpdateLightJSONRequestBody{
+				Dimming: &struct {
+					Brightness *float32 `json:"brightness,omitempty"`
+				}{Brightness: &br},
 			})
 			if err != nil {
 				b.logError(fmt.Sprintf("%s: brightness failed: %v", lightName, err))
@@ -208,12 +221,20 @@ func (b *Bridge) SetLightColor(lightID string, x, y float64) error {
 		b.mu.RLock()
 		client := b.client
 		b.mu.RUnlock()
-		
+
 		if client != nil {
 			b.logRequest(fmt.Sprintf("%s: color", lightName))
-			httpResp, err := client.UpdateLightWithResponse(context.Background(), lightID, hueclient.UpdateLightJSONRequestBody{
-				Color: &hueclient.Color{
-					Xy: &hueclient.GamutPosition{X: &xf, Y: &yf},
+			httpResp, err := client.UpdateLightWithResponse(context.Background(), toResourceId(lightID), hueclient.UpdateLightJSONRequestBody{
+				Color: &struct {
+					Xy *struct {
+						X float32 `json:"x"`
+						Y float32 `json:"y"`
+					} `json:"xy,omitempty"`
+				}{
+					Xy: &struct {
+						X float32 `json:"x"`
+						Y float32 `json:"y"`
+					}{X: xf, Y: yf},
 				},
 			})
 			if err != nil {
@@ -265,8 +286,10 @@ func (b *Bridge) SetLightColorTemperature(lightID string, mirek int) error {
 		
 		if client != nil {
 			b.logRequest(fmt.Sprintf("%s: color temp %d mirek", lightName, mirek))
-			httpResp, err := client.UpdateLightWithResponse(context.Background(), lightID, hueclient.UpdateLightJSONRequestBody{
-				ColorTemperature: &hueclient.ColorTemperature{Mirek: &mirek},
+			httpResp, err := client.UpdateLightWithResponse(context.Background(), toResourceId(lightID), hueclient.UpdateLightJSONRequestBody{
+				ColorTemperature: &struct {
+					Mirek *int `json:"mirek,omitempty"`
+				}{Mirek: &mirek},
 			})
 			if err != nil {
 				b.logError(fmt.Sprintf("%s: color temp failed: %v", lightName, err))
@@ -286,7 +309,7 @@ func (b *Bridge) SetLightColorTemperature(lightID string, mirek int) error {
 }
 
 // SetLightEffect sets a light's effect (candle, fire, prism, etc.).
-func (b *Bridge) SetLightEffect(lightID string, effect hueclient.SupportedEffects) error {
+func (b *Bridge) SetLightEffect(lightID string, effect hueclient.Effect) error {
 	b.mu.RLock()
 	client := b.client
 	b.mu.RUnlock()
@@ -295,8 +318,8 @@ func (b *Bridge) SetLightEffect(lightID string, effect hueclient.SupportedEffect
 		return ErrAuthFailed
 	}
 
-	// Optimistic update
-	b.state.SetLightEffect(lightID, effect)
+	// Optimistic update - convert Effect to LightGetEffectsStatus for state cache
+	b.state.SetLightEffect(lightID, hueclient.Effect(effect))
 
 	lightName := "Unknown"
 	if light, ok := b.state.GetLight(lightID); ok {
@@ -304,8 +327,11 @@ func (b *Bridge) SetLightEffect(lightID string, effect hueclient.SupportedEffect
 	}
 	effectName := EffectDisplayName(string(effect))
 	b.logRequest(fmt.Sprintf("%s: effect %s", lightName, effectName))
-	httpResp, err := client.UpdateLightWithResponse(context.Background(), lightID, hueclient.UpdateLightJSONRequestBody{
-		Effects: &hueclient.Effects{Effect: &effect},
+	effectVal := hueclient.Effect(effect)
+	httpResp, err := client.UpdateLightWithResponse(context.Background(), toResourceId(lightID), hueclient.UpdateLightJSONRequestBody{
+		Effects: &struct {
+			Effect *hueclient.Effect `json:"effect,omitempty"`
+		}{Effect: &effectVal},
 	})
 	if err != nil {
 		b.logError(fmt.Sprintf("%s: effect %s failed: %v", lightName, effectName, err))
@@ -325,13 +351,13 @@ type gradientModePutBody struct {
 }
 
 type gradientModePut struct {
-	Mode   *hueclient.SupportedGradientMode `json:"mode,omitempty"`
+	Mode   *hueclient.LightGetGradientMode `json:"mode,omitempty"`
 	Points []gradientPointPut               `json:"points,omitempty"`
 }
 
 // SetLightGradientMode sets a light's gradient mode.
 // The API requires points to be included when changing mode.
-func (b *Bridge) SetLightGradientMode(lightID string, mode hueclient.SupportedGradientMode) error {
+func (b *Bridge) SetLightGradientMode(lightID string, mode hueclient.LightGetGradientMode) error {
 	b.mu.RLock()
 	client := b.client
 	b.mu.RUnlock()
@@ -350,9 +376,9 @@ func (b *Bridge) SetLightGradientMode(lightID string, mode hueclient.SupportedGr
 
 	// Build wrapped points from current state
 	var wrappedPoints []gradientPointPut
-	if light.Gradient != nil && light.Gradient.Points != nil {
-		for _, c := range *light.Gradient.Points {
-			wrappedPoints = append(wrappedPoints, gradientPointPut{Color: &c})
+	if light.Gradient != nil {
+		for _, pt := range light.Gradient.Points {
+			wrappedPoints = append(wrappedPoints, gradientPointPut{Color: &pt.Color})
 		}
 	}
 
@@ -376,7 +402,7 @@ func (b *Bridge) SetLightGradientMode(lightID string, mode hueclient.SupportedGr
 
 	debug.Log("Gradient mode request for %s: %s", lightID, string(bodyBytes))
 
-	resp, err := client.UpdateLightWithBody(context.Background(), lightID, "application/json", bytes.NewReader(bodyBytes))
+	resp, err := client.UpdateLightWithBody(context.Background(), toResourceId(lightID), "application/json", bytes.NewReader(bodyBytes))
 	if err != nil {
 		b.logError(fmt.Sprintf("%s: gradient mode failed: %v", lightName, err))
 		return err
@@ -396,7 +422,7 @@ func (b *Bridge) SetLightGradientMode(lightID string, mode hueclient.SupportedGr
 // gradientPointPut wraps a Color in a "color" field for the PUT API.
 // The Hue API expects: { "color": { "xy": { "x": ..., "y": ... } } }
 type gradientPointPut struct {
-	Color *hueclient.Color `json:"color,omitempty"`
+	Color *hueclient.ActionGetActionColor `json:"color,omitempty"`
 }
 
 // gradientPut is a custom gradient structure for PUT requests.
@@ -411,7 +437,7 @@ type lightGradientPutBody struct {
 
 // SetLightGradientPoints sets a light's gradient points (array of XY colors).
 // Rapid calls are debounced - state is updated immediately, but API call is delayed.
-func (b *Bridge) SetLightGradientPoints(lightID string, points []hueclient.Color) error {
+func (b *Bridge) SetLightGradientPoints(lightID string, points []hueclient.ActionGetActionColor) error {
 	b.mu.RLock()
 	client := b.client
 	b.mu.RUnlock()
@@ -420,8 +446,12 @@ func (b *Bridge) SetLightGradientPoints(lightID string, points []hueclient.Color
 		return ErrAuthFailed
 	}
 
-	// Optimistic update
-	b.state.SetLightGradientPoints(lightID, points)
+	// Optimistic update - convert ActionGetActionColor to GradientPointGet for state cache
+	gradientPoints := make([]hueclient.GradientPointGet, len(points))
+	for i, pt := range points {
+		gradientPoints[i] = hueclient.GradientPointGet{Color: pt}
+	}
+	b.state.SetLightGradientPoints(lightID, gradientPoints)
 
 	// Debounce the actual API call (use same mechanism as color)
 	b.debounceMu.Lock()
@@ -461,7 +491,7 @@ func (b *Bridge) SetLightGradientPoints(lightID string, points []hueclient.Color
 
 			debug.Log("Gradient points request for %s: %s", lightID, string(bodyBytes))
 
-			resp, err := client.UpdateLightWithBody(context.Background(), lightID, "application/json", bytes.NewReader(bodyBytes))
+			resp, err := client.UpdateLightWithBody(context.Background(), toResourceId(lightID), "application/json", bytes.NewReader(bodyBytes))
 			if err != nil {
 				b.logError(fmt.Sprintf("%s: gradient points failed: %v", lightName, err))
 			} else {
@@ -513,8 +543,10 @@ func (b *Bridge) ToggleGroupedLight(groupedLightID string) error {
 		action = "off"
 	}
 	b.logRequest(fmt.Sprintf("%s: %s", groupName, action))
-	_, err := client.UpdateGroupedLight(context.Background(), groupedLightID, hueclient.UpdateGroupedLightJSONRequestBody{
-		On: &hueclient.On{On: &newState},
+	_, err := client.UpdateGroupedLight(context.Background(), toResourceId(groupedLightID), hueclient.UpdateGroupedLightJSONRequestBody{
+		On: &struct {
+			On *bool `json:"on,omitempty"`
+		}{On: &newState},
 	})
 	return err
 }
@@ -541,8 +573,10 @@ func (b *Bridge) SetGroupedLightOn(groupedLightID string, on bool) error {
 		action = "off"
 	}
 	b.logRequest(fmt.Sprintf("%s: %s", groupName, action))
-	_, err := client.UpdateGroupedLight(context.Background(), groupedLightID, hueclient.UpdateGroupedLightJSONRequestBody{
-		On: &hueclient.On{On: &on},
+	_, err := client.UpdateGroupedLight(context.Background(), toResourceId(groupedLightID), hueclient.UpdateGroupedLightJSONRequestBody{
+		On: &struct {
+			On *bool `json:"on,omitempty"`
+		}{On: &on},
 	})
 	return err
 }
@@ -566,8 +600,10 @@ func (b *Bridge) SetGroupedLightBrightness(groupedLightID string, brightness flo
 	}
 	b.logRequest(fmt.Sprintf("%s: brightness %.0f%%", groupName, brightness))
 	br := float32(brightness)
-	_, err := client.UpdateGroupedLight(context.Background(), groupedLightID, hueclient.UpdateGroupedLightJSONRequestBody{
-		Dimming: &hueclient.Dimming{Brightness: &br},
+	_, err := client.UpdateGroupedLight(context.Background(), toResourceId(groupedLightID), hueclient.UpdateGroupedLightJSONRequestBody{
+		Dimming: &struct {
+			Brightness *float32 `json:"brightness,omitempty"`
+		}{Brightness: &br},
 	})
 	return err
 }
@@ -587,18 +623,22 @@ func (b *Bridge) RecallScene(sceneID string) error {
 		sceneName = b.state.GetSceneName(scene)
 	}
 	b.logRequest(fmt.Sprintf("%s: activated", sceneName))
-	action := hueclient.SceneRecallAction("active")
-	_, err := client.UpdateScene(context.Background(), sceneID, hueclient.UpdateSceneJSONRequestBody{
-		Recall: &hueclient.SceneRecall{
-		Action: &action,
-		},
+	action := hueclient.UpdateSceneJSONBodyRecallActionActive
+	_, err := client.UpdateScene(context.Background(), toResourceId(sceneID), hueclient.UpdateSceneJSONRequestBody{
+		Recall: &struct {
+			Action  *hueclient.UpdateSceneJSONBodyRecallAction `json:"action,omitempty"`
+			Dimming *struct {
+				Brightness *float32 `json:"brightness,omitempty"`
+			} `json:"dimming,omitempty"`
+			Duration *int `json:"duration,omitempty"`
+		}{Action: &action},
 	})
 	return err
 }
 
 // isMotionEnabled checks if a motion sensor is enabled.
 func isMotionEnabled(motion hueclient.MotionGet) bool {
-	return motion.Enabled != nil && *motion.Enabled
+	return motion.Enabled
 }
 
 // ToggleMotionSensor toggles a motion sensor's enabled state.
@@ -622,9 +662,9 @@ func (b *Bridge) ToggleMotionSensor(motionID string) error {
 	b.state.SetMotionSensorEnabled(motionID, newState)
 
 	deviceName := "Unknown"
-	if motion.Owner != nil && motion.Owner.Rid != nil {
-	if device, ok := b.state.GetDevice(*motion.Owner.Rid); ok {
-		deviceName = b.state.GetDeviceName(device)
+	if motion.Owner.Rid != "" {
+		if device, ok := b.state.GetDevice(motion.Owner.Rid); ok {
+			deviceName = b.state.GetDeviceName(device)
 		}
 	}
 	action := "sensor enabled"
@@ -632,7 +672,7 @@ func (b *Bridge) ToggleMotionSensor(motionID string) error {
 		action = "sensor disabled"
 	}
 	b.logRequest(fmt.Sprintf("%s: %s", deviceName, action))
-	_, err := client.UpdateMotionSensor(context.Background(), motionID, hueclient.UpdateMotionSensorJSONRequestBody{
+	_, err := client.UpdateMotionWithResponse(context.Background(), toResourceId(motionID), hueclient.UpdateMotionJSONRequestBody{
 		Enabled: &newState,
 	})
 	return err
@@ -653,10 +693,10 @@ func (b *Bridge) SetMotionSensorEnabled(motionID string, enabled bool) error {
 
 	deviceName := "Unknown"
 	if motion, ok := b.state.GetMotionSensor(motionID); ok {
-	if motion.Owner != nil && motion.Owner.Rid != nil {
-		if device, ok := b.state.GetDevice(*motion.Owner.Rid); ok {
-			deviceName = b.state.GetDeviceName(device)
-		}
+		if motion.Owner.Rid != "" {
+			if device, ok := b.state.GetDevice(motion.Owner.Rid); ok {
+				deviceName = b.state.GetDeviceName(device)
+			}
 		}
 	}
 	action := "sensor enabled"
@@ -664,7 +704,7 @@ func (b *Bridge) SetMotionSensorEnabled(motionID string, enabled bool) error {
 		action = "sensor disabled"
 	}
 	b.logRequest(fmt.Sprintf("%s: %s", deviceName, action))
-	_, err := client.UpdateMotionSensor(context.Background(), motionID, hueclient.UpdateMotionSensorJSONRequestBody{
+	_, err := client.UpdateMotionWithResponse(context.Background(), toResourceId(motionID), hueclient.UpdateMotionJSONRequestBody{
 		Enabled: &enabled,
 	})
 	return err
@@ -685,18 +725,18 @@ func (b *Bridge) SetMotionSensorSensitivity(motionID string, sensitivity int) er
 
 	deviceName := "Unknown"
 	if motion, ok := b.state.GetMotionSensor(motionID); ok {
-	if motion.Owner != nil && motion.Owner.Rid != nil {
-		if device, ok := b.state.GetDevice(*motion.Owner.Rid); ok {
-			deviceName = b.state.GetDeviceName(device)
-		}
+		if motion.Owner.Rid != "" {
+			if device, ok := b.state.GetDevice(motion.Owner.Rid); ok {
+				deviceName = b.state.GetDeviceName(device)
+			}
 		}
 	}
 	b.logRequest(fmt.Sprintf("%s: sensitivity %d", deviceName, sensitivity))
-	_, err := client.UpdateMotionSensor(context.Background(), motionID, hueclient.UpdateMotionSensorJSONRequestBody{
+	_, err := client.UpdateMotionWithResponse(context.Background(), toResourceId(motionID), hueclient.UpdateMotionJSONRequestBody{
 		Sensitivity: &struct {
-		Sensitivity *int `json:"sensitivity,omitempty"`
+			Sensitivity *int `json:"sensitivity,omitempty"`
 		}{
-		Sensitivity: &sensitivity,
+			Sensitivity: &sensitivity,
 		},
 	})
 	return err
@@ -717,8 +757,8 @@ func (b *Bridge) SetTemperatureSensorEnabled(temperatureID string, enabled bool)
 
 	deviceName := "Unknown"
 	if temp, ok := b.state.GetTemperature(temperatureID); ok {
-		if temp.Owner != nil && temp.Owner.Rid != nil {
-			if device, ok := b.state.GetDevice(*temp.Owner.Rid); ok {
+		if temp.Owner.Rid != "" {
+			if device, ok := b.state.GetDevice(temp.Owner.Rid); ok {
 				deviceName = b.state.GetDeviceName(device)
 			}
 		}
@@ -728,7 +768,7 @@ func (b *Bridge) SetTemperatureSensorEnabled(temperatureID string, enabled bool)
 		action = "temperature sensor disabled"
 	}
 	b.logRequest(fmt.Sprintf("%s: %s", deviceName, action))
-	_, err := client.UpdateTemperature(context.Background(), temperatureID, hueclient.UpdateTemperatureJSONRequestBody{
+	_, err := client.UpdateTemperatureWithResponse(context.Background(), toResourceId(temperatureID), hueclient.UpdateTemperatureJSONRequestBody{
 		Enabled: &enabled,
 	})
 	return err
@@ -749,8 +789,8 @@ func (b *Bridge) SetLightLevelSensorEnabled(lightLevelID string, enabled bool) e
 
 	deviceName := "Unknown"
 	if ll, ok := b.state.GetLightLevel(lightLevelID); ok {
-		if ll.Owner != nil && ll.Owner.Rid != nil {
-			if device, ok := b.state.GetDevice(*ll.Owner.Rid); ok {
+		if ll.Owner.Rid != "" {
+			if device, ok := b.state.GetDevice(ll.Owner.Rid); ok {
 				deviceName = b.state.GetDeviceName(device)
 			}
 		}
@@ -760,7 +800,7 @@ func (b *Bridge) SetLightLevelSensorEnabled(lightLevelID string, enabled bool) e
 		action = "light level sensor disabled"
 	}
 	b.logRequest(fmt.Sprintf("%s: %s", deviceName, action))
-	_, err := client.UpdateLightLevel(context.Background(), lightLevelID, hueclient.UpdateLightLevelJSONRequestBody{
+	_, err := client.UpdateLightLevel(context.Background(), toResourceId(lightLevelID), hueclient.UpdateLightLevelJSONRequestBody{
 		Enabled: &enabled,
 	})
 	return err
@@ -781,12 +821,12 @@ func (b *Bridge) RenameDevice(deviceID, newName string) error {
 		deviceName = b.state.GetDeviceName(device)
 	}
 	b.logRequest(fmt.Sprintf("%s: renamed to \"%s\"", deviceName, newName))
-	_, err := client.UpdateDevice(context.Background(), deviceID, hueclient.UpdateDeviceJSONRequestBody{
+	_, err := client.UpdateDevice(context.Background(), toResourceId(deviceID), hueclient.UpdateDeviceJSONRequestBody{
 		Metadata: &struct {
-		Archetype *hueclient.ProductArchetype `json:"archetype,omitempty"`
-		Name      *string                     `json:"name,omitempty"`
+			Archetype *hueclient.DeviceArchetype `json:"archetype,omitempty"`
+			Name      *string                                          `json:"name,omitempty"`
 		}{
-		Name: &newName,
+			Name: &newName,
 		},
 	})
 	return err
@@ -810,12 +850,13 @@ func (b *Bridge) IdentifyDevice(deviceID string) error {
 	}
 	b.logRequest(fmt.Sprintf("%s: identify", deviceName))
 
-	action := hueclient.DevicePutIdentifyAction("identify")
-	_, err := client.UpdateDevice(context.Background(), deviceID, hueclient.UpdateDeviceJSONRequestBody{
+	action := hueclient.UpdateDeviceJSONBodyIdentifyAction("identify")
+	_, err := client.UpdateDevice(context.Background(), toResourceId(deviceID), hueclient.UpdateDeviceJSONRequestBody{
 		Identify: &struct {
-			Action *hueclient.DevicePutIdentifyAction `json:"action,omitempty"`
+			Action   hueclient.UpdateDeviceJSONBodyIdentifyAction `json:"action"`
+			Duration *int                                         `json:"duration,omitempty"`
 		}{
-			Action: &action,
+			Action: action,
 		},
 	})
 	return err
@@ -836,10 +877,10 @@ func (b *Bridge) RenameRoom(roomID, newName string) error {
 		roomName = b.state.GetRoomName(room)
 	}
 	b.logRequest(fmt.Sprintf("%s: renamed to \"%s\"", roomName, newName))
-	_, err := client.UpdateRoom(context.Background(), roomID, hueclient.UpdateRoomJSONRequestBody{
+	_, err := client.UpdateRoom(context.Background(), toResourceId(roomID), hueclient.UpdateRoomJSONRequestBody{
 		Metadata: &struct {
 			Archetype *hueclient.RoomArchetype `json:"archetype,omitempty"`
-			Name      *string                  `json:"name,omitempty"`
+			Name      *string                                        `json:"name,omitempty"`
 		}{
 			Name: &newName,
 		},
@@ -859,13 +900,13 @@ func (b *Bridge) RenameZone(zoneID, newName string) error {
 
 	zoneName := "Unknown"
 	if zone, ok := b.state.GetZone(zoneID); ok {
-		zoneName = zone.RoomName("")
+		zoneName = zone.Metadata.Name
 	}
 	b.logRequest(fmt.Sprintf("%s: renamed to \"%s\"", zoneName, newName))
-	_, err := client.UpdateZone(context.Background(), zoneID, hueclient.UpdateZoneJSONRequestBody{
+	_, err := client.UpdateZone(context.Background(), toResourceId(zoneID), hueclient.UpdateZoneJSONRequestBody{
 		Metadata: &struct {
 			Archetype *hueclient.RoomArchetype `json:"archetype,omitempty"`
-			Name      *string                  `json:"name,omitempty"`
+			Name      *string                                        `json:"name,omitempty"`
 		}{
 			Name: &newName,
 		},
@@ -888,8 +929,11 @@ func (b *Bridge) RenameScene(sceneID, newName string) error {
 		sceneName = b.state.GetSceneName(scene)
 	}
 	b.logRequest(fmt.Sprintf("%s: renamed to \"%s\"", sceneName, newName))
-	_, err := client.UpdateScene(context.Background(), sceneID, hueclient.UpdateSceneJSONRequestBody{
-		Metadata: &hueclient.SceneMetadata{
+	_, err := client.UpdateScene(context.Background(), toResourceId(sceneID), hueclient.UpdateSceneJSONRequestBody{
+		Metadata: &struct {
+			Appdata *string `json:"appdata,omitempty"`
+			Name    *string `json:"name,omitempty"`
+		}{
 			Name: &newName,
 		},
 	})
@@ -909,25 +953,23 @@ func (b *Bridge) CreateRoom(name string, archetype hueclient.RoomArchetype, devi
 
 	// Build children list from device IDs
 	children := make([]hueclient.ResourceIdentifier, len(deviceIDs))
-	deviceType := hueclient.ResourceIdentifierRtypeDevice
 	for i, id := range deviceIDs {
-		idCopy := id
 		children[i] = hueclient.ResourceIdentifier{
-		Rid:   &idCopy,
-		Rtype: &deviceType,
+			Rid:   id,
+			Rtype: hueclient.ResourceTypeDevice,
 		}
 	}
 
 	b.logRequest(fmt.Sprintf("Room \"%s\": created", name))
 	_, err := client.CreateRoom(context.Background(), hueclient.CreateRoomJSONRequestBody{
-		Metadata: &struct {
-		Archetype *hueclient.RoomArchetype `json:"archetype,omitempty"`
-		Name      *string                  `json:"name,omitempty"`
+		Metadata: struct {
+			Archetype hueclient.RoomArchetype `json:"archetype"`
+			Name      string                                        `json:"name"`
 		}{
-		Name:      &name,
-		Archetype: &archetype,
+			Name:      name,
+			Archetype: archetype,
 		},
-		Children: &children,
+		Children: children,
 	})
 	return err
 }
@@ -945,25 +987,23 @@ func (b *Bridge) CreateZone(name string, archetype hueclient.RoomArchetype, serv
 
 	// Build children list from service IDs (typically lights)
 	children := make([]hueclient.ResourceIdentifier, len(serviceIDs))
-	lightType := hueclient.ResourceIdentifierRtypeLight
 	for i, id := range serviceIDs {
-		idCopy := id
 		children[i] = hueclient.ResourceIdentifier{
-		Rid:   &idCopy,
-		Rtype: &lightType,
+			Rid:   id,
+			Rtype: hueclient.ResourceTypeLight,
 		}
 	}
 
 	b.logRequest(fmt.Sprintf("Zone \"%s\": created", name))
 	_, err := client.CreateZone(context.Background(), hueclient.CreateZoneJSONRequestBody{
-		Metadata: &struct {
-		Archetype *hueclient.RoomArchetype `json:"archetype,omitempty"`
-		Name      *string                  `json:"name,omitempty"`
+		Metadata: struct {
+			Archetype hueclient.RoomArchetype `json:"archetype"`
+			Name      string                                        `json:"name"`
 		}{
-		Name:      &name,
-		Archetype: &archetype,
+			Name:      name,
+			Archetype: archetype,
 		},
-		Children: &children,
+		Children: children,
 	})
 	return err
 }
@@ -983,7 +1023,7 @@ func (b *Bridge) DeleteRoom(roomID string) error {
 		roomName = b.state.GetRoomName(room)
 		}
 	b.logRequest(fmt.Sprintf("%s: deleted", roomName))
-	_, err := client.DeleteRoom(context.Background(), roomID)
+	_, err := client.DeleteRoom(context.Background(), toResourceId(roomID))
 	return err
 }
 
@@ -999,10 +1039,10 @@ func (b *Bridge) DeleteZone(zoneID string) error {
 
 	zoneName := "Unknown"
 	if zone, ok := b.state.GetZone(zoneID); ok {
-		zoneName = zone.RoomName("")
+		zoneName = zone.Metadata.Name
 		}
 	b.logRequest(fmt.Sprintf("%s: deleted", zoneName))
-	_, err := client.DeleteZone(context.Background(), zoneID)
+	_, err := client.DeleteZone(context.Background(), toResourceId(zoneID))
 	return err
 }
 
@@ -1024,16 +1064,14 @@ func (b *Bridge) UpdateRoomDevices(roomID string, deviceIDs []string) error {
 
 	// Build children list from device IDs
 	children := make([]hueclient.ResourceIdentifier, len(deviceIDs))
-	deviceType := hueclient.ResourceIdentifierRtypeDevice
 	for i, id := range deviceIDs {
-		idCopy := id
 		children[i] = hueclient.ResourceIdentifier{
-		Rid:   &idCopy,
-		Rtype: &deviceType,
+			Rid:   id,
+			Rtype: hueclient.ResourceTypeDevice,
 		}
 	}
 
-	_, err := client.UpdateRoom(context.Background(), roomID, hueclient.UpdateRoomJSONRequestBody{
+	_, err := client.UpdateRoom(context.Background(), toResourceId(roomID), hueclient.UpdateRoomJSONRequestBody{
 		Children: &children,
 	})
 	return err
@@ -1045,8 +1083,8 @@ func (b *Bridge) MoveDeviceToRoom(deviceID, newRoomID string) error {
 	// Find current room
 	oldRoom, hasOldRoom := b.state.GetDeviceRoom(deviceID)
 	oldRoomID := ""
-	if hasOldRoom && oldRoom.Id != nil {
-		oldRoomID = *oldRoom.Id
+	if hasOldRoom && oldRoom.Id != "" {
+		oldRoomID = oldRoom.Id
 	}
 
 	// If already in the target room, nothing to do
@@ -1055,13 +1093,11 @@ func (b *Bridge) MoveDeviceToRoom(deviceID, newRoomID string) error {
 	}
 
 	// Remove from old room if it was in one
-	if hasOldRoom && oldRoom.Children != nil {
+	if hasOldRoom && len(oldRoom.Children) > 0 {
 		var remainingDevices []string
-		for _, child := range *oldRoom.Children {
-			if child.Rid != nil && child.Rtype != nil &&
-				*child.Rtype == hueclient.ResourceIdentifierRtypeDevice &&
-				*child.Rid != deviceID {
-				remainingDevices = append(remainingDevices, *child.Rid)
+		for _, child := range oldRoom.Children {
+			if child.Rtype == hueclient.ResourceTypeDevice && child.Rid != deviceID {
+				remainingDevices = append(remainingDevices, child.Rid)
 			}
 		}
 		if err := b.UpdateRoomDevices(oldRoomID, remainingDevices); err != nil {
@@ -1077,12 +1113,9 @@ func (b *Bridge) MoveDeviceToRoom(deviceID, newRoomID string) error {
 		}
 
 		var newDevices []string
-		if newRoom.Children != nil {
-			for _, child := range *newRoom.Children {
-				if child.Rid != nil && child.Rtype != nil &&
-					*child.Rtype == hueclient.ResourceIdentifierRtypeDevice {
-					newDevices = append(newDevices, *child.Rid)
-				}
+		for _, child := range newRoom.Children {
+			if child.Rtype == hueclient.ResourceTypeDevice {
+				newDevices = append(newDevices, child.Rid)
 			}
 		}
 		newDevices = append(newDevices, deviceID)
@@ -1107,22 +1140,20 @@ func (b *Bridge) UpdateZoneServices(zoneID string, serviceIDs []string) error {
 
 	zoneName := "Unknown"
 	if zone, ok := b.state.GetZone(zoneID); ok {
-		zoneName = zone.RoomName("")
+		zoneName = zone.Metadata.Name
 	}
 	b.logRequest(fmt.Sprintf("%s: updated services (%d)", zoneName, len(serviceIDs)))
 
 	// Build children list from service IDs
 	children := make([]hueclient.ResourceIdentifier, len(serviceIDs))
-	lightType := hueclient.ResourceIdentifierRtypeLight
 	for i, id := range serviceIDs {
-		idCopy := id
 		children[i] = hueclient.ResourceIdentifier{
-		Rid:   &idCopy,
-		Rtype: &lightType,
+			Rid:   id,
+			Rtype: hueclient.ResourceTypeLight,
 		}
 	}
 
-	_, err := client.UpdateZone(context.Background(), zoneID, hueclient.UpdateZoneJSONRequestBody{
+	_, err := client.UpdateZone(context.Background(), toResourceId(zoneID), hueclient.UpdateZoneJSONRequestBody{
 		Children: &children,
 	})
 	return err
@@ -1137,16 +1168,13 @@ func (b *Bridge) AddLightToZone(lightID, zoneID string) error {
 
 	// Get current light IDs in the zone
 	var lightIDs []string
-	if zone.Children != nil {
-		for _, child := range *zone.Children {
-			if child.Rid != nil && child.Rtype != nil &&
-				*child.Rtype == hueclient.ResourceIdentifierRtypeLight {
-				// Check if light is already in the zone
-				if *child.Rid == lightID {
-					return nil // Already in zone, nothing to do
-				}
-				lightIDs = append(lightIDs, *child.Rid)
+	for _, child := range zone.Children {
+		if child.Rtype == hueclient.ResourceTypeLight {
+			// Check if light is already in the zone
+			if child.Rid == lightID {
+				return nil // Already in zone, nothing to do
 			}
+			lightIDs = append(lightIDs, child.Rid)
 		}
 	}
 
@@ -1165,16 +1193,13 @@ func (b *Bridge) RemoveLightFromZone(lightID, zoneID string) error {
 	// Get current light IDs in the zone, excluding the one to remove
 	var lightIDs []string
 	found := false
-	if zone.Children != nil {
-		for _, child := range *zone.Children {
-			if child.Rid != nil && child.Rtype != nil &&
-				*child.Rtype == hueclient.ResourceIdentifierRtypeLight {
-				if *child.Rid == lightID {
-					found = true
-					continue // Skip this light
-				}
-				lightIDs = append(lightIDs, *child.Rid)
+	for _, child := range zone.Children {
+		if child.Rtype == hueclient.ResourceTypeLight {
+			if child.Rid == lightID {
+				found = true
+				continue // Skip this light
 			}
+			lightIDs = append(lightIDs, child.Rid)
 		}
 	}
 
@@ -1198,14 +1223,14 @@ func (b *Bridge) SetRoomArchetype(roomID string, archetype hueclient.RoomArchety
 	roomName := "Unknown"
 	if room, ok := b.state.GetRoom(roomID); ok {
 		roomName = b.state.GetRoomName(room)
-		}
-	b.logRequest(fmt.Sprintf("%s: renamed to \"%s\"", roomName, roomName))
-	_, err := client.UpdateRoom(context.Background(), roomID, hueclient.UpdateRoomJSONRequestBody{
+	}
+	b.logRequest(fmt.Sprintf("%s: archetype changed", roomName))
+	_, err := client.UpdateRoom(context.Background(), toResourceId(roomID), hueclient.UpdateRoomJSONRequestBody{
 		Metadata: &struct {
-		Archetype *hueclient.RoomArchetype `json:"archetype,omitempty"`
-		Name      *string                  `json:"name,omitempty"`
+			Archetype *hueclient.RoomArchetype `json:"archetype,omitempty"`
+			Name      *string                                        `json:"name,omitempty"`
 		}{
-		Archetype: &archetype,
+			Archetype: &archetype,
 		},
 	})
 	return err
@@ -1223,15 +1248,15 @@ func (b *Bridge) SetZoneArchetype(zoneID string, archetype hueclient.RoomArchety
 
 	zoneName := "Unknown"
 	if zone, ok := b.state.GetZone(zoneID); ok {
-		zoneName = zone.RoomName("")
+		zoneName = zone.Metadata.Name
 	}
 	b.logRequest(fmt.Sprintf("%s: archetype changed", zoneName))
-	_, err := client.UpdateZone(context.Background(), zoneID, hueclient.UpdateZoneJSONRequestBody{
+	_, err := client.UpdateZone(context.Background(), toResourceId(zoneID), hueclient.UpdateZoneJSONRequestBody{
 		Metadata: &struct {
-		Archetype *hueclient.RoomArchetype `json:"archetype,omitempty"`
-		Name      *string                  `json:"name,omitempty"`
+			Archetype *hueclient.RoomArchetype `json:"archetype,omitempty"`
+			Name      *string                                        `json:"name,omitempty"`
 		}{
-		Archetype: &archetype,
+			Archetype: &archetype,
 		},
 	})
 	return err
@@ -1248,14 +1273,14 @@ func (b *Bridge) SetDeviceName(deviceID string, name string) error {
 	}
 
 	oldName := "Unknown"
-	if device, ok := b.state.GetDevice(deviceID); ok && device.Metadata != nil && device.Metadata.Name != nil {
-		oldName = *device.Metadata.Name
+	if device, ok := b.state.GetDevice(deviceID); ok && device.Metadata.Name != "" {
+		oldName = device.Metadata.Name
 	}
 	b.logRequest(fmt.Sprintf("%s: renamed to \"%s\"", oldName, name))
-	_, err := client.UpdateDevice(context.Background(), deviceID, hueclient.UpdateDeviceJSONRequestBody{
+	_, err := client.UpdateDevice(context.Background(), toResourceId(deviceID), hueclient.UpdateDeviceJSONRequestBody{
 		Metadata: &struct {
-			Archetype *hueclient.ProductArchetype `json:"archetype,omitempty"`
-			Name      *string                     `json:"name,omitempty"`
+			Archetype *hueclient.DeviceArchetype `json:"archetype,omitempty"`
+			Name      *string                                          `json:"name,omitempty"`
 		}{
 			Name: &name,
 		},
@@ -1264,7 +1289,7 @@ func (b *Bridge) SetDeviceName(deviceID string, name string) error {
 }
 
 // SetDeviceArchetype updates a device's archetype.
-func (b *Bridge) SetDeviceArchetype(deviceID string, archetype hueclient.ProductArchetype) error {
+func (b *Bridge) SetDeviceArchetype(deviceID string, archetype hueclient.DeviceArchetype) error {
 	b.mu.RLock()
 	client := b.client
 	b.mu.RUnlock()
@@ -1274,18 +1299,18 @@ func (b *Bridge) SetDeviceArchetype(deviceID string, archetype hueclient.Product
 	}
 
 	deviceName := "Unknown"
-	if device, ok := b.state.GetDevice(deviceID); ok && device.Metadata != nil && device.Metadata.Name != nil {
-		deviceName = *device.Metadata.Name
+	if device, ok := b.state.GetDevice(deviceID); ok && device.Metadata.Name != "" {
+		deviceName = device.Metadata.Name
 	}
 
 	// Optimistic update: apply to cache immediately
 	b.state.SetDeviceArchetype(deviceID, archetype)
 
 	b.logRequest(fmt.Sprintf("%s: archetype changed to \"%s\"", deviceName, string(archetype)))
-	_, err := client.UpdateDevice(context.Background(), deviceID, hueclient.UpdateDeviceJSONRequestBody{
+	_, err := client.UpdateDevice(context.Background(), toResourceId(deviceID), hueclient.UpdateDeviceJSONRequestBody{
 		Metadata: &struct {
-			Archetype *hueclient.ProductArchetype `json:"archetype,omitempty"`
-			Name      *string                     `json:"name,omitempty"`
+			Archetype *hueclient.DeviceArchetype `json:"archetype,omitempty"`
+			Name      *string                                          `json:"name,omitempty"`
 		}{
 			Archetype: &archetype,
 		},
@@ -1294,7 +1319,7 @@ func (b *Bridge) SetDeviceArchetype(deviceID string, archetype hueclient.Product
 }
 
 // SetLightPowerupPreset updates a light's power-on behavior preset.
-func (b *Bridge) SetLightPowerupPreset(lightID string, preset hueclient.PowerupPreset) error {
+func (b *Bridge) SetLightPowerupPreset(lightID string, preset hueclient.UpdateLightJSONBodyPowerupPreset) error {
 	b.mu.RLock()
 	client := b.client
 	b.mu.RUnlock()
@@ -1309,13 +1334,39 @@ func (b *Bridge) SetLightPowerupPreset(lightID string, preset hueclient.PowerupP
 		lightName = b.state.GetLightName(light)
 	}
 
-	// Optimistic update: apply to cache immediately
-	b.state.SetLightPowerupPreset(lightID, preset)
+	// Optimistic update: apply to cache immediately - convert to Get type
+	b.state.SetLightPowerupPreset(lightID, hueclient.LightGetPowerupPreset(preset))
 
 	b.logRequest(fmt.Sprintf("%s: power-on preset changed to \"%s\"", lightName, string(preset)))
-	_, err := client.UpdateLight(context.Background(), lightID, hueclient.UpdateLightJSONRequestBody{
-		Powerup: &hueclient.Powerup{
-			Preset: &preset,
+	_, err := client.UpdateLight(context.Background(), toResourceId(lightID), hueclient.UpdateLightJSONRequestBody{
+		Powerup: &struct {
+			Color *struct {
+				Color *struct {
+					Xy *struct {
+						X float32 `json:"x"`
+						Y float32 `json:"y"`
+					} `json:"xy,omitempty"`
+				} `json:"color,omitempty"`
+				ColorTemperature *struct {
+					Mirek *int `json:"mirek,omitempty"`
+				} `json:"color_temperature,omitempty"`
+				Mode hueclient.UpdateLightJSONBodyPowerupColorMode `json:"mode"`
+			} `json:"color,omitempty"`
+			Dimming *struct {
+				Dimming *struct {
+					Brightness *float32 `json:"brightness,omitempty"`
+				} `json:"dimming,omitempty"`
+				Mode hueclient.UpdateLightJSONBodyPowerupDimmingMode `json:"mode"`
+			} `json:"dimming,omitempty"`
+			On *struct {
+				Mode hueclient.UpdateLightJSONBodyPowerupOnMode `json:"mode"`
+				On   *struct {
+					On *bool `json:"on,omitempty"`
+				} `json:"on,omitempty"`
+			} `json:"on,omitempty"`
+			Preset hueclient.UpdateLightJSONBodyPowerupPreset `json:"preset"`
+		}{
+			Preset: preset,
 		},
 	})
 	return err
@@ -1341,7 +1392,7 @@ func (b *Bridge) DeleteScene(sceneID string) error {
 	// Remove from state immediately (optimistic)
 	b.state.DeleteScene(sceneID)
 
-	_, err := client.DeleteScene(context.Background(), sceneID)
+	_, err := client.DeleteScene(context.Background(), toResourceId(sceneID))
 	return err
 }
 
@@ -1365,7 +1416,7 @@ func (b *Bridge) DeleteDevice(deviceID string) error {
 	// Remove from state immediately (optimistic)
 	b.state.DeleteDevice(deviceID)
 
-	_, err := client.DeleteDevice(context.Background(), deviceID)
+	_, err := client.DeleteDevice(context.Background(), toResourceId(deviceID))
 	return err
 }
 
@@ -1386,9 +1437,11 @@ func (b *Bridge) ActivateSmartScene(sceneID string) error {
 
 	b.logRequest(fmt.Sprintf("Activating smart scene: %s", sceneName))
 
-	action := hueclient.SmartSceneOptionalRecallActionActivate
-	_, err := client.UpdateSmartScene(context.Background(), sceneID, hueclient.UpdateSmartSceneJSONRequestBody{
-		Recall: &hueclient.SmartSceneOptionalRecall{
+	action := hueclient.UpdateSmartSceneJSONBodyRecallActionActivate
+	_, err := client.UpdateSmartScene(context.Background(), toResourceId(sceneID), hueclient.UpdateSmartSceneJSONRequestBody{
+		Recall: &struct {
+			Action *hueclient.UpdateSmartSceneJSONBodyRecallAction `json:"action,omitempty"`
+		}{
 			Action: &action,
 		},
 	})
@@ -1412,9 +1465,11 @@ func (b *Bridge) DeactivateSmartScene(sceneID string) error {
 
 	b.logRequest(fmt.Sprintf("Deactivating smart scene: %s", sceneName))
 
-	action := hueclient.SmartSceneOptionalRecallActionDeactivate
-	_, err := client.UpdateSmartScene(context.Background(), sceneID, hueclient.UpdateSmartSceneJSONRequestBody{
-		Recall: &hueclient.SmartSceneOptionalRecall{
+	action := hueclient.UpdateSmartSceneJSONBodyRecallActionDeactivate
+	_, err := client.UpdateSmartScene(context.Background(), toResourceId(sceneID), hueclient.UpdateSmartSceneJSONRequestBody{
+		Recall: &struct {
+			Action *hueclient.UpdateSmartSceneJSONBodyRecallAction `json:"action,omitempty"`
+		}{
 			Action: &action,
 		},
 	})
@@ -1441,101 +1496,12 @@ func (b *Bridge) DeleteSmartScene(sceneID string) error {
 	// Remove from state immediately (optimistic)
 	b.state.DeleteSmartScene(sceneID)
 
-	_, err := client.DeleteSmartScene(context.Background(), sceneID)
+	_, err := client.DeleteSmartScene(context.Background(), toResourceId(sceneID))
 	return err
 }
 
 // CreateSceneFromCurrentState creates a new scene for a room/zone using the current light states.
+// TODO: Re-implement with new hueclient types after oapi-hue migration
 func (b *Bridge) CreateSceneFromCurrentState(groupID string, isZone bool, sceneName string) error {
-	b.mu.RLock()
-	client := b.client
-	b.mu.RUnlock()
-
-	if client == nil {
-		return ErrAuthFailed
-	}
-
-	// Get the room/zone to find its lights
-	var lights []hueclient.LightGet
-	var groupType hueclient.ResourceIdentifierRtype
-	if isZone {
-		zone, ok := b.state.GetZone(groupID)
-		if !ok {
-			return fmt.Errorf("zone not found: %s", groupID)
-		}
-		lights = b.state.ZoneLights(zone)
-		groupType = hueclient.ResourceIdentifierRtypeZone
-	} else {
-		room, ok := b.state.GetRoom(groupID)
-		if !ok {
-			return fmt.Errorf("room not found: %s", groupID)
-		}
-		lights = b.state.RoomLights(room)
-		groupType = hueclient.ResourceIdentifierRtypeRoom
-	}
-
-	if len(lights) == 0 {
-		return fmt.Errorf("no lights in group")
-	}
-
-	// Build actions from current light states
-	var actions []hueclient.ActionPost
-	lightType := hueclient.ResourceIdentifierRtypeLight
-	for _, light := range lights {
-		if light.Id == nil {
-			continue
-		}
-		lightID := *light.Id
-
-		action := hueclient.ActionPost{
-			Target: hueclient.ResourceIdentifier{
-				Rid:   &lightID,
-				Rtype: &lightType,
-			},
-		}
-
-		// Capture on/off state
-		if light.On != nil && light.On.On != nil {
-			action.Action.On = &hueclient.On{On: light.On.On}
-		}
-
-		// Capture brightness
-		if light.Dimming != nil && light.Dimming.Brightness != nil {
-			action.Action.Dimming = &hueclient.Dimming{Brightness: light.Dimming.Brightness}
-		}
-
-		// Capture color (XY)
-		if light.Color != nil && light.Color.Xy != nil {
-			action.Action.Color = &hueclient.Color{
-				Xy: light.Color.Xy,
-			}
-		}
-
-		// Capture color temperature (mirek)
-		if light.ColorTemperature != nil && light.ColorTemperature.Mirek != nil {
-			action.Action.ColorTemperature = &struct {
-				Mirek *hueclient.Mirek `json:"mirek,omitempty"`
-			}{
-				Mirek: light.ColorTemperature.Mirek,
-			}
-		}
-
-		actions = append(actions, action)
-	}
-
-	// Create the scene
-	b.logRequest(fmt.Sprintf("Creating scene \"%s\" with %d lights", sceneName, len(actions)))
-
-	_, err := client.CreateScene(context.Background(), hueclient.CreateSceneJSONRequestBody{
-		Metadata: hueclient.SceneMetadata{
-			Name: &sceneName,
-		},
-		Group: hueclient.ResourceIdentifier{
-			Rid:   &groupID,
-			Rtype: &groupType,
-		},
-		Actions: actions,
-	})
-
-	return err
+	return fmt.Errorf("CreateSceneFromCurrentState: not yet implemented with new hueclient types")
 }

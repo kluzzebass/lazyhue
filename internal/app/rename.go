@@ -48,19 +48,19 @@ func (m *Model) startRenameMode() tea.Cmd {
 			return nil
 		}
 		bridgeDevice, ok := state.GetBridgeDevice()
-		if !ok || bridgeDevice.Id == nil {
+		if !ok || bridgeDevice.Id == "" {
 			m.status = "Bridge device not found"
 			return nil
 		}
-		nameFieldID = "bridge-name:" + *bridgeDevice.Id
+		nameFieldID = FieldIDBridgeName(bridgeDevice.Id)
 	case panels.EntityRoom:
-		nameFieldID = "room-name:" + item.ID
+		nameFieldID = FieldIDRoomName(item.ID)
 	case panels.EntityZone:
-		nameFieldID = "zone-name:" + item.ID
+		nameFieldID = FieldIDZoneName(item.ID)
 	case panels.EntityScene:
-		nameFieldID = "scene-name:" + item.ID
+		nameFieldID = FieldIDSceneName(item.ID)
 	case panels.EntityDevice:
-		nameFieldID = "name:" + item.ID
+		nameFieldID = FieldIDDeviceName(item.ID)
 	case panels.EntityLight:
 		// Lights are renamed via their owning device - find the device ID
 		var light hueclient.LightGet
@@ -83,12 +83,12 @@ func (m *Model) startRenameMode() tea.Cmd {
 			m.status = "Light not found"
 			return nil
 		}
-		if light.Owner == nil || light.Owner.Rid == nil {
+		if light.Owner.Rid == "" {
 			m.status = "Light has no owning device"
 			return nil
 		}
-		// Lights use device name field with format "name:<deviceID>"
-		nameFieldID = "name:" + *light.Owner.Rid
+		// Lights use device name field
+		nameFieldID = FieldIDName(light.Owner.Rid)
 	default:
 		m.status = fmt.Sprintf("Cannot rename %s", item.Type.String())
 		return nil

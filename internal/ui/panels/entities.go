@@ -103,7 +103,7 @@ type RoomsCategoryData struct {
 // ZonesCategoryData holds aggregate data for a zones category folder.
 type ZonesCategoryData struct {
 	BridgeID string
-	Zones    []hueclient.RoomGet
+	Zones    []hueclient.ZoneGet
 }
 
 // EntertainmentCategoryData holds aggregate data for an entertainment areas category folder.
@@ -118,14 +118,14 @@ type EntertainmentConfig struct {
 	Name string
 }
 
-// IsLightOn checks if a light is on (nil-safe).
+// IsLightOn checks if a light is on.
 func IsLightOn(light hueclient.LightGet) bool {
-	return light.On != nil && light.On.On != nil && *light.On.On
+	return light.On.On
 }
 
 // IsGroupedLightOn checks if a grouped light is on (nil-safe).
 func IsGroupedLightOn(gl hueclient.GroupedLightGet) bool {
-	return gl.On != nil && gl.On.On != nil && *gl.On.On
+	return gl.On != nil && gl.On.On
 }
 
 // EntityItem represents an entity that can be displayed in a list or tree.

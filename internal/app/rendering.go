@@ -565,10 +565,8 @@ func (m *Model) updateDetailContent() {
 
 		if ok {
 			// Get the actual light ID from the light object
-			actualLightID := ""
-			if light.Id != nil {
-				actualLightID = *light.Id
-			} else {
+			actualLightID := light.Id
+			if actualLightID == "" {
 				actualLightID = node.Item.ID
 			}
 
@@ -608,10 +606,10 @@ func (m *Model) updateDetailContent() {
 
 	case panels.EntityZone:
 		m.selectedLightID = ""
-		var zone hueclient.RoomGet
+		var zone hueclient.ZoneGet
 		var ok bool
 		if node.Item.RawPtr != nil {
-			if z, typeOk := node.Item.RawPtr.(hueclient.RoomGet); typeOk {
+			if z, typeOk := node.Item.RawPtr.(hueclient.ZoneGet); typeOk {
 				zone = z
 				ok = true
 			}
@@ -620,7 +618,15 @@ func (m *Model) updateDetailContent() {
 			zone, ok = state.GetZone(node.Item.ID)
 		}
 		if ok {
-			rows := m.buildRoomGridRows(zone, true, state)
+			// Convert ZoneGet to RoomGet-like structure for rendering
+			room := hueclient.RoomGet{
+				Children: zone.Children,
+				Id:       zone.Id,
+				IdV1:     zone.IdV1,
+				Metadata: zone.Metadata,
+				Services: zone.Services,
+			}
+			rows := m.buildRoomGridRows(room, true, state)
 			m.lightGrid.SetRows(rows)
 			if len(m.lightGrid.Children()) > 0 {
 				content.WriteString(m.lightGrid.View())
@@ -1027,10 +1033,7 @@ func (m *Model) buildLightGridRows(light hueclient.LightGet) {
 	rows = append(rows, m.buildControlsRows(light)...)
 
 	// 2. Gradient section - interactive color gradient editing (if supported)
-	lightID := ""
-	if light.Id != nil {
-		lightID = *light.Id
-	}
+	lightID := light.Id
 	rows = append(rows, m.buildGradientRows(light, lightID)...)
 
 	// 3. Settings section - persistent configuration (name, power-on behavior)
@@ -1091,31 +1094,31 @@ func (m *Model) handleNewFieldChange(msg field.FieldChangedMsg) {
 	var err error
 
 	// Handle fields with embedded IDs (name:deviceID, archetype:deviceID, powerup-preset:lightID, room-archetype:roomID, zone-archetype:zoneID)
-	if strings.HasPrefix(msg.FieldID, "name:") {
-		deviceID := strings.TrimPrefix(msg.FieldID, "name:")
+	if strings.HasPrefix(msg.FieldID, FieldPrefixName) {
+		deviceID := strings.TrimPrefix(msg.FieldID, FieldPrefixName)
 		if v, ok := msg.Value.(field.TextValue); ok {
 			err = bridge.SetDeviceName(deviceID, v.Text)
 		}
-	} else if strings.HasPrefix(msg.FieldID, "archetype:") {
-		deviceID := strings.TrimPrefix(msg.FieldID, "archetype:")
+	} else if strings.HasPrefix(msg.FieldID, FieldPrefixArchetype) {
+		deviceID := strings.TrimPrefix(msg.FieldID, FieldPrefixArchetype)
 		if v, ok := msg.Value.(field.SelectValue); ok {
 			archetypeKeys := getSortedProductArchetypes()
 			if v.Index >= 0 && v.Index < len(archetypeKeys) {
-				archetype := hueclient.ProductArchetype(archetypeKeys[v.Index])
+				archetype := hueclient.DeviceArchetype(archetypeKeys[v.Index])
 				err = bridge.SetDeviceArchetype(deviceID, archetype)
 			}
 		}
-	} else if strings.HasPrefix(msg.FieldID, "powerup-preset:") {
-		lightIDFromField := strings.TrimPrefix(msg.FieldID, "powerup-preset:")
+	} else if strings.HasPrefix(msg.FieldID, FieldPrefixPowerupPreset) {
+		lightIDFromField := strings.TrimPrefix(msg.FieldID, FieldPrefixPowerupPreset)
 		if v, ok := msg.Value.(field.SelectValue); ok {
 			presetKeys := getSortedPowerupPresets()
 			if v.Index >= 0 && v.Index < len(presetKeys) {
-				preset := hueclient.PowerupPreset(presetKeys[v.Index])
+				preset := hueclient.UpdateLightJSONBodyPowerupPreset(presetKeys[v.Index])
 				err = bridge.SetLightPowerupPreset(lightIDFromField, preset)
 			}
 		}
-	} else if strings.HasPrefix(msg.FieldID, "room-archetype:") {
-		roomID := strings.TrimPrefix(msg.FieldID, "room-archetype:")
+	} else if strings.HasPrefix(msg.FieldID, FieldPrefixRoomArchetype) {
+		roomID := strings.TrimPrefix(msg.FieldID, FieldPrefixRoomArchetype)
 		if v, ok := msg.Value.(field.SelectValue); ok {
 			archetypeKeys := hue.RoomArchetypeList()
 			if v.Index >= 0 && v.Index < len(archetypeKeys) {
@@ -1130,8 +1133,8 @@ func (m *Model) handleNewFieldChange(msg field.FieldChangedMsg) {
 				return
 			}
 		}
-	} else if strings.HasPrefix(msg.FieldID, "zone-archetype:") {
-		zoneID := strings.TrimPrefix(msg.FieldID, "zone-archetype:")
+	} else if strings.HasPrefix(msg.FieldID, FieldPrefixZoneArchetype) {
+		zoneID := strings.TrimPrefix(msg.FieldID, FieldPrefixZoneArchetype)
 		if v, ok := msg.Value.(field.SelectValue); ok {
 			archetypeKeys := hue.RoomArchetypeList()
 			if v.Index >= 0 && v.Index < len(archetypeKeys) {
@@ -1145,8 +1148,8 @@ func (m *Model) handleNewFieldChange(msg field.FieldChangedMsg) {
 				return
 			}
 		}
-	} else if strings.HasPrefix(msg.FieldID, "room-name:") {
-		roomID := strings.TrimPrefix(msg.FieldID, "room-name:")
+	} else if strings.HasPrefix(msg.FieldID, FieldPrefixRoomName) {
+		roomID := strings.TrimPrefix(msg.FieldID, FieldPrefixRoomName)
 		if v, ok := msg.Value.(field.TextValue); ok {
 			m.status = fmt.Sprintf("Renaming room to \"%s\"", v.Text)
 			err = bridge.RenameRoom(roomID, v.Text)
@@ -1156,8 +1159,8 @@ func (m *Model) handleNewFieldChange(msg field.FieldChangedMsg) {
 			}
 			return
 		}
-	} else if strings.HasPrefix(msg.FieldID, "zone-name:") {
-		zoneID := strings.TrimPrefix(msg.FieldID, "zone-name:")
+	} else if strings.HasPrefix(msg.FieldID, FieldPrefixZoneName) {
+		zoneID := strings.TrimPrefix(msg.FieldID, FieldPrefixZoneName)
 		if v, ok := msg.Value.(field.TextValue); ok {
 			m.status = fmt.Sprintf("Renaming zone to \"%s\"", v.Text)
 			err = bridge.RenameZone(zoneID, v.Text)
@@ -1187,11 +1190,9 @@ func (m *Model) handleNewFieldChange(msg field.FieldChangedMsg) {
 				} else if v.Index > 0 && v.Index <= len(allRooms) {
 					// Room selected (index 1 = first room in AllRooms)
 					room := allRooms[v.Index-1]
-					if room.Id != nil {
-						newRoomID = *room.Id
-					}
-					if room.Metadata != nil && room.Metadata.Name != nil {
-						newRoomName = *room.Metadata.Name
+					newRoomID = room.Id
+					if room.Metadata.Name != "" {
+						newRoomName = room.Metadata.Name
 					}
 				}
 
@@ -1219,18 +1220,18 @@ func (m *Model) handleNewFieldChange(msg field.FieldChangedMsg) {
 				// Build current zone membership set
 				currentZoneIDs := make(map[string]bool)
 				for _, zone := range currentZones {
-					if zone.Id != nil {
-						currentZoneIDs[*zone.Id] = true
+					if zone.Id != "" {
+						currentZoneIDs[zone.Id] = true
 					}
 				}
 
 				// Process changes
 				var added, removed int
 				for i, zone := range allZones {
-					if zone.Id == nil {
+					if zone.Id == "" {
 						continue
 					}
-					zoneID := *zone.Id
+					zoneID := zone.Id
 					wasInZone := currentZoneIDs[zoneID]
 					nowInZone := v.Selected[i]
 
@@ -1288,7 +1289,7 @@ func (m *Model) handleNewFieldChange(msg field.FieldChangedMsg) {
 			bridgeState := bridge.GetState()
 			if bridgeState != nil {
 				if zone, ok := bridgeState.GetZone(zoneID); ok {
-					zoneName := zone.RoomName("Zone")
+					zoneName := zone.ZoneName("Zone")
 					sceneName = fmt.Sprintf("%s Scene", zoneName)
 				}
 			}
@@ -1303,8 +1304,8 @@ func (m *Model) handleNewFieldChange(msg field.FieldChangedMsg) {
 			}
 			return
 		}
-	} else if strings.HasPrefix(msg.FieldID, "scene-name:") {
-		sceneID := strings.TrimPrefix(msg.FieldID, "scene-name:")
+	} else if strings.HasPrefix(msg.FieldID, FieldPrefixSceneName) {
+		sceneID := strings.TrimPrefix(msg.FieldID, FieldPrefixSceneName)
 		if v, ok := msg.Value.(field.TextValue); ok {
 			m.status = fmt.Sprintf("Renaming scene to \"%s\"", v.Text)
 			err = bridge.RenameScene(sceneID, v.Text)
@@ -1314,8 +1315,8 @@ func (m *Model) handleNewFieldChange(msg field.FieldChangedMsg) {
 			}
 			return
 		}
-	} else if strings.HasPrefix(msg.FieldID, "bridge-name:") {
-		deviceID := strings.TrimPrefix(msg.FieldID, "bridge-name:")
+	} else if strings.HasPrefix(msg.FieldID, FieldPrefixBridgeName) {
+		deviceID := strings.TrimPrefix(msg.FieldID, FieldPrefixBridgeName)
 		if v, ok := msg.Value.(field.TextValue); ok {
 			m.status = fmt.Sprintf("Renaming bridge to \"%s\"", v.Text)
 			err = bridge.RenameDevice(deviceID, v.Text)
@@ -1351,8 +1352,8 @@ func (m *Model) handleNewFieldChange(msg field.FieldChangedMsg) {
 			}
 			return
 		}
-	} else if strings.HasPrefix(msg.FieldID, "device-name:") {
-		deviceID := strings.TrimPrefix(msg.FieldID, "device-name:")
+	} else if strings.HasPrefix(msg.FieldID, FieldPrefixDeviceName) {
+		deviceID := strings.TrimPrefix(msg.FieldID, FieldPrefixDeviceName)
 		if v, ok := msg.Value.(field.TextValue); ok {
 			m.status = fmt.Sprintf("Renaming device to \"%s\"", v.Text)
 			err = bridge.RenameDevice(deviceID, v.Text)
@@ -1473,11 +1474,11 @@ func (m *Model) handleNewFieldChange(msg field.FieldChangedMsg) {
 			state := bridge.GetState()
 			if state != nil {
 				if light, ok := state.GetLight(gradientLightID); ok {
-					if light.Gradient != nil && light.Gradient.ModeValues != nil {
-						modes := *light.Gradient.ModeValues
+					if light.Gradient != nil && len(light.Gradient.ModeValues) > 0 {
+						modes := light.Gradient.ModeValues
 						if v.Index >= 0 && v.Index < len(modes) {
-							m.status = fmt.Sprintf("Gradient mode: %s", formatGradientMode(modes[v.Index]))
-							err = bridge.SetLightGradientMode(gradientLightID, modes[v.Index])
+							m.status = fmt.Sprintf("Gradient mode: %s", string(modes[v.Index]))
+							err = bridge.SetLightGradientMode(gradientLightID, hueclient.LightGetGradientMode(modes[v.Index]))
 						}
 					}
 				}
@@ -1515,10 +1516,10 @@ func (m *Model) handleNewFieldChange(msg field.FieldChangedMsg) {
 				// Get the effect from the light's effect values
 				if state := bridge.GetState(); state != nil {
 					if light, ok := state.GetLight(lightID); ok {
-						if light.Effects != nil && light.Effects.EffectValues != nil {
-							effects := *light.Effects.EffectValues
+						if light.Effects != nil && len(light.Effects.EffectValues) > 0 {
+							effects := light.Effects.EffectValues
 							if v.Index >= 0 && v.Index < len(effects) {
-								effect := effects[v.Index]
+								effect := hueclient.Effect(effects[v.Index])
 								err = bridge.SetLightEffect(lightID, effect)
 							}
 						}
@@ -1540,7 +1541,7 @@ func (m *Model) handleNewFieldChange(msg field.FieldChangedMsg) {
 
 // getDeviceForLight looks up the device that owns a light.
 func (m *Model) getDeviceForLight(light hueclient.LightGet) *hueclient.DeviceGet {
-	if light.Owner == nil || light.Owner.Rid == nil {
+	if light.Owner.Rid == "" {
 		return nil
 	}
 	node := m.tree.SelectedNode()
@@ -1555,7 +1556,7 @@ func (m *Model) getDeviceForLight(light hueclient.LightGet) *hueclient.DeviceGet
 	if state == nil {
 		return nil
 	}
-	if device, ok := state.GetDevice(*light.Owner.Rid); ok {
+	if device, ok := state.GetDevice(light.Owner.Rid); ok {
 		return &device
 	}
 	return nil
@@ -1569,8 +1570,8 @@ func (m *Model) renderLightIndicator(light hueclient.LightGet, isOn bool) string
 	}
 
 	brightness := 100.0
-	if light.Dimming != nil && light.Dimming.Brightness != nil {
-		brightness = float64(*light.Dimming.Brightness)
+	if light.Dimming != nil {
+		brightness = float64(light.Dimming.Brightness)
 	}
 
 	hexColor := ui.GetLightColor(light)
@@ -1582,7 +1583,7 @@ const infoLabelWidth = 14
 
 // buildProductInfoRows builds rows for the product info section.
 func (m *Model) buildProductInfoRows(device *hueclient.DeviceGet) []gridlayout.GridRow {
-	if device == nil || device.ProductData == nil {
+	if device == nil {
 		return nil
 	}
 
@@ -1596,17 +1597,17 @@ func (m *Model) buildProductInfoRows(device *hueclient.DeviceGet) []gridlayout.G
 		Section: header,
 	})
 
-	if pd.ProductName != nil {
-		rows = append(rows, gridlayout.NewInfoRow("Product", *pd.ProductName, infoLabelWidth))
+	if pd.ProductName != "" {
+		rows = append(rows, gridlayout.NewInfoRow("Product", pd.ProductName, infoLabelWidth))
 	}
-	if pd.ManufacturerName != nil {
-		rows = append(rows, gridlayout.NewInfoRow("Manufacturer", *pd.ManufacturerName, infoLabelWidth))
+	if pd.ManufacturerName != "" {
+		rows = append(rows, gridlayout.NewInfoRow("Manufacturer", pd.ManufacturerName, infoLabelWidth))
 	}
-	if pd.ModelId != nil {
-		rows = append(rows, gridlayout.NewInfoRow("Model", *pd.ModelId, infoLabelWidth))
+	if pd.ModelId != "" {
+		rows = append(rows, gridlayout.NewInfoRow("Model", pd.ModelId, infoLabelWidth))
 	}
-	if pd.SoftwareVersion != nil {
-		rows = append(rows, gridlayout.NewInfoRow("Firmware", *pd.SoftwareVersion, infoLabelWidth))
+	if pd.SoftwareVersion != "" {
+		rows = append(rows, gridlayout.NewInfoRow("Firmware", pd.SoftwareVersion, infoLabelWidth))
 	}
 	if pd.HardwarePlatformType != nil {
 		rows = append(rows, gridlayout.NewInfoRow("Hardware", *pd.HardwarePlatformType, infoLabelWidth))
@@ -1627,21 +1628,21 @@ func (m *Model) buildClassificationRows(light hueclient.LightGet, device *huecli
 	})
 
 	// Type (read-only)
-	if light.Type != nil {
-		rows = append(rows, gridlayout.NewInfoRow("Type", string(*light.Type), infoLabelWidth))
+	if light.Type != "" {
+		rows = append(rows, gridlayout.NewInfoRow("Type", string(light.Type), infoLabelWidth))
 	}
 
 	// Mode (read-only)
-	if light.Mode != nil {
-		rows = append(rows, gridlayout.NewInfoRow("Mode", string(*light.Mode), infoLabelWidth))
+	if light.Mode != "" {
+		rows = append(rows, gridlayout.NewInfoRow("Mode", string(light.Mode), infoLabelWidth))
 	}
 
 	// Alternate name (read-only) - shows light's own name if different from device name
-	if light.Metadata != nil && light.Metadata.Name != nil {
-		altName := *light.Metadata.Name
+	if light.Metadata.Name != "" {
+		altName := light.Metadata.Name
 		currentName := ""
-		if device != nil && device.Metadata != nil && device.Metadata.Name != nil {
-			currentName = *device.Metadata.Name
+		if device != nil && device.Metadata.Name != "" {
+			currentName = device.Metadata.Name
 		}
 		if altName != currentName {
 			rows = append(rows, gridlayout.NewInfoRow("Alternate name", altName, infoLabelWidth))
@@ -1665,13 +1666,13 @@ func (m *Model) buildLightSettingsRows(light hueclient.LightGet, device *hueclie
 
 	// Device name (editable)
 	deviceID := ""
-	if device != nil && device.Id != nil {
-		deviceID = *device.Id
+	if device != nil && device.Id != "" {
+		deviceID = device.Id
 	}
 
-	if device != nil && device.Metadata != nil && device.Metadata.Name != nil {
+	if device != nil && device.Metadata.Name != "" {
 		textInput := field.NewTextComponent(
-			"name:"+deviceID, "Name", *device.Metadata.Name,
+			FieldIDName(deviceID), "Name", device.Metadata.Name,
 			&m.styles, m.zones,
 		)
 		rows = append(rows, gridlayout.GridRow{
@@ -1684,16 +1685,13 @@ func (m *Model) buildLightSettingsRows(light hueclient.LightGet, device *hueclie
 	}
 
 	// Archetype (editable)
-	if device != nil && device.ProductData != nil && device.ProductData.ProductArchetype != nil {
-		deviceID := ""
-		if device.Id != nil {
-			deviceID = *device.Id
-		}
+	if device != nil && device.ProductData.ProductArchetype != "" {
+		deviceID := device.Id
 
 		archetypeKeys := getSortedProductArchetypes()
 		var options []field.Option
 		currentIndex := 0
-		currentArchetype := string(*device.ProductData.ProductArchetype)
+		currentArchetype := string(device.ProductData.ProductArchetype)
 
 		for i, key := range archetypeKeys {
 			displayName := hue.ProductArchetypeDisplayNames[key]
@@ -1704,7 +1702,7 @@ func (m *Model) buildLightSettingsRows(light hueclient.LightGet, device *hueclie
 		}
 
 		selectComp := field.NewSelectComponent(
-			"archetype:"+deviceID, "Archetype", currentIndex, options,
+			FieldIDArchetype(deviceID), "Archetype", currentIndex, options,
 			&m.styles, m.zones,
 		)
 		rows = append(rows, gridlayout.GridRow{
@@ -1717,11 +1715,11 @@ func (m *Model) buildLightSettingsRows(light hueclient.LightGet, device *hueclie
 	}
 
 	// Powerup preset (editable)
-	if light.Powerup != nil && light.Powerup.Preset != nil {
+	if light.Powerup != nil && light.Powerup.Preset != "" {
 		presetKeys := getSortedPowerupPresets()
 		var options []field.Option
 		currentIndex := 0
-		currentPreset := string(*light.Powerup.Preset)
+		currentPreset := string(light.Powerup.Preset)
 
 		for i, key := range presetKeys {
 			displayName := hue.PowerupPresetDisplayNames[key]
@@ -1731,13 +1729,10 @@ func (m *Model) buildLightSettingsRows(light hueclient.LightGet, device *hueclie
 			}
 		}
 
-		lightID := ""
-		if light.Id != nil {
-			lightID = *light.Id
-		}
+		lightID := light.Id
 
 		selectComp := field.NewSelectComponent(
-			"powerup-preset:"+lightID, "Power-on", currentIndex, options,
+			FieldIDPowerupPreset(lightID), "Power-on", currentIndex, options,
 			&m.styles, m.zones,
 		)
 		rows = append(rows, gridlayout.GridRow{
@@ -1760,8 +1755,8 @@ func (m *Model) buildLightSettingsRows(light hueclient.LightGet, device *hueclie
 				if state != nil {
 					currentRoom, hasRoom := state.GetDeviceRoom(deviceID)
 					currentRoomID := ""
-					if hasRoom && currentRoom.Id != nil {
-						currentRoomID = *currentRoom.Id
+					if hasRoom && currentRoom.Id != "" {
+						currentRoomID = currentRoom.Id
 					}
 
 					// Build room options: "No Room" + all rooms
@@ -1773,11 +1768,11 @@ func (m *Model) buildLightSettingsRows(light hueclient.LightGet, device *hueclie
 					for i, room := range allRooms {
 						roomName := "Unknown"
 						roomID := ""
-						if room.Metadata != nil && room.Metadata.Name != nil {
-							roomName = *room.Metadata.Name
+						if room.Metadata.Name != "" {
+							roomName = room.Metadata.Name
 						}
-						if room.Id != nil {
-							roomID = *room.Id
+						if room.Id != "" {
+							roomID = room.Id
 						}
 						options = append(options, field.Option{Label: roomName, Value: i + 1, Color: m.styles.Theme.EntityRoom})
 						if roomID == currentRoomID {
@@ -1802,22 +1797,22 @@ func (m *Model) buildLightSettingsRows(light hueclient.LightGet, device *hueclie
 	}
 
 	// Zone membership (checkboxes)
-	if light.Id != nil {
+	if light.Id != "" {
 		zoneNode := m.tree.SelectedNode()
 		if zoneNode != nil && zoneNode.Item != nil {
 			zoneBridge := m.manager.GetBridge(zoneNode.Item.BridgeID)
 			if zoneBridge != nil {
 				zoneState := zoneBridge.GetState()
 				if zoneState != nil {
-					lightID := *light.Id
+					lightID := light.Id
 					allZones := zoneState.AllZones()
 					if len(allZones) > 0 {
 						// Build a set of zone IDs this light is in
 						lightZones := zoneState.GetLightZones(lightID)
 						lightZoneIDs := make(map[string]bool)
 						for _, zone := range lightZones {
-							if zone.Id != nil {
-								lightZoneIDs[*zone.Id] = true
+							if zone.Id != "" {
+								lightZoneIDs[zone.Id] = true
 							}
 						}
 
@@ -1827,11 +1822,11 @@ func (m *Model) buildLightSettingsRows(light hueclient.LightGet, device *hueclie
 						for i, z := range allZones {
 							zoneID := ""
 							zoneName := "Unknown"
-							if z.Id != nil {
-								zoneID = *z.Id
+							if z.Id != "" {
+								zoneID = z.Id
 							}
-							if z.Metadata != nil && z.Metadata.Name != nil {
-								zoneName = *z.Metadata.Name
+							if z.Metadata.Name != "" {
+								zoneName = z.Metadata.Name
 							}
 							options = append(options, field.Option{Label: zoneName, Value: i, Color: m.styles.Theme.EntityZone})
 							if lightZoneIDs[zoneID] {
@@ -1873,11 +1868,11 @@ func (m *Model) buildIDsRows(light hueclient.LightGet) []gridlayout.GridRow {
 
 	dimStyle := m.styles.Dimmed
 
-	if light.Id != nil {
-		rows = append(rows, gridlayout.NewStyledInfoRow("Light ID", *light.Id, infoLabelWidth, dimStyle))
+	if light.Id != "" {
+		rows = append(rows, gridlayout.NewStyledInfoRow("Light ID", light.Id, infoLabelWidth, dimStyle))
 	}
-	if light.Owner != nil && light.Owner.Rid != nil {
-		rows = append(rows, gridlayout.NewStyledInfoRow("Device ID", *light.Owner.Rid, infoLabelWidth, dimStyle))
+	if light.Owner.Rid != "" {
+		rows = append(rows, gridlayout.NewStyledInfoRow("Device ID", light.Owner.Rid, infoLabelWidth, dimStyle))
 	}
 	if light.IdV1 != nil {
 		rows = append(rows, gridlayout.NewStyledInfoRow("V1 ID", *light.IdV1, infoLabelWidth, dimStyle))
@@ -1898,10 +1893,7 @@ func (m *Model) buildControlsRows(light hueclient.LightGet) []gridlayout.GridRow
 	})
 
 	// On/Off toggle
-	onValue := false
-	if light.On != nil && light.On.On != nil && *light.On.On {
-		onValue = true
-	}
+	onValue := light.On.On
 	toggle := field.NewToggleComponent("on", "Power", onValue, &m.styles, m.zones)
 	toggle.SetLabels("On", "Off")
 	rows = append(rows, gridlayout.GridRow{
@@ -1913,8 +1905,8 @@ func (m *Model) buildControlsRows(light hueclient.LightGet) []gridlayout.GridRow
 	})
 
 	// Brightness (if dimmable)
-	if light.Dimming != nil && light.Dimming.Brightness != nil {
-		brightness := int(*light.Dimming.Brightness)
+	if light.Dimming != nil {
+		brightness := int(light.Dimming.Brightness)
 		slider := field.NewBrightnessSliderComponent(
 			"brightness", "Brightness", brightness,
 			&m.styles, m.zones,
@@ -1929,18 +1921,18 @@ func (m *Model) buildControlsRows(light hueclient.LightGet) []gridlayout.GridRow
 	}
 
 	// Color temperature (if supported)
-	if light.ColorTemperature != nil && light.ColorTemperature.MirekSchema != nil {
-		mirek := 250
-		if light.ColorTemperature.Mirek != nil {
-			mirek = *light.ColorTemperature.Mirek
+	if light.ColorTemperature != nil {
+		mirek := light.ColorTemperature.Mirek
+		if mirek == 0 {
+			mirek = 250 // default if not set
 		}
-		minMirek := 153
-		maxMirek := 500
-		if light.ColorTemperature.MirekSchema.MirekMinimum != nil {
-			minMirek = *light.ColorTemperature.MirekSchema.MirekMinimum
+		minMirek := light.ColorTemperature.MirekSchema.MirekMinimum
+		maxMirek := light.ColorTemperature.MirekSchema.MirekMaximum
+		if minMirek == 0 {
+			minMirek = 153
 		}
-		if light.ColorTemperature.MirekSchema.MirekMaximum != nil {
-			maxMirek = *light.ColorTemperature.MirekSchema.MirekMaximum
+		if maxMirek == 0 {
+			maxMirek = 500
 		}
 		slider := field.NewColorTempSliderComponent(
 			"colortemp", "Color Temp", mirek, minMirek, maxMirek,
@@ -1956,13 +1948,11 @@ func (m *Model) buildControlsRows(light hueclient.LightGet) []gridlayout.GridRow
 	}
 
 	// Color (if supported)
-	if light.Color != nil && light.Color.Xy != nil {
-		x, y := 0.3127, 0.329
-		if light.Color.Xy.X != nil {
-			x = float64(*light.Color.Xy.X)
-		}
-		if light.Color.Xy.Y != nil {
-			y = float64(*light.Color.Xy.Y)
+	if light.Color != nil {
+		x := float64(light.Color.Xy.X)
+		y := float64(light.Color.Xy.Y)
+		if x == 0 && y == 0 {
+			x, y = 0.3127, 0.329 // default white point
 		}
 		colorWheel := field.NewColorWheelComponent(
 			"color", "Color", x, y,
@@ -1978,20 +1968,18 @@ func (m *Model) buildControlsRows(light hueclient.LightGet) []gridlayout.GridRow
 	}
 
 	// Effect (if supported)
-	if light.Effects != nil && light.Effects.EffectValues != nil {
+	if light.Effects != nil && len(light.Effects.EffectValues) > 0 {
 		var options []field.Option
 		currentEffect := -1
-		if light.Effects.Status != nil {
-			for i, effect := range *light.Effects.EffectValues {
-				effectStr := string(effect)
-				displayName := hue.EffectDisplayName(effectStr)
-				options = append(options, field.Option{
-					Label: displayName,
-					Value: i,
-				})
-				if effect == *light.Effects.Status {
-					currentEffect = i
-				}
+		for i, effect := range light.Effects.EffectValues {
+			effectStr := string(effect)
+			displayName := hue.EffectDisplayName(effectStr)
+			options = append(options, field.Option{
+				Label: displayName,
+				Value: i,
+			})
+			if hueclient.SupportedSounds(light.Effects.Status) == effect {
+				currentEffect = i
 			}
 		}
 		if len(options) > 0 {
@@ -2013,9 +2001,9 @@ func (m *Model) buildControlsRows(light hueclient.LightGet) []gridlayout.GridRow
 	}
 
 	// Identify button (uses device ID from light owner)
-	if light.Owner != nil && light.Owner.Rid != nil {
+	if light.Owner.Rid != "" {
 		identifyBtn := field.NewButtonComponent(
-			"identify:"+*light.Owner.Rid, "Identify", "Identify",
+			"identify:"+light.Owner.Rid, "Identify", "Identify",
 			&m.styles, m.zones,
 		)
 		rows = append(rows, gridlayout.GridRow{
@@ -2044,14 +2032,14 @@ func (m *Model) buildStateRows(light hueclient.LightGet) []gridlayout.GridRow {
 	}
 
 	// Gamut type (not shown in color wheel)
-	if light.Color != nil && light.Color.GamutType != nil {
+	if light.Color != nil && light.Color.GamutType != "" {
 		hasContent = true
 	}
 
 	// CT range (not shown in color temp slider)
-	if light.ColorTemperature != nil && light.ColorTemperature.MirekSchema != nil {
+	if light.ColorTemperature != nil {
 		schema := light.ColorTemperature.MirekSchema
-		if schema.MirekMinimum != nil && schema.MirekMaximum != nil {
+		if schema.MirekMinimum != 0 && schema.MirekMaximum != 0 {
 			hasContent = true
 		}
 	}
@@ -2074,16 +2062,16 @@ func (m *Model) buildStateRows(light hueclient.LightGet) []gridlayout.GridRow {
 	}
 
 	// Gamut type
-	if light.Color != nil && light.Color.GamutType != nil {
-		rows = append(rows, gridlayout.NewInfoRow("Gamut", string(*light.Color.GamutType), infoLabelWidth))
+	if light.Color != nil && light.Color.GamutType != "" {
+		rows = append(rows, gridlayout.NewInfoRow("Gamut", string(light.Color.GamutType), infoLabelWidth))
 	}
 
 	// CT range
-	if light.ColorTemperature != nil && light.ColorTemperature.MirekSchema != nil {
+	if light.ColorTemperature != nil {
 		schema := light.ColorTemperature.MirekSchema
-		if schema.MirekMinimum != nil && schema.MirekMaximum != nil {
-			minK := 1000000 / int(*schema.MirekMaximum)
-			maxK := 1000000 / int(*schema.MirekMinimum)
+		if schema.MirekMinimum != 0 && schema.MirekMaximum != 0 {
+			minK := 1000000 / schema.MirekMaximum
+			maxK := 1000000 / schema.MirekMinimum
 			rows = append(rows, gridlayout.NewInfoRow("CT Range", fmt.Sprintf("%dK - %dK", minK, maxK), infoLabelWidth))
 		}
 	}
@@ -2106,11 +2094,11 @@ func (m *Model) buildDynamicsRows(light hueclient.LightGet) []gridlayout.GridRow
 		Section: header,
 	})
 
-	if light.Dynamics.Status != nil {
-		rows = append(rows, gridlayout.NewInfoRow("Status", string(*light.Dynamics.Status), infoLabelWidth))
+	if light.Dynamics.Status != "" {
+		rows = append(rows, gridlayout.NewInfoRow("Status", string(light.Dynamics.Status), infoLabelWidth))
 	}
-	if light.Dynamics.Speed != nil {
-		rows = append(rows, gridlayout.NewInfoRow("Speed", fmt.Sprintf("%.2f", *light.Dynamics.Speed), infoLabelWidth))
+	if light.Dynamics.SpeedValid {
+		rows = append(rows, gridlayout.NewInfoRow("Speed", fmt.Sprintf("%.2f", light.Dynamics.Speed), infoLabelWidth))
 	}
 
 	return rows
@@ -2161,7 +2149,7 @@ func (m *Model) buildCapabilitiesRows(light hueclient.LightGet) []gridlayout.Gri
 
 // buildEffectsListRows builds rows for the available effects section.
 func (m *Model) buildEffectsListRows(light hueclient.LightGet) []gridlayout.GridRow {
-	if light.Effects == nil || light.Effects.EffectValues == nil || len(*light.Effects.EffectValues) == 0 {
+	if light.Effects == nil || len(light.Effects.EffectValues) == 0 {
 		return nil
 	}
 
@@ -2174,7 +2162,7 @@ func (m *Model) buildEffectsListRows(light hueclient.LightGet) []gridlayout.Grid
 		Section: header,
 	})
 
-	for _, effect := range *light.Effects.EffectValues {
+	for _, effect := range light.Effects.EffectValues {
 		displayName := hue.EffectDisplayName(string(effect))
 		rows = append(rows, gridlayout.NewListItemRow("•", displayName))
 	}
@@ -2198,12 +2186,12 @@ func (m *Model) buildGradientRows(light hueclient.LightGet, lightID string) []gr
 	})
 
 	// Mode selector (if ModeValues available)
-	if light.Gradient.ModeValues != nil && len(*light.Gradient.ModeValues) > 0 {
-		options := make([]field.Option, len(*light.Gradient.ModeValues))
+	if len(light.Gradient.ModeValues) > 0 {
+		options := make([]field.Option, len(light.Gradient.ModeValues))
 		currentIndex := 0
-		for i, mode := range *light.Gradient.ModeValues {
-			options[i] = field.Option{Label: formatGradientMode(mode), Value: i}
-			if light.Gradient.Mode != nil && *light.Gradient.Mode == mode {
+		for i, mode := range light.Gradient.ModeValues {
+			options[i] = field.Option{Label: formatGradientMode(hueclient.LightGetGradientMode(mode)), Value: i}
+			if hueclient.SupportedSounds(light.Gradient.Mode) == mode {
 				currentIndex = i
 			}
 		}
@@ -2218,9 +2206,9 @@ func (m *Model) buildGradientRows(light hueclient.LightGet, lightID string) []gr
 				{Component: modeSelect},
 			},
 		})
-	} else if light.Gradient.Mode != nil {
+	} else if light.Gradient.Mode != "" {
 		// Read-only mode display if no mode values available
-		rows = append(rows, gridlayout.NewInfoRow("Mode", formatGradientMode(*light.Gradient.Mode), infoLabelWidth))
+		rows = append(rows, gridlayout.NewInfoRow("Mode", formatGradientMode(light.Gradient.Mode), infoLabelWidth))
 	}
 
 	// Pixel count info
@@ -2229,18 +2217,18 @@ func (m *Model) buildGradientRows(light hueclient.LightGet, lightID string) []gr
 	}
 
 	// Max points capability info
-	if light.Gradient.PointsCapable != nil {
-		rows = append(rows, gridlayout.NewInfoRow("Max Points", fmt.Sprintf("%d", *light.Gradient.PointsCapable), infoLabelWidth))
+	if light.Gradient.PointsCapable > 0 {
+		rows = append(rows, gridlayout.NewInfoRow("Max Points", fmt.Sprintf("%d", light.Gradient.PointsCapable), infoLabelWidth))
 	}
 
 	// Gradient editor
-	if light.Gradient.Points != nil && len(*light.Gradient.Points) > 0 {
-		maxPoints := 5 // default
-		if light.Gradient.PointsCapable != nil {
-			maxPoints = *light.Gradient.PointsCapable
+	if len(light.Gradient.Points) > 0 {
+		maxPoints := light.Gradient.PointsCapable
+		if maxPoints == 0 {
+			maxPoints = 5 // default
 		}
 
-		points := convertGradientPoints(*light.Gradient.Points)
+		points := convertGradientPoints(light.Gradient.Points)
 		editor := field.NewGradientEditorComponent(
 			"gradient-points:"+lightID, "Colors", points, maxPoints,
 			&m.styles, m.zones,
@@ -2258,40 +2246,37 @@ func (m *Model) buildGradientRows(light hueclient.LightGet, lightID string) []gr
 }
 
 // formatGradientMode converts a gradient mode to a display-friendly string.
-func formatGradientMode(mode hueclient.SupportedGradientMode) string {
+func formatGradientMode(mode hueclient.LightGetGradientMode) string {
 	switch mode {
-	case hueclient.InterpolatedPalette:
+	case hueclient.LightGetGradientModeInterpolatedPalette:
 		return "Interpolated"
-	case hueclient.InterpolatedPaletteMirrored:
+	case hueclient.LightGetGradientModeInterpolatedPaletteMirrored:
 		return "Mirrored"
-	case hueclient.RandomPixelated:
+	case hueclient.LightGetGradientModeRandomPixelated:
 		return "Pixelated"
 	default:
 		return string(mode)
 	}
 }
 
-// convertGradientPoints converts hueclient colors to field gradient points.
-func convertGradientPoints(colors []hueclient.Color) []field.GradientPoint {
-	points := make([]field.GradientPoint, 0, len(colors))
-	for _, c := range colors {
-		if c.Xy != nil && c.Xy.X != nil && c.Xy.Y != nil {
-			points = append(points, field.GradientPoint{
-				X: float64(*c.Xy.X),
-				Y: float64(*c.Xy.Y),
-			})
-		}
+// convertGradientPoints converts hueclient gradient points to field gradient points.
+func convertGradientPoints(gradientPoints []hueclient.GradientPointGet) []field.GradientPoint {
+	points := make([]field.GradientPoint, 0, len(gradientPoints))
+	for _, gp := range gradientPoints {
+		points = append(points, field.GradientPoint{
+			X: float64(gp.Color.Xy.X),
+			Y: float64(gp.Color.Xy.Y),
+		})
 	}
 	return points
 }
 
 // convertToAPIPoints converts field gradient points to hueclient colors.
-func convertToAPIPoints(points []field.GradientPoint) []hueclient.Color {
-	colors := make([]hueclient.Color, len(points))
+func convertToAPIPoints(points []field.GradientPoint) []hueclient.ActionGetActionColor {
+	colors := make([]hueclient.ActionGetActionColor, len(points))
 	for i, pt := range points {
-		x, y := float32(pt.X), float32(pt.Y)
-		colors[i] = hueclient.Color{
-			Xy: &hueclient.GamutPosition{X: &x, Y: &y},
+		colors[i] = hueclient.ActionGetActionColor{
+			Xy: hueclient.XY{X: float32(pt.X), Y: float32(pt.Y)},
 		}
 	}
 	return colors
@@ -2299,7 +2284,7 @@ func convertToAPIPoints(points []field.GradientPoint) []hueclient.Color {
 
 // buildSignalingRows builds rows for the signaling section.
 func (m *Model) buildSignalingRows(light hueclient.LightGet) []gridlayout.GridRow {
-	if light.Signaling == nil || light.Signaling.SignalValues == nil || len(*light.Signaling.SignalValues) == 0 {
+	if light.Signaling == nil || len(light.Signaling.SignalValues) == 0 {
 		return nil
 	}
 
@@ -2312,7 +2297,7 @@ func (m *Model) buildSignalingRows(light hueclient.LightGet) []gridlayout.GridRo
 		Section: header,
 	})
 
-	for _, sig := range *light.Signaling.SignalValues {
+	for _, sig := range light.Signaling.SignalValues {
 		displayName := hue.SignalingModeDisplayName(string(sig))
 		rows = append(rows, gridlayout.NewListItemRow("•", displayName))
 	}
@@ -2336,11 +2321,11 @@ func (m *Model) buildPowerupRows(light hueclient.LightGet) []gridlayout.GridRow 
 	})
 
 	// Powerup preset (editable)
-	if light.Powerup.Preset != nil {
+	if light.Powerup.Preset != "" {
 		presetKeys := getSortedPowerupPresets()
 		var options []field.Option
 		currentIndex := 0
-		currentPreset := string(*light.Powerup.Preset)
+		currentPreset := string(light.Powerup.Preset)
 
 		for i, key := range presetKeys {
 			displayName := hue.PowerupPresetDisplayNames[key]
@@ -2350,13 +2335,10 @@ func (m *Model) buildPowerupRows(light hueclient.LightGet) []gridlayout.GridRow 
 			}
 		}
 
-		lightID := ""
-		if light.Id != nil {
-			lightID = *light.Id
-		}
+		lightID := light.Id
 
 		selectComp := field.NewSelectComponent(
-			"powerup-preset:"+lightID, "Preset", currentIndex, options,
+			FieldIDPowerupPreset(lightID), "Preset", currentIndex, options,
 			&m.styles, m.zones,
 		)
 		rows = append(rows, gridlayout.GridRow{
@@ -2373,7 +2355,7 @@ func (m *Model) buildPowerupRows(light hueclient.LightGet) []gridlayout.GridRow 
 
 // buildDeviceServicesRows builds rows for the device services section.
 func (m *Model) buildDeviceServicesRows(light hueclient.LightGet, device *hueclient.DeviceGet) []gridlayout.GridRow {
-	if device == nil || device.Services == nil || len(*device.Services) == 0 {
+	if device == nil || len(device.Services) == 0 {
 		return nil
 	}
 
@@ -2386,13 +2368,10 @@ func (m *Model) buildDeviceServicesRows(light hueclient.LightGet, device *huecli
 		Section: header,
 	})
 
-	for _, svc := range *device.Services {
-		rtype := "unknown"
-		if svc.Rtype != nil {
-			rtype = string(*svc.Rtype)
-		}
+	for _, svc := range device.Services {
+		rtype := string(svc.Rtype)
 		displayName := hue.DeviceServiceDisplayName(rtype)
-		if svc.Rid != nil && light.Id != nil && *svc.Rid == *light.Id {
+		if svc.Rid == light.Id {
 			displayName = displayName + " " + m.styles.Dimmed.Render("(this)")
 		}
 		rows = append(rows, gridlayout.NewListItemRow("•", displayName))
@@ -2410,14 +2389,19 @@ func (m *Model) buildRoomGridRows(room hueclient.RoomGet, isZone bool, state *hu
 		return rows
 	}
 
-	roomID := ""
-	if room.Id != nil {
-		roomID = *room.Id
-	}
+	roomID := room.Id
 
 	var lights []hueclient.LightGet
 	if isZone {
-		lights = state.ZoneLights(room)
+		// For zones, we need to convert back to ZoneGet to get the lights
+		zone := hueclient.ZoneGet{
+			Children: room.Children,
+			Id:       room.Id,
+			IdV1:     room.IdV1,
+			Metadata: room.Metadata,
+			Services: room.Services,
+		}
+		lights = state.ZoneLights(zone)
 	} else {
 		lights = state.RoomLights(room)
 	}
@@ -2436,13 +2420,10 @@ func (m *Model) buildRoomGridRows(room hueclient.RoomGet, isZone bool, state *hu
 			fieldPrefix = "zone-"
 		}
 
-		glID := ""
-		if gl.Id != nil {
-			glID = *gl.Id
-		}
+		glID := gl.Id
 
 		// Power toggle
-		onValue := gl.On != nil && gl.On.On != nil && *gl.On.On
+		onValue := gl.On != nil && gl.On.On
 		toggle := field.NewToggleComponent(fieldPrefix+"power:"+glID, "Power", onValue, &m.styles, m.zones)
 		toggle.SetLabels("On", "Off")
 		rows = append(rows, gridlayout.GridRow{
@@ -2454,8 +2435,8 @@ func (m *Model) buildRoomGridRows(room hueclient.RoomGet, isZone bool, state *hu
 		})
 
 		// Brightness slider
-		if gl.Dimming != nil && gl.Dimming.Brightness != nil {
-			brightness := int(*gl.Dimming.Brightness)
+		if gl.Dimming != nil {
+			brightness := int(gl.Dimming.Brightness)
 			slider := field.NewBrightnessSliderComponent(
 				fieldPrefix+"brightness:"+glID, "Brightness", brightness,
 				&m.styles, m.zones,
@@ -2490,15 +2471,17 @@ func (m *Model) buildRoomGridRows(room hueclient.RoomGet, isZone bool, state *hu
 		Section: settingsHeader,
 	})
 
-	if room.Metadata != nil && room.Metadata.Name != nil {
-		// Use different field ID prefix for rooms vs zones
-		namePrefix := "room-name:"
+	if room.Metadata.Name != "" {
+		// Use different field ID for rooms vs zones
+		var nameFieldID string
 		if isZone {
-			namePrefix = "zone-name:"
+			nameFieldID = FieldIDZoneName(roomID)
+		} else {
+			nameFieldID = FieldIDRoomName(roomID)
 		}
 
 		textInput := field.NewTextComponent(
-			namePrefix+roomID, "Name", *room.Metadata.Name,
+			nameFieldID, "Name", room.Metadata.Name,
 			&m.styles, m.zones,
 		)
 		rows = append(rows, gridlayout.GridRow{
@@ -2511,11 +2494,11 @@ func (m *Model) buildRoomGridRows(room hueclient.RoomGet, isZone bool, state *hu
 	}
 
 	// Archetype (editable)
-	if room.Metadata != nil && room.Metadata.Archetype != nil {
+	if room.Metadata.Archetype != "" {
 		archetypeKeys := hue.RoomArchetypeList()
 		var options []field.Option
 		currentIndex := 0
-		currentArchetype := string(*room.Metadata.Archetype)
+		currentArchetype := string(room.Metadata.Archetype)
 
 		for i, key := range archetypeKeys {
 			displayName := hue.RoomArchetypeDisplayNames[key]
@@ -2560,14 +2543,14 @@ func (m *Model) buildRoomGridRows(room hueclient.RoomGet, isZone bool, state *hu
 	rows = append(rows, gridlayout.NewInfoRow("Lights", fmt.Sprintf("%d/%d on", onCount, len(lights)), infoLabelWidth))
 
 	// Motion sensor status - check devices in the room for motion sensors
-	if room.Children != nil {
+	if len(room.Children) > 0 {
 		var motionSensors int
 		var motionDetected bool
-		for _, child := range *room.Children {
-			if child.Rid == nil || child.Rtype == nil || *child.Rtype != hueclient.ResourceIdentifierRtypeDevice {
+		for _, child := range room.Children {
+			if child.Rid == "" || child.Rtype != hueclient.ResourceTypeDevice {
 				continue
 			}
-			device, ok := state.GetDevice(*child.Rid)
+			device, ok := state.GetDevice(child.Rid)
 			if !ok {
 				continue
 			}
@@ -2612,11 +2595,11 @@ func (m *Model) buildRoomGridRows(room hueclient.RoomGet, isZone bool, state *hu
 
 			var detailParts []string
 			if isOn {
-				if light.Dimming != nil && light.Dimming.Brightness != nil {
-					detailParts = append(detailParts, fmt.Sprintf("%.0f%%", *light.Dimming.Brightness))
+				if light.Dimming != nil {
+					detailParts = append(detailParts, fmt.Sprintf("%.0f%%", light.Dimming.Brightness))
 				}
-				if light.ColorTemperature != nil && light.ColorTemperature.Mirek != nil {
-					mirek := *light.ColorTemperature.Mirek
+				if light.ColorTemperature != nil && light.ColorTemperature.Mirek != 0 {
+					mirek := light.ColorTemperature.Mirek
 					kelvin := 1000000 / mirek
 					detailParts = append(detailParts, fmt.Sprintf("%dK", kelvin))
 				}
@@ -2633,23 +2616,21 @@ func (m *Model) buildRoomGridRows(room hueclient.RoomGet, isZone bool, state *hu
 	}
 
 	// Non-light devices
-	if room.Children != nil && len(*room.Children) > 0 {
+	if len(room.Children) > 0 {
 		var nonLightDevices []hueclient.DeviceGet
-		for _, child := range *room.Children {
-			if child.Rid == nil || child.Rtype == nil || *child.Rtype != hueclient.ResourceIdentifierRtypeDevice {
+		for _, child := range room.Children {
+			if child.Rid == "" || child.Rtype != hueclient.ResourceTypeDevice {
 				continue
 			}
-			device, ok := state.GetDevice(*child.Rid)
+			device, ok := state.GetDevice(child.Rid)
 			if !ok {
 				continue
 			}
 			isLight := false
-			if device.Services != nil {
-				for _, svc := range *device.Services {
-					if svc.Rtype != nil && *svc.Rtype == hueclient.ResourceIdentifierRtypeLight {
-						isLight = true
-						break
-					}
+			for _, svc := range device.Services {
+				if svc.Rtype == hueclient.ResourceTypeLight {
+					isLight = true
+					break
 				}
 			}
 			if isLight {
@@ -2710,8 +2691,8 @@ func (m *Model) buildRoomGridRows(room hueclient.RoomGet, isZone bool, state *hu
 	})
 
 	dimStyle := m.styles.Dimmed
-	if room.Id != nil {
-		rows = append(rows, gridlayout.NewStyledInfoRow("ID", *room.Id, infoLabelWidth, dimStyle))
+	if room.Id != "" {
+		rows = append(rows, gridlayout.NewStyledInfoRow("ID", room.Id, infoLabelWidth, dimStyle))
 	}
 	if room.IdV1 != nil && *room.IdV1 != "" {
 		rows = append(rows, gridlayout.NewStyledInfoRow("V1 ID", *room.IdV1, infoLabelWidth, dimStyle))
@@ -2730,10 +2711,7 @@ func (m *Model) buildRoomGridRows(room hueclient.RoomGet, isZone bool, state *hu
 func (m *Model) buildSceneGridRows(scene hueclient.SceneGet, state *hue.BridgeState) []gridlayout.GridRow {
 	var rows []gridlayout.GridRow
 
-	sceneID := ""
-	if scene.Id != nil {
-		sceneID = *scene.Id
-	}
+	sceneID := scene.Id
 
 	// 1. Controls section - instant action (recall/activate scene)
 	controlsHeader := field.NewHeaderComponent("controls-header", "Controls", &m.styles, m.zones)
@@ -2763,9 +2741,9 @@ func (m *Model) buildSceneGridRows(scene hueclient.SceneGet, state *hue.BridgeSt
 		Section: settingsHeader,
 	})
 
-	if scene.Metadata != nil && scene.Metadata.Name != nil {
+	if scene.Metadata.Name != "" {
 		textInput := field.NewTextComponent(
-			"scene-name:"+sceneID, "Name", *scene.Metadata.Name,
+			FieldIDSceneName(sceneID), "Name", scene.Metadata.Name,
 			&m.styles, m.zones,
 		)
 		rows = append(rows, gridlayout.GridRow{
@@ -2784,7 +2762,7 @@ func (m *Model) buildSceneGridRows(scene hueclient.SceneGet, state *hue.BridgeSt
 		Section: infoHeader,
 	})
 
-	if scene.Status != nil && scene.Status.Active != nil {
+	if scene.Status.Active != nil {
 		status := string(*scene.Status.Active)
 		statusStyle := m.styles.Dimmed
 		if status == "active" {
@@ -2794,18 +2772,15 @@ func (m *Model) buildSceneGridRows(scene hueclient.SceneGet, state *hue.BridgeSt
 	}
 
 	// Group (room/zone)
-	if scene.Group != nil && scene.Group.Rid != nil && state != nil {
+	if scene.Group.Rid != "" && state != nil {
 		groupName := ""
-		groupType := "unknown"
+		groupType := string(scene.Group.Rtype)
 		var groupStyle lipgloss.Style
-		if scene.Group.Rtype != nil {
-			groupType = string(*scene.Group.Rtype)
-		}
-		if room, ok := state.GetRoom(*scene.Group.Rid); ok {
+		if room, ok := state.GetRoom(scene.Group.Rid); ok {
 			groupName = state.GetRoomName(room)
 			groupStyle = lipgloss.NewStyle().Foreground(m.styles.Theme.EntityRoom)
-		} else if zone, ok := state.GetZone(*scene.Group.Rid); ok {
-			groupName = zone.RoomName("")
+		} else if zone, ok := state.GetZone(scene.Group.Rid); ok {
+			groupName = zone.ZoneName("")
 			groupStyle = lipgloss.NewStyle().Foreground(m.styles.Theme.EntityZone)
 		}
 		if groupName != "" {
@@ -2815,16 +2790,14 @@ func (m *Model) buildSceneGridRows(scene hueclient.SceneGet, state *hue.BridgeSt
 	}
 
 	// Speed and auto dynamic
-	if scene.Speed != nil {
-		rows = append(rows, gridlayout.NewInfoRow("Speed", fmt.Sprintf("%.2f", *scene.Speed), infoLabelWidth))
+	if scene.Speed > 0 {
+		rows = append(rows, gridlayout.NewInfoRow("Speed", fmt.Sprintf("%.2f", scene.Speed), infoLabelWidth))
 	}
-	if scene.AutoDynamic != nil {
-		rows = append(rows, gridlayout.NewInfoRow("Auto Dynamic", fmt.Sprintf("%v", *scene.AutoDynamic), infoLabelWidth))
-	}
+	rows = append(rows, gridlayout.NewInfoRow("Auto Dynamic", fmt.Sprintf("%v", scene.AutoDynamic), infoLabelWidth))
 
 	// Actions
-	if scene.Actions != nil && len(*scene.Actions) > 0 {
-		actionsHeaderText := fmt.Sprintf("Actions %s%d%s", m.styles.Dimmed.Render("["), len(*scene.Actions), m.styles.Dimmed.Render("]"))
+	if len(scene.Actions) > 0 {
+		actionsHeaderText := fmt.Sprintf("Actions %s%d%s", m.styles.Dimmed.Render("["), len(scene.Actions), m.styles.Dimmed.Render("]"))
 		actionsHeader := field.NewHeaderComponent("actions-header", actionsHeaderText, &m.styles, m.zones)
 		rows = append(rows, gridlayout.GridRow{
 			Type:    gridlayout.RowTypeSection,
@@ -2832,37 +2805,33 @@ func (m *Model) buildSceneGridRows(scene hueclient.SceneGet, state *hue.BridgeSt
 		})
 
 		actionLightStyle := lipgloss.NewStyle().Foreground(m.styles.Theme.EntityLight)
-		for _, action := range *scene.Actions {
+		for _, action := range scene.Actions {
 			targetName := "unknown"
-			if action.Target != nil && action.Target.Rid != nil {
-				targetName = *action.Target.Rid
+			if action.Target.Rid != "" {
+				targetName = action.Target.Rid
 				if state != nil {
-					if light, ok := state.GetLight(*action.Target.Rid); ok {
+					if light, ok := state.GetLight(action.Target.Rid); ok {
 						targetName = state.GetLightName(light)
 					}
 				}
 			}
 
 			actionDesc := ""
-			if action.Action != nil {
-				var parts []string
-				if action.Action.On != nil && action.Action.On.On != nil {
-					if *action.Action.On.On {
-						parts = append(parts, "on")
-					} else {
-						parts = append(parts, "off")
-					}
-				}
-				if action.Action.Dimming != nil && action.Action.Dimming.Brightness != nil {
-					parts = append(parts, fmt.Sprintf("%.0f%%", *action.Action.Dimming.Brightness))
-				}
-				if action.Action.ColorTemperature != nil && action.Action.ColorTemperature.Mirek != nil {
-					kelvin := 1000000 / *action.Action.ColorTemperature.Mirek
-					parts = append(parts, fmt.Sprintf("%dK", kelvin))
-				}
-				if len(parts) > 0 {
-					actionDesc = " → " + strings.Join(parts, ", ")
-				}
+			var parts []string
+			if action.Action.On != nil && action.Action.On.On {
+				parts = append(parts, "on")
+			} else if action.Action.On != nil && !action.Action.On.On {
+				parts = append(parts, "off")
+			}
+			if action.Action.Dimming != nil {
+				parts = append(parts, fmt.Sprintf("%.0f%%", action.Action.Dimming.Brightness))
+			}
+			if action.Action.ColorTemperature != nil && action.Action.ColorTemperature.Mirek != 0 {
+				kelvin := 1000000 / action.Action.ColorTemperature.Mirek
+				parts = append(parts, fmt.Sprintf("%dK", kelvin))
+			}
+			if len(parts) > 0 {
+				actionDesc = " → " + strings.Join(parts, ", ")
 			}
 
 			rows = append(rows, gridlayout.NewListItemRow("•", actionLightStyle.Render(targetName)+m.styles.Dimmed.Render(actionDesc)))
@@ -2877,8 +2846,8 @@ func (m *Model) buildSceneGridRows(scene hueclient.SceneGet, state *hue.BridgeSt
 	})
 
 	dimStyle := m.styles.Dimmed
-	if scene.Id != nil {
-		rows = append(rows, gridlayout.NewStyledInfoRow("ID", *scene.Id, infoLabelWidth, dimStyle))
+	if scene.Id != "" {
+		rows = append(rows, gridlayout.NewStyledInfoRow("ID", scene.Id, infoLabelWidth, dimStyle))
 	}
 	if scene.IdV1 != nil {
 		rows = append(rows, gridlayout.NewStyledInfoRow("V1 ID", *scene.IdV1, infoLabelWidth, dimStyle))
@@ -2892,10 +2861,7 @@ func (m *Model) buildSceneGridRows(scene hueclient.SceneGet, state *hue.BridgeSt
 func (m *Model) buildDeviceGridRows(device hueclient.DeviceGet, state *hue.BridgeState) []gridlayout.GridRow {
 	var rows []gridlayout.GridRow
 
-	deviceID := ""
-	if device.Id != nil {
-		deviceID = *device.Id
-	}
+	deviceID := device.Id
 
 	// 1. Controls section - instant actions (identify)
 	controlsHeader := field.NewHeaderComponent("controls-header", "Controls", &m.styles, m.zones)
@@ -2925,9 +2891,9 @@ func (m *Model) buildDeviceGridRows(device hueclient.DeviceGet, state *hue.Bridg
 		Section: settingsHeader,
 	})
 
-	if device.Metadata != nil && device.Metadata.Name != nil {
+	if device.Metadata.Name != "" {
 		textInput := field.NewTextComponent(
-			"device-name:"+deviceID, "Name", *device.Metadata.Name,
+			FieldIDDeviceName(deviceID), "Name", device.Metadata.Name,
 			&m.styles, m.zones,
 		)
 		rows = append(rows, gridlayout.GridRow{
@@ -2943,8 +2909,8 @@ func (m *Model) buildDeviceGridRows(device hueclient.DeviceGet, state *hue.Bridg
 	if state != nil && deviceID != "" {
 		currentRoom, hasRoom := state.GetDeviceRoom(deviceID)
 		currentRoomID := ""
-		if hasRoom && currentRoom.Id != nil {
-			currentRoomID = *currentRoom.Id
+		if hasRoom && currentRoom.Id != "" {
+			currentRoomID = currentRoom.Id
 		}
 
 		// Build room options: "No Room" + all rooms
@@ -2956,11 +2922,11 @@ func (m *Model) buildDeviceGridRows(device hueclient.DeviceGet, state *hue.Bridg
 		for i, room := range allRooms {
 			roomName := "Unknown"
 			roomID := ""
-			if room.Metadata != nil && room.Metadata.Name != nil {
-				roomName = *room.Metadata.Name
+			if room.Metadata.Name != "" {
+				roomName = room.Metadata.Name
 			}
-			if room.Id != nil {
-				roomID = *room.Id
+			if room.Id != "" {
+				roomID = room.Id
 			}
 			options = append(options, field.Option{Label: roomName, Value: i + 1, Color: m.styles.Theme.EntityRoom})
 			if roomID == currentRoomID {
@@ -2985,7 +2951,7 @@ func (m *Model) buildDeviceGridRows(device hueclient.DeviceGet, state *hue.Bridg
 	if state != nil {
 		// Motion sensor toggle and sensitivity
 		if motionID, motion, found := state.GetDeviceMotionSensor(device); found {
-			enabled := motion.Enabled != nil && *motion.Enabled
+			enabled := motion.Enabled
 			motionToggle := field.NewToggleComponent(
 				"motion-enabled:"+motionID, "Motion Sensor", enabled,
 				&m.styles, m.zones,
@@ -3000,10 +2966,7 @@ func (m *Model) buildDeviceGridRows(device hueclient.DeviceGet, state *hue.Bridg
 
 			// Sensitivity slider
 			if motion.Sensitivity != nil && motion.Sensitivity.SensitivityMax != nil {
-				sensitivity := 0
-				if motion.Sensitivity.Sensitivity != nil {
-					sensitivity = *motion.Sensitivity.Sensitivity
-				}
+				sensitivity := motion.Sensitivity.Sensitivity
 				maxSensitivity := *motion.Sensitivity.SensitivityMax
 				sensitivitySlider := field.NewSliderComponent(
 					"motion-sensitivity:"+motionID, "Sensitivity",
@@ -3022,7 +2985,7 @@ func (m *Model) buildDeviceGridRows(device hueclient.DeviceGet, state *hue.Bridg
 
 		// Temperature sensor toggle
 		if tempID, tempSensor, found := state.GetDeviceTemperatureSensor(device); found {
-			enabled := tempSensor.Enabled != nil && *tempSensor.Enabled
+			enabled := tempSensor.Enabled
 			tempToggle := field.NewToggleComponent(
 				"temp-enabled:"+tempID, "Temp Sensor", enabled,
 				&m.styles, m.zones,
@@ -3038,7 +3001,7 @@ func (m *Model) buildDeviceGridRows(device hueclient.DeviceGet, state *hue.Bridg
 
 		// Light level sensor toggle
 		if llID, llSensor, found := state.GetDeviceLightLevelSensor(device); found {
-			enabled := llSensor.Enabled != nil && *llSensor.Enabled
+			enabled := llSensor.Enabled
 			llToggle := field.NewToggleComponent(
 				"ll-enabled:"+llID, "Light Sensor", enabled,
 				&m.styles, m.zones,
@@ -3054,28 +3017,28 @@ func (m *Model) buildDeviceGridRows(device hueclient.DeviceGet, state *hue.Bridg
 	}
 
 	// 3. Product section
-	if device.ProductData != nil {
-		pd := device.ProductData
+	pd := device.ProductData
+	if pd.ProductName != "" || pd.ManufacturerName != "" || pd.ModelId != "" {
 		header := field.NewHeaderComponent("product-header", "Product", &m.styles, m.zones)
 		rows = append(rows, gridlayout.GridRow{
 			Type:    gridlayout.RowTypeSection,
 			Section: header,
 		})
 
-		if pd.ProductName != nil {
-			rows = append(rows, gridlayout.NewInfoRow("Product", *pd.ProductName, infoLabelWidth))
+		if pd.ProductName != "" {
+			rows = append(rows, gridlayout.NewInfoRow("Product", pd.ProductName, infoLabelWidth))
 		}
-		if pd.ManufacturerName != nil {
-			rows = append(rows, gridlayout.NewInfoRow("Manufacturer", *pd.ManufacturerName, infoLabelWidth))
+		if pd.ManufacturerName != "" {
+			rows = append(rows, gridlayout.NewInfoRow("Manufacturer", pd.ManufacturerName, infoLabelWidth))
 		}
-		if pd.ModelId != nil {
-			rows = append(rows, gridlayout.NewInfoRow("Model", *pd.ModelId, infoLabelWidth))
+		if pd.ModelId != "" {
+			rows = append(rows, gridlayout.NewInfoRow("Model", pd.ModelId, infoLabelWidth))
 		}
-		if pd.SoftwareVersion != nil {
-			rows = append(rows, gridlayout.NewInfoRow("Firmware", *pd.SoftwareVersion, infoLabelWidth))
+		if pd.SoftwareVersion != "" {
+			rows = append(rows, gridlayout.NewInfoRow("Firmware", pd.SoftwareVersion, infoLabelWidth))
 		}
-		if pd.ProductArchetype != nil {
-			rows = append(rows, gridlayout.NewStyledInfoRow("Archetype", string(*pd.ProductArchetype), infoLabelWidth, m.styles.Dimmed))
+		if pd.ProductArchetype != "" {
+			rows = append(rows, gridlayout.NewStyledInfoRow("Archetype", hue.ProductArchetypeDisplayName(string(pd.ProductArchetype)), infoLabelWidth, m.styles.Dimmed))
 		}
 	}
 
@@ -3086,12 +3049,10 @@ func (m *Model) buildDeviceGridRows(device hueclient.DeviceGet, state *hue.Bridg
 		// Motion sensor (read-only status)
 		if _, motion, found := state.GetDeviceMotionSensor(device); found {
 			isDetecting := false
-			if motion.Motion != nil {
-				if motion.Motion.MotionReport != nil && motion.Motion.MotionReport.Motion != nil {
-					isDetecting = *motion.Motion.MotionReport.Motion
-				} else if motion.Motion.Motion != nil {
-					isDetecting = *motion.Motion.Motion
-				}
+			if motion.Motion.MotionReport != nil {
+				isDetecting = motion.Motion.MotionReport.Motion
+			} else {
+				isDetecting = motion.Motion.Motion
 			}
 			status := "clear"
 			statusStyle := m.styles.Dimmed
@@ -3105,12 +3066,10 @@ func (m *Model) buildDeviceGridRows(device hueclient.DeviceGet, state *hue.Bridg
 		// Temperature (read-only value)
 		if _, tempSensor, found := state.GetDeviceTemperatureSensor(device); found {
 			tempValue := "N/A"
-			if tempSensor.Temperature != nil {
-				if tempSensor.Temperature.TemperatureReport != nil && tempSensor.Temperature.TemperatureReport.Temperature != nil {
-					tempValue = fmt.Sprintf("%.1f°C", *tempSensor.Temperature.TemperatureReport.Temperature)
-				} else if tempSensor.Temperature.Temperature != nil {
-					tempValue = fmt.Sprintf("%.1f°C", *tempSensor.Temperature.Temperature)
-				}
+			if tempSensor.Temperature.TemperatureReport != nil {
+				tempValue = fmt.Sprintf("%.1f°C", tempSensor.Temperature.TemperatureReport.Temperature)
+			} else {
+				tempValue = fmt.Sprintf("%.1f°C", tempSensor.Temperature.Temperature)
 			}
 			sensorRows = append(sensorRows, gridlayout.NewInfoRow("Temperature", tempValue, infoLabelWidth))
 		}
@@ -3118,19 +3077,17 @@ func (m *Model) buildDeviceGridRows(device hueclient.DeviceGet, state *hue.Bridg
 		// Light level (read-only value)
 		if _, llSensor, found := state.GetDeviceLightLevelSensor(device); found {
 			llValue := "N/A"
-			if llSensor.Light != nil {
-				level := 0
-				if llSensor.Light.LightLevelReport != nil && llSensor.Light.LightLevelReport.LightLevel != nil {
-					level = *llSensor.Light.LightLevelReport.LightLevel
-				} else if llSensor.Light.LightLevel != nil {
-					level = *llSensor.Light.LightLevel
-				}
-				if level > 1 {
-					lux := math.Pow(10, float64(level-1)/10000.0)
-					llValue = fmt.Sprintf("%.0f lux", lux)
-				} else {
-					llValue = "0 lux"
-				}
+			level := 0
+			if llSensor.Light.LightLevelReport != nil {
+				level = llSensor.Light.LightLevelReport.LightLevel
+			} else {
+				level = llSensor.Light.LightLevel
+			}
+			if level > 1 {
+				lux := math.Pow(10, float64(level-1)/10000.0)
+				llValue = fmt.Sprintf("%.0f lux", lux)
+			} else {
+				llValue = "0 lux"
 			}
 			sensorRows = append(sensorRows, gridlayout.NewInfoRow("Light Level", llValue, infoLabelWidth))
 		}
@@ -3183,11 +3140,11 @@ func (m *Model) buildDeviceGridRows(device hueclient.DeviceGet, state *hue.Bridg
 	})
 
 	dimStyle := m.styles.Dimmed
-	if device.Id != nil {
-		rows = append(rows, gridlayout.NewStyledInfoRow("ID", *device.Id, infoLabelWidth, dimStyle))
+	if device.Id != "" {
+		rows = append(rows, gridlayout.NewStyledInfoRow("ID", device.Id, infoLabelWidth, dimStyle))
 	}
-	if device.Type != nil {
-		rows = append(rows, gridlayout.NewStyledInfoRow("Type", string(*device.Type), infoLabelWidth, dimStyle))
+	if device.Type != "" {
+		rows = append(rows, gridlayout.NewStyledInfoRow("Type", string(device.Type), infoLabelWidth, dimStyle))
 	}
 
 	return rows
@@ -3207,10 +3164,7 @@ func (m *Model) buildBridgeGridRows(bridgeID string) []gridlayout.GridRow {
 	// 1. Controls section - instant actions (identify)
 	if state != nil {
 		if bridgeDevice, ok := state.GetBridgeDevice(); ok {
-			deviceID := ""
-			if bridgeDevice.Id != nil {
-				deviceID = *bridgeDevice.Id
-			}
+			deviceID := bridgeDevice.Id
 
 			controlsHeader := field.NewHeaderComponent("controls-header", "Controls", &m.styles, m.zones)
 			rows = append(rows, gridlayout.GridRow{
@@ -3241,9 +3195,9 @@ func (m *Model) buildBridgeGridRows(bridgeID string) []gridlayout.GridRow {
 			})
 
 			// Name field
-			if bridgeDevice.Metadata != nil && bridgeDevice.Metadata.Name != nil && deviceID != "" {
+			if bridgeDevice.Metadata.Name != "" && deviceID != "" {
 				textInput := field.NewTextComponent(
-					"bridge-name:"+deviceID, "Name", *bridgeDevice.Metadata.Name,
+					FieldIDBridgeName(deviceID), "Name", bridgeDevice.Metadata.Name,
 					&m.styles, m.zones,
 				)
 				rows = append(rows, gridlayout.GridRow{
@@ -3284,22 +3238,27 @@ func (m *Model) buildBridgeGridRows(bridgeID string) []gridlayout.GridRow {
 
 	// Hardware section
 	if state != nil {
-		if bridgeDevice, ok := state.GetBridgeDevice(); ok && bridgeDevice.ProductData != nil {
+		if bridgeDevice, ok := state.GetBridgeDevice(); ok {
 			pd := bridgeDevice.ProductData
-			hwHeader := field.NewHeaderComponent("hw-header", "Hardware", &m.styles, m.zones)
-			rows = append(rows, gridlayout.GridRow{
-				Type:    gridlayout.RowTypeSection,
-				Section: hwHeader,
-			})
+			if pd.ProductName != "" || pd.ModelId != "" || pd.SoftwareVersion != "" {
+				hwHeader := field.NewHeaderComponent("hw-header", "Hardware", &m.styles, m.zones)
+				rows = append(rows, gridlayout.GridRow{
+					Type:    gridlayout.RowTypeSection,
+					Section: hwHeader,
+				})
 
-			if pd.ProductName != nil {
-				rows = append(rows, gridlayout.NewInfoRow("Product", *pd.ProductName, infoLabelWidth))
-			}
-			if pd.ModelId != nil {
-				rows = append(rows, gridlayout.NewInfoRow("Model", *pd.ModelId, infoLabelWidth))
-			}
-			if pd.SoftwareVersion != nil {
-				rows = append(rows, gridlayout.NewInfoRow("Firmware", *pd.SoftwareVersion, infoLabelWidth))
+				if pd.ProductName != "" {
+					rows = append(rows, gridlayout.NewInfoRow("Product", pd.ProductName, infoLabelWidth))
+				}
+				if pd.ModelId != "" {
+					rows = append(rows, gridlayout.NewInfoRow("Model", pd.ModelId, infoLabelWidth))
+				}
+				if pd.SoftwareVersion != "" {
+					rows = append(rows, gridlayout.NewInfoRow("Firmware", pd.SoftwareVersion, infoLabelWidth))
+				}
+				if pd.ProductArchetype != "" {
+					rows = append(rows, gridlayout.NewStyledInfoRow("Archetype", hue.ProductArchetypeDisplayName(string(pd.ProductArchetype)), infoLabelWidth, m.styles.Dimmed))
+				}
 			}
 		}
 	}
@@ -3449,8 +3408,8 @@ func (m *Model) buildRoomsCategoryGridRows(data panels.RoomsCategoryData, state 
 	roomStyle := lipgloss.NewStyle().Foreground(m.styles.Theme.EntityRoom)
 	for _, room := range data.Rooms {
 		name := "Unknown"
-		if room.Metadata != nil && room.Metadata.Name != nil {
-			name = *room.Metadata.Name
+		if room.Metadata.Name != "" {
+			name = room.Metadata.Name
 		}
 
 		// Get room's lights and calculate state
@@ -3500,8 +3459,8 @@ func (m *Model) buildZonesCategoryGridRows(data panels.ZonesCategoryData, state 
 	zoneStyle := lipgloss.NewStyle().Foreground(m.styles.Theme.EntityZone)
 	for _, zone := range data.Zones {
 		name := "Unknown"
-		if zone.Metadata != nil && zone.Metadata.Name != nil {
-			name = *zone.Metadata.Name
+		if zone.Metadata.Name != "" {
+			name = zone.Metadata.Name
 		}
 
 		// Get zone's lights and calculate state
@@ -3549,16 +3508,16 @@ func (m *Model) buildLightsCategoryGridRows(data panels.LightsCategoryData, _ *h
 	// List each light
 	for _, light := range data.Lights {
 		name := "Unknown"
-		if light.Metadata != nil && light.Metadata.Name != nil {
-			name = *light.Metadata.Name
+		if light.Metadata.Name != "" {
+			name = light.Metadata.Name
 		}
 
 		isOn := panels.IsLightOn(light)
 		brightness := 0.0
 		indicatorColor := ""
 		if isOn {
-			if light.Dimming != nil && light.Dimming.Brightness != nil {
-				brightness = float64(*light.Dimming.Brightness)
+			if light.Dimming != nil {
+				brightness = float64(light.Dimming.Brightness)
 			} else {
 				brightness = 100.0
 			}
@@ -3648,10 +3607,7 @@ func (m *Model) buildScenesCategoryGridRows(data panels.ScenesCategoryData, _ *h
 func (m *Model) buildSmartSceneGridRows(scene hueclient.SmartSceneGet, state *hue.BridgeState, bridgeID string) []gridlayout.GridRow {
 	var rows []gridlayout.GridRow
 
-	sceneID := ""
-	if scene.Id != nil {
-		sceneID = *scene.Id
-	}
+	sceneID := scene.Id
 
 	// 1. Controls section - activate/deactivate toggle and delete
 	controlsHeader := field.NewHeaderComponent("controls-header", "Controls", &m.styles, m.zones)
@@ -3685,8 +3641,8 @@ func (m *Model) buildSmartSceneGridRows(scene hueclient.SmartSceneGet, state *hu
 	})
 
 	// Name
-	if scene.Metadata.Name != nil {
-		rows = append(rows, gridlayout.NewInfoRow("Name", *scene.Metadata.Name, infoLabelWidth))
+	if scene.Metadata.Name != "" {
+		rows = append(rows, gridlayout.NewInfoRow("Name", scene.Metadata.Name, infoLabelWidth))
 	}
 
 	// State
@@ -3698,23 +3654,20 @@ func (m *Model) buildSmartSceneGridRows(scene hueclient.SmartSceneGet, state *hu
 	rows = append(rows, gridlayout.NewStyledInfoRow("State", stateStr, infoLabelWidth, stateStyle))
 
 	// Group (room/zone)
-	if scene.Group.Rid != nil && state != nil {
+	if scene.Group.Rid != "" && state != nil {
 		groupName := ""
-		groupType := "unknown"
+		groupType := string(scene.Group.Rtype)
 		var groupStyle lipgloss.Style
-		if scene.Group.Rtype != nil {
-			groupType = string(*scene.Group.Rtype)
-			switch *scene.Group.Rtype {
-			case hueclient.ResourceIdentifierRtypeRoom:
-				if room, ok := state.GetRoom(*scene.Group.Rid); ok {
-					groupName = state.GetRoomName(room)
-					groupStyle = lipgloss.NewStyle().Foreground(m.styles.Theme.EntityRoom)
-				}
-			case hueclient.ResourceIdentifierRtypeZone:
-				if zone, ok := state.GetZone(*scene.Group.Rid); ok {
-					groupName = zone.RoomName("Unknown")
-					groupStyle = lipgloss.NewStyle().Foreground(m.styles.Theme.EntityZone)
-				}
+		switch scene.Group.Rtype {
+		case hueclient.ResourceTypeRoom:
+			if room, ok := state.GetRoom(scene.Group.Rid); ok {
+				groupName = state.GetRoomName(room)
+				groupStyle = lipgloss.NewStyle().Foreground(m.styles.Theme.EntityRoom)
+			}
+		case hueclient.ResourceTypeZone:
+			if zone, ok := state.GetZone(scene.Group.Rid); ok {
+				groupName = zone.ZoneName("Unknown")
+				groupStyle = lipgloss.NewStyle().Foreground(m.styles.Theme.EntityZone)
 			}
 		}
 		if groupName != "" {
@@ -3740,9 +3693,9 @@ func (m *Model) buildSmartSceneGridRows(scene hueclient.SmartSceneGet, state *hu
 		rows = append(rows, gridlayout.NewInfoRow("Days Configured", fmt.Sprintf("%d", len(scene.WeekTimeslots)), infoLabelWidth))
 	}
 
-	if scene.Id != nil {
+	if scene.Id != "" {
 		rows = append(rows, gridlayout.NewEmptyRow())
-		rows = append(rows, gridlayout.NewInfoRow("ID", *scene.Id, infoLabelWidth))
+		rows = append(rows, gridlayout.NewInfoRow("ID", scene.Id, infoLabelWidth))
 	}
 
 	return rows
@@ -3770,8 +3723,8 @@ func (m *Model) buildSmartScenesCategoryGridRows(data panels.SmartScenesCategory
 	smartSceneStyle := lipgloss.NewStyle().Foreground(m.styles.Theme.EntityScene)
 	for _, scene := range data.SmartScenes {
 		name := "Unknown"
-		if scene.Metadata.Name != nil {
-			name = *scene.Metadata.Name
+		if scene.Metadata.Name != "" {
+			name = scene.Metadata.Name
 		}
 		statusIndicator := m.styles.Dimmed.Render("○") // inactive
 		if scene.State == "active" {

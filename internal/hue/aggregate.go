@@ -19,10 +19,10 @@ func CalculateRoomAggregate(lights []hueclient.LightGet) (float64, string) {
 	var onCount int
 
 	for _, light := range lights {
-		if light.On != nil && light.On.On != nil && *light.On.On {
+		if light.On.On {
 			onCount++
-			if light.Dimming != nil && light.Dimming.Brightness != nil {
-				totalBrightness += float64(*light.Dimming.Brightness)
+			if light.Dimming != nil {
+				totalBrightness += float64(light.Dimming.Brightness)
 			} else {
 				totalBrightness += 100.0
 			}

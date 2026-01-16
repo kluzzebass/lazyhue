@@ -146,12 +146,12 @@ func (m *Model) startEntityDeleteConfirmation() tea.Cmd {
 			m.status = "Light not found"
 			return nil
 		}
-		if light.Owner == nil || light.Owner.Rid == nil {
+		if light.Owner.Rid == "" {
 			m.status = "Light has no owning device"
 			return nil
 		}
 		// Store the device ID for deletion
-		deleteID = *light.Owner.Rid
+		deleteID = light.Owner.Rid
 	}
 
 	// Set confirmation state

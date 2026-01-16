@@ -301,3 +301,28 @@ func (c *ExtendedClient) GetZigbeeConnectivityByID(ctx context.Context, id strin
 	}
 	return &result.Data[0], nil
 }
+
+// GetAllResources fetches all resources from the bridge in a single call.
+// This endpoint is not in the OpenAPI spec but is supported by the bridge.
+// Returns the raw JSON body for manual parsing by the caller.
+func (c *ExtendedClient) GetAllResources(ctx context.Context) ([]byte, int, error) {
+	url := fmt.Sprintf("https://%s/clip/v2/resource", c.bridgeIP)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return nil, 0, err
+	}
+	req.Header.Set("hue-application-key", c.apiKey)
+
+	resp, err := c.client.Do(req)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, resp.StatusCode, err
+	}
+
+	return body, resp.StatusCode, nil
+}

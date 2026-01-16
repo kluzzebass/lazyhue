@@ -1,14 +1,15 @@
 package hue
 
 import (
+	"bytes"
 	"context"
 	"crypto/tls"
+	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"os"
 	"time"
-
-	"github.com/kluzzebass/lazyhue/internal/hueclient"
 )
 
 // ErrPairingCancelled indicates that pairing was cancelled by the user.
@@ -30,7 +31,7 @@ type AuthResult struct {
 
 // Authenticator handles the bridge pairing flow.
 type Authenticator struct {
-	client     *hueclient.ClientWithResponses
+	bridgeIP   string
 	deviceType string
 }
 
@@ -42,6 +43,23 @@ func NewAuthenticator(bridgeIP string) (*Authenticator, error) {
 		deviceType = "lazyhue#" + hostname
 	}
 
+	return &Authenticator{
+		bridgeIP:   bridgeIP,
+		deviceType: deviceType,
+	}, nil
+}
+
+// TryAuthenticate attempts to authenticate once.
+// Returns the API key on success, or an error indicating whether to retry.
+// NOTE: The authentication endpoint is a v1 API, not part of CLIP v2.
+// This uses direct HTTP calls instead of the generated client.
+func (a *Authenticator) TryAuthenticate() AuthResult {
+	// Build request body
+	body := map[string]interface{}{
+		"devicetype":        a.deviceType,
+		"generateclientkey": true,
+	}
+
 	// Create HTTP client with TLS skip (bridge uses self-signed cert)
 	httpClient := &http.Client{
 		Timeout: 10 * time.Second,
@@ -50,70 +68,66 @@ func NewAuthenticator(bridgeIP string) (*Authenticator, error) {
 		},
 	}
 
-	client, err := hueclient.NewClientWithResponses(
-		"https://"+bridgeIP,
-		hueclient.WithHTTPClient(httpClient),
-	)
+	// Marshal body
+	bodyBytes, err := json.Marshal(body)
 	if err != nil {
-		return nil, err
+		return AuthResult{Retry: false, Err: err}
 	}
 
-	return &Authenticator{
-		client:     client,
-		deviceType: deviceType,
-	}, nil
-}
-
-// TryAuthenticate attempts to authenticate once.
-// Returns the API key on success, or an error indicating whether to retry.
-func (a *Authenticator) TryAuthenticate() AuthResult {
-	generateClientKey := true
-	body := hueclient.AuthenticateJSONRequestBody{
-		Devicetype:        &a.deviceType,
-		Generateclientkey: &generateClientKey,
-	}
-
-	resp, err := a.client.AuthenticateWithResponse(context.Background(), body)
+	// Create request to v1 API endpoint
+	// The authentication endpoint is at /api, not /clip/v2
+	serverURL := "https://" + a.bridgeIP + "/api"
+	req, err := http.NewRequestWithContext(context.Background(), "POST", serverURL, bytes.NewReader(bodyBytes))
 	if err != nil {
-		// Network errors are retryable
+		return AuthResult{Retry: false, Err: err}
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		return AuthResult{Retry: true, Err: err}
+	}
+	defer resp.Body.Close()
+
+	// Read response
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
 		return AuthResult{Retry: true, Err: err}
 	}
 
-	// Check for HTTP-level errors
-	if resp.StatusCode() != http.StatusOK {
-		if resp.JSON401 != nil {
-			return AuthResult{Retry: false, Err: ErrAuthFailed}
-		}
-		return AuthResult{Retry: true, Err: errors.New("unexpected HTTP status: " + resp.Status())}
+	// Parse response
+	var responses []struct {
+		Success *struct {
+			Username string `json:"username"`
+		} `json:"success,omitempty"`
+		Error *struct {
+			Type        int    `json:"type"`
+			Description string `json:"description"`
+		} `json:"error,omitempty"`
 	}
 
-	// Parse the response
-	if resp.JSON200 == nil || len(*resp.JSON200) == 0 {
+	if err := json.Unmarshal(respBody, &responses); err != nil {
+		return AuthResult{Retry: true, Err: errors.New("failed to parse response: " + err.Error())}
+	}
+
+	if len(responses) == 0 {
 		return AuthResult{Retry: true, Err: errors.New("empty response from bridge")}
 	}
 
-	response := (*resp.JSON200)[0]
+	response := responses[0]
 
 	// Check for success
-	if response.Success != nil && response.Success.Username != nil && *response.Success.Username != "" {
-		return AuthResult{ApiKey: *response.Success.Username, Retry: false, Err: nil}
+	if response.Success != nil && response.Success.Username != "" {
+		return AuthResult{ApiKey: response.Success.Username, Retry: false, Err: nil}
 	}
 
 	// Check for error
 	if response.Error != nil {
 		// Error type 101 = link button not pressed
-		if response.Error.Type != nil && *response.Error.Type == 101 {
+		if response.Error.Type == 101 {
 			return AuthResult{Retry: true, Err: ErrLinkButtonNotPressed}
 		}
-		desc := "unknown error"
-		if response.Error.Description != nil {
-			desc = *response.Error.Description
-		}
-		errType := 0
-		if response.Error.Type != nil {
-			errType = *response.Error.Type
-		}
-		return AuthResult{Retry: true, Err: errors.New(desc + " (type " + string(rune(errType+'0')) + ")")}
+		return AuthResult{Retry: true, Err: errors.New(response.Error.Description)}
 	}
 
 	return AuthResult{Retry: true, Err: errors.New("unexpected response format")}

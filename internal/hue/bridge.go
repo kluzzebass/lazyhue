@@ -387,105 +387,105 @@ func (b *Bridge) applyResourceAdd(update ResourceUpdate) bool {
 
 	switch update.Type {
 	case "room":
-		resp, err := client.GetRoomWithResponse(ctx, update.ID)
-		if err != nil || resp.JSON200 == nil || resp.JSON200.Data == nil {
+		resp, err := client.GetRoomByIdWithResponse(ctx, toResourceId(update.ID))
+		if err != nil || resp.JSON200 == nil {
 			debug.Log("Failed to fetch new room %s: %v", update.ID, err)
 			return false
 		}
-		for _, room := range *resp.JSON200.Data {
-			if room.Id != nil {
-				b.state.AddRoom(*room.Id, room)
-				debug.Log("Added new room %s to cache", *room.Id)
+		for _, room := range resp.JSON200.Data {
+			if room.Id != "" {
+				b.state.AddRoom(room.Id, room)
+				debug.Log("Added new room %s to cache", room.Id)
 				return true
 			}
 		}
 		return false
 
 	case "zone":
-		resp, err := client.GetZoneWithResponse(ctx, update.ID)
-		if err != nil || resp.JSON200 == nil || resp.JSON200.Data == nil {
+		resp, err := client.GetZoneByIdWithResponse(ctx, toResourceId(update.ID))
+		if err != nil || resp.JSON200 == nil {
 			debug.Log("Failed to fetch new zone %s: %v", update.ID, err)
 			return false
 		}
-		for _, zone := range *resp.JSON200.Data {
-			if zone.Id != nil {
-				b.state.AddZone(*zone.Id, zone)
-				debug.Log("Added new zone %s to cache", *zone.Id)
+		for _, zone := range resp.JSON200.Data {
+			if zone.Id != "" {
+				b.state.AddZone(zone.Id, zone)
+				debug.Log("Added new zone %s to cache", zone.Id)
 				return true
 			}
 		}
 		return false
 
 	case "scene":
-		resp, err := client.GetSceneWithResponse(ctx, update.ID)
-		if err != nil || resp.JSON200 == nil || resp.JSON200.Data == nil {
+		resp, err := client.GetSceneByIdWithResponse(ctx, toResourceId(update.ID))
+		if err != nil || resp.JSON200 == nil {
 			debug.Log("Failed to fetch new scene %s: %v", update.ID, err)
 			return false
 		}
-		for _, scene := range *resp.JSON200.Data {
-			if scene.Id != nil {
-				b.state.AddScene(*scene.Id, scene)
-				debug.Log("Added new scene %s to cache", *scene.Id)
+		for _, scene := range resp.JSON200.Data {
+			if scene.Id != "" {
+				b.state.AddScene(scene.Id, scene)
+				debug.Log("Added new scene %s to cache", scene.Id)
 				return true
 			}
 		}
 		return false
 
 	case "smart_scene":
-		resp, err := client.GetSmartSceneWithResponse(ctx, update.ID)
-		if err != nil || resp.JSON200 == nil || resp.JSON200.Data == nil {
+		resp, err := client.GetSmartSceneByIdWithResponse(ctx, toResourceId(update.ID))
+		if err != nil || resp.JSON200 == nil {
 			debug.Log("Failed to fetch new smart_scene %s: %v", update.ID, err)
 			return false
 		}
-		for _, scene := range *resp.JSON200.Data {
-			if scene.Id != nil {
-				b.state.AddSmartScene(*scene.Id, scene)
-				debug.Log("Added new smart_scene %s to cache", *scene.Id)
+		for _, scene := range resp.JSON200.Data {
+			if scene.Id != "" {
+				b.state.AddSmartScene(scene.Id, scene)
+				debug.Log("Added new smart_scene %s to cache", scene.Id)
 				return true
 			}
 		}
 		return false
 
 	case "grouped_light":
-		resp, err := client.GetGroupedLightWithResponse(ctx, update.ID)
-		if err != nil || resp.JSON200 == nil || resp.JSON200.Data == nil {
+		resp, err := client.GetGroupedLightByIdWithResponse(ctx, toResourceId(update.ID))
+		if err != nil || resp.JSON200 == nil {
 			debug.Log("Failed to fetch new grouped_light %s: %v", update.ID, err)
 			return false
 		}
-		for _, gl := range *resp.JSON200.Data {
-			if gl.Id != nil {
-				b.state.AddGroupedLight(*gl.Id, gl)
-				debug.Log("Added new grouped_light %s to cache", *gl.Id)
+		for _, gl := range resp.JSON200.Data {
+			if gl.Id != "" {
+				b.state.AddGroupedLight(gl.Id, gl)
+				debug.Log("Added new grouped_light %s to cache", gl.Id)
 				return true
 			}
 		}
 		return false
 
 	case "light":
-		resp, err := client.GetLightWithResponse(ctx, update.ID)
-		if err != nil || resp.JSON200 == nil || resp.JSON200.Data == nil {
+		resp, err := client.GetLightByIdWithResponse(ctx, toResourceId(update.ID))
+		if err != nil || resp.JSON200 == nil {
 			debug.Log("Failed to fetch new light %s: %v", update.ID, err)
 			return false
 		}
-		for _, light := range *resp.JSON200.Data {
-			if light.Id != nil {
-				b.state.AddLight(*light.Id, light)
-				debug.Log("Added new light %s to cache", *light.Id)
+		for _, light := range resp.JSON200.Data {
+			if light.Id != "" {
+				b.state.AddLight(light.Id, light)
+				debug.Log("Added new light %s to cache", light.Id)
 				return true
 			}
 		}
 		return false
 
 	case "device":
-		resp, err := client.GetDeviceWithResponse(ctx, update.ID)
-		if err != nil || resp.JSON200 == nil || resp.JSON200.Data == nil {
+		resp, err := client.GetDeviceByIdWithResponse(ctx, toResourceId(update.ID))
+		if err != nil || resp.JSON200 == nil {
 			debug.Log("Failed to fetch new device %s: %v", update.ID, err)
 			return false
 		}
-		for _, device := range *resp.JSON200.Data {
-			if device.Id != nil {
-				b.state.AddDevice(*device.Id, device)
-				debug.Log("Added new device %s to cache", *device.Id)
+		for _, device := range resp.JSON200.Data {
+			if device.Id != "" {
+				b.state.AddDevice(device.Id, device)
+				debug.Log("Added new device %s to cache", device.Id)
 				return true
 			}
 		}
@@ -577,20 +577,19 @@ func (b *Bridge) SyncAll(ctx context.Context) error {
 // This is more efficient than SyncAll which makes 12+ separate calls.
 func (b *Bridge) SyncAllBulk(ctx context.Context) error {
 	b.mu.RLock()
-	client := b.client
 	extended := b.extended
 	b.mu.RUnlock()
 
-	if client == nil {
+	if extended == nil {
 		return ErrAuthFailed
 	}
 
-	resp, err := client.GetResourcesWithResponse(ctx)
+	body, statusCode, err := extended.GetAllResources(ctx)
 	if err != nil {
 		return err
 	}
 
-	if resp.StatusCode() != 200 || len(resp.Body) == 0 {
+	if statusCode != 200 || len(body) == 0 {
 		return ErrAuthFailed
 	}
 
@@ -601,14 +600,14 @@ func (b *Bridge) SyncAllBulk(ctx context.Context) error {
 			Description string `json:"description"`
 		} `json:"errors"`
 	}
-	if err := json.Unmarshal(resp.Body, &envelope); err != nil {
+	if err := json.Unmarshal(body, &envelope); err != nil {
 		return err
 	}
 
 	// Temporary maps for each resource type
 	lights := make(map[string]hueclient.LightGet)
 	rooms := make(map[string]hueclient.RoomGet)
-	zones := make(map[string]hueclient.RoomGet)
+	zones := make(map[string]hueclient.ZoneGet)
 	groupedLights := make(map[string]hueclient.GroupedLightGet)
 	scenes := make(map[string]hueclient.SceneGet)
 	smartScenes := make(map[string]hueclient.SmartSceneGet)
@@ -634,68 +633,68 @@ func (b *Bridge) SyncAllBulk(ctx context.Context) error {
 		switch typeOnly.Type {
 		case "light":
 			var light hueclient.LightGet
-			if err := json.Unmarshal(raw, &light); err == nil && light.Id != nil {
-				lights[*light.Id] = light
+			if err := json.Unmarshal(raw, &light); err == nil && light.Id != "" {
+				lights[light.Id] = light
 			}
 		case "room":
 			var room hueclient.RoomGet
-			if err := json.Unmarshal(raw, &room); err == nil && room.Id != nil {
-				rooms[*room.Id] = room
+			if err := json.Unmarshal(raw, &room); err == nil && room.Id != "" {
+				rooms[room.Id] = room
 			}
 		case "zone":
-			var zone hueclient.RoomGet
-			if err := json.Unmarshal(raw, &zone); err == nil && zone.Id != nil {
-				zones[*zone.Id] = zone
+			var zone hueclient.ZoneGet
+			if err := json.Unmarshal(raw, &zone); err == nil && zone.Id != "" {
+				zones[zone.Id] = zone
 			}
 		case "grouped_light":
 			var gl hueclient.GroupedLightGet
-			if err := json.Unmarshal(raw, &gl); err == nil && gl.Id != nil {
-				groupedLights[*gl.Id] = gl
+			if err := json.Unmarshal(raw, &gl); err == nil && gl.Id != "" {
+				groupedLights[gl.Id] = gl
 			}
 		case "scene":
 			var scene hueclient.SceneGet
-			if err := json.Unmarshal(raw, &scene); err == nil && scene.Id != nil {
-				scenes[*scene.Id] = scene
+			if err := json.Unmarshal(raw, &scene); err == nil && scene.Id != "" {
+				scenes[scene.Id] = scene
 			}
 		case "smart_scene":
 			var smartScene hueclient.SmartSceneGet
-			if err := json.Unmarshal(raw, &smartScene); err == nil && smartScene.Id != nil {
-				smartScenes[*smartScene.Id] = smartScene
+			if err := json.Unmarshal(raw, &smartScene); err == nil && smartScene.Id != "" {
+				smartScenes[smartScene.Id] = smartScene
 			}
 		case "device":
 			var device hueclient.DeviceGet
-			if err := json.Unmarshal(raw, &device); err == nil && device.Id != nil {
-				devices[*device.Id] = device
+			if err := json.Unmarshal(raw, &device); err == nil && device.Id != "" {
+				devices[device.Id] = device
 			}
 		case "motion":
 			var motion hueclient.MotionGet
-			if err := json.Unmarshal(raw, &motion); err == nil && motion.Id != nil {
-				motions[*motion.Id] = motion
+			if err := json.Unmarshal(raw, &motion); err == nil && motion.Id != "" {
+				motions[motion.Id] = motion
 			}
 		case "temperature":
 			var temp hueclient.TemperatureGet
-			if err := json.Unmarshal(raw, &temp); err == nil && temp.Id != nil {
-				temperatures[*temp.Id] = temp
+			if err := json.Unmarshal(raw, &temp); err == nil && temp.Id != "" {
+				temperatures[temp.Id] = temp
 			}
 		case "light_level":
 			var ll hueclient.LightLevelGet
-			if err := json.Unmarshal(raw, &ll); err == nil && ll.Id != nil {
-				lightLevels[*ll.Id] = ll
+			if err := json.Unmarshal(raw, &ll); err == nil && ll.Id != "" {
+				lightLevels[ll.Id] = ll
 			}
 		case "device_power":
 			var dp hueclient.DevicePowerGet
-			if err := json.Unmarshal(raw, &dp); err == nil && dp.Id != nil {
-				devicePowers[*dp.Id] = dp
+			if err := json.Unmarshal(raw, &dp); err == nil && dp.Id != "" {
+				devicePowers[dp.Id] = dp
 			}
 		case "bridge":
 			var br hueclient.BridgeGet
-			if err := json.Unmarshal(raw, &br); err == nil && br.Id != nil {
-				bridges[*br.Id] = br
+			if err := json.Unmarshal(raw, &br); err == nil && br.Id != "" {
+				bridges[br.Id] = br
 			}
 		case "bridge_home":
 			var bh hueclient.BridgeHomeGet
-			if err := json.Unmarshal(raw, &bh); err == nil && bh.Id != nil {
-				bridgeHomes[*bh.Id] = bh
+			if err := json.Unmarshal(raw, &bh); err == nil && bh.Id != "" {
+				bridgeHomes[bh.Id] = bh
 			}
 		}
 	}
@@ -753,14 +752,14 @@ func (b *Bridge) SyncLights(ctx context.Context) error {
 		return err
 	}
 
-	if resp.JSON200 == nil || resp.JSON200.Data == nil {
+	if resp.JSON200 == nil {
 		return nil
 	}
 
 	lights := make(map[string]hueclient.LightGet)
-	for _, light := range *resp.JSON200.Data {
-		if light.Id != nil {
-			lights[*light.Id] = light
+	for _, light := range resp.JSON200.Data {
+		if light.Id != "" {
+			lights[light.Id] = light
 		}
 	}
 
@@ -783,14 +782,14 @@ func (b *Bridge) SyncRooms(ctx context.Context) error {
 		return err
 	}
 
-	if resp.JSON200 == nil || resp.JSON200.Data == nil {
+	if resp.JSON200 == nil {
 		return nil
 	}
 
 	rooms := make(map[string]hueclient.RoomGet)
-	for _, room := range *resp.JSON200.Data {
-		if room.Id != nil {
-			rooms[*room.Id] = room
+	for _, room := range resp.JSON200.Data {
+		if room.Id != "" {
+			rooms[room.Id] = room
 		}
 	}
 
@@ -813,14 +812,14 @@ func (b *Bridge) SyncZones(ctx context.Context) error {
 		return err
 	}
 
-	if resp.JSON200 == nil || resp.JSON200.Data == nil {
+	if resp.JSON200 == nil {
 		return nil
 	}
 
-	zones := make(map[string]hueclient.RoomGet)
-	for _, zone := range *resp.JSON200.Data {
-		if zone.Id != nil {
-			zones[*zone.Id] = zone
+	zones := make(map[string]hueclient.ZoneGet)
+	for _, zone := range resp.JSON200.Data {
+		if zone.Id != "" {
+			zones[zone.Id] = zone
 		}
 	}
 
@@ -843,14 +842,14 @@ func (b *Bridge) SyncGroupedLights(ctx context.Context) error {
 		return err
 	}
 
-	if resp.JSON200 == nil || resp.JSON200.Data == nil {
+	if resp.JSON200 == nil {
 		return nil
 	}
 
 	grouped := make(map[string]hueclient.GroupedLightGet)
-	for _, gl := range *resp.JSON200.Data {
-		if gl.Id != nil {
-			grouped[*gl.Id] = gl
+	for _, gl := range resp.JSON200.Data {
+		if gl.Id != "" {
+			grouped[gl.Id] = gl
 		}
 	}
 
@@ -873,14 +872,14 @@ func (b *Bridge) SyncScenes(ctx context.Context) error {
 		return err
 	}
 
-	if resp.JSON200 == nil || resp.JSON200.Data == nil {
+	if resp.JSON200 == nil {
 		return nil
 	}
 
 	scenes := make(map[string]hueclient.SceneGet)
-	for _, scene := range *resp.JSON200.Data {
-		if scene.Id != nil {
-			scenes[*scene.Id] = scene
+	for _, scene := range resp.JSON200.Data {
+		if scene.Id != "" {
+			scenes[scene.Id] = scene
 		}
 	}
 
@@ -903,14 +902,14 @@ func (b *Bridge) SyncSmartScenes(ctx context.Context) error {
 		return err
 	}
 
-	if resp.JSON200 == nil || resp.JSON200.Data == nil {
+	if resp.JSON200 == nil {
 		return nil
 	}
 
 	smartScenes := make(map[string]hueclient.SmartSceneGet)
-	for _, scene := range *resp.JSON200.Data {
-		if scene.Id != nil {
-			smartScenes[*scene.Id] = scene
+	for _, scene := range resp.JSON200.Data {
+		if scene.Id != "" {
+			smartScenes[scene.Id] = scene
 		}
 	}
 
@@ -933,14 +932,14 @@ func (b *Bridge) SyncDevices(ctx context.Context) error {
 		return err
 	}
 
-	if resp.JSON200 == nil || resp.JSON200.Data == nil {
+	if resp.JSON200 == nil {
 		return nil
 	}
 
 	devices := make(map[string]hueclient.DeviceGet)
-	for _, device := range *resp.JSON200.Data {
-		if device.Id != nil {
-			devices[*device.Id] = device
+	for _, device := range resp.JSON200.Data {
+		if device.Id != "" {
+			devices[device.Id] = device
 		}
 	}
 
@@ -959,19 +958,19 @@ func (b *Bridge) SyncMotionSensors(ctx context.Context) error {
 	}
 
 	// Sync operations don't need detailed logging - state sync covers it
-	resp, err := client.GetMotionSensorsWithResponse(ctx)
+	resp, err := client.GetMotionsWithResponse(ctx)
 	if err != nil {
 		return err
 	}
 
-	if resp.JSON200 == nil || resp.JSON200.Data == nil {
+	if resp.JSON200 == nil {
 		return nil
 	}
 
 	sensors := make(map[string]hueclient.MotionGet)
-	for _, sensor := range *resp.JSON200.Data {
-		if sensor.Id != nil {
-			sensors[*sensor.Id] = sensor
+	for _, sensor := range resp.JSON200.Data {
+		if sensor.Id != "" {
+			sensors[sensor.Id] = sensor
 		}
 	}
 
@@ -995,14 +994,14 @@ func (b *Bridge) SyncTemperatures(ctx context.Context) error {
 		return err
 	}
 
-	if resp.JSON200 == nil || resp.JSON200.Data == nil {
+	if resp.JSON200 == nil {
 		return nil
 	}
 
 	temps := make(map[string]hueclient.TemperatureGet)
-	for _, temp := range *resp.JSON200.Data {
-		if temp.Id != nil {
-			temps[*temp.Id] = temp
+	for _, temp := range resp.JSON200.Data {
+		if temp.Id != "" {
+			temps[temp.Id] = temp
 		}
 	}
 
@@ -1026,14 +1025,14 @@ func (b *Bridge) SyncLightLevels(ctx context.Context) error {
 		return err
 	}
 
-	if resp.JSON200 == nil || resp.JSON200.Data == nil {
+	if resp.JSON200 == nil {
 		return nil
 	}
 
 	levels := make(map[string]hueclient.LightLevelGet)
-	for _, level := range *resp.JSON200.Data {
-		if level.Id != nil {
-			levels[*level.Id] = level
+	for _, level := range resp.JSON200.Data {
+		if level.Id != "" {
+			levels[level.Id] = level
 		}
 	}
 
@@ -1057,14 +1056,14 @@ func (b *Bridge) SyncDevicePowers(ctx context.Context) error {
 		return err
 	}
 
-	if resp.JSON200 == nil || resp.JSON200.Data == nil {
+	if resp.JSON200 == nil {
 		return nil
 	}
 
 	powers := make(map[string]hueclient.DevicePowerGet)
-	for _, power := range *resp.JSON200.Data {
-		if power.Id != nil {
-			powers[*power.Id] = power
+	for _, power := range resp.JSON200.Data {
+		if power.Id != "" {
+			powers[power.Id] = power
 		}
 	}
 
@@ -1087,11 +1086,11 @@ func (b *Bridge) SyncBridgeResource(ctx context.Context) error {
 		return err
 	}
 
-	if resp.JSON200 == nil || resp.JSON200.Data == nil || len(*resp.JSON200.Data) == 0 {
+	if resp.JSON200 == nil || len(resp.JSON200.Data) == 0 {
 		return nil
 	}
 
-	bridge := (*resp.JSON200.Data)[0]
+	bridge := resp.JSON200.Data[0]
 	b.state.UpdateBridgeResource(&bridge)
 	return nil
 }
@@ -1111,11 +1110,11 @@ func (b *Bridge) SyncBridgeHome(ctx context.Context) error {
 		return err
 	}
 
-	if resp.JSON200 == nil || resp.JSON200.Data == nil || len(*resp.JSON200.Data) == 0 {
+	if resp.JSON200 == nil || len(resp.JSON200.Data) == 0 {
 		return nil
 	}
 
-	home := (*resp.JSON200.Data)[0]
+	home := resp.JSON200.Data[0]
 	b.state.UpdateBridgeHome(&home)
 	return nil
 }

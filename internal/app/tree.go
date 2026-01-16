@@ -119,14 +119,11 @@ func (m *Model) buildBridgeChildren(bridgeNode *panels.TreeNode, state *hue.Brid
 
 		for _, room := range rooms {
 			name := "Unknown"
-			if room.Metadata != nil && room.Metadata.Name != nil {
-				name = *room.Metadata.Name
+			if room.Metadata.Name != "" {
+				name = room.Metadata.Name
 			}
 
-			roomID := ""
-			if room.Id != nil {
-				roomID = *room.Id
-			}
+			roomID := room.Id
 
 			// Get lights for this room
 			lights := state.RoomLights(room)
@@ -157,26 +154,22 @@ func (m *Model) buildBridgeChildren(bridgeNode *panels.TreeNode, state *hue.Brid
 
 			// Get non-light devices in room
 			var nonLightDevices []hueclient.DeviceGet
-			if room.Children != nil {
-				for _, child := range *room.Children {
-					if child.Rtype != nil && *child.Rtype == "device" && child.Rid != nil {
-						device, found := state.GetDevice(*child.Rid)
-						if !found {
-							continue
+			for _, child := range room.Children {
+				if child.Rtype == hueclient.ResourceTypeDevice && child.Rid != "" {
+					device, found := state.GetDevice(child.Rid)
+					if !found {
+						continue
+					}
+					// Check if device has lights (if so, skip - it's a light device)
+					hasLightService := false
+					for _, svc := range device.Services {
+						if svc.Rtype == hueclient.ResourceTypeLight {
+							hasLightService = true
+							break
 						}
-						// Check if device has lights (if so, skip - it's a light device)
-						hasLightService := false
-						if device.Services != nil {
-							for _, svc := range *device.Services {
-								if svc.Rtype != nil && *svc.Rtype == "light" {
-									hasLightService = true
-									break
-								}
-							}
-						}
-						if !hasLightService {
-							nonLightDevices = append(nonLightDevices, device)
-						}
+					}
+					if !hasLightService {
+						nonLightDevices = append(nonLightDevices, device)
 					}
 				}
 			}
@@ -204,12 +197,9 @@ func (m *Model) buildBridgeChildren(bridgeNode *panels.TreeNode, state *hue.Brid
 					Children: make([]*panels.TreeNode, 0, len(lights)),
 				}
 				for _, light := range lights {
-					lightID := ""
-					if light.Id != nil {
-						lightID = *light.Id
-					}
+					lightID := light.Id
 					lightName := state.GetLightName(light)
-					isOn := light.On != nil && light.On.On != nil && *light.On.On
+					isOn := light.On.On
 					brightness, indicatorColor := getLightBrightnessAndColor(light)
 					// Store a copy of the light in RawPtr for later access
 					lightCopy := light
@@ -252,11 +242,8 @@ func (m *Model) buildBridgeChildren(bridgeNode *panels.TreeNode, state *hue.Brid
 					Children: make([]*panels.TreeNode, 0, len(nonLightDevices)),
 				}
 				for _, device := range nonLightDevices {
-					deviceID := ""
+					deviceID := device.Id
 					deviceName := device.DeviceName("")
-					if device.Id != nil {
-						deviceID = *device.Id
-					}
 					// Check if device has motion sensor and its state
 					hasMotion, isDetecting := state.GetDeviceMotionState(device)
 					isOn := hasMotion && isDetecting
@@ -301,11 +288,8 @@ func (m *Model) buildBridgeChildren(bridgeNode *panels.TreeNode, state *hue.Brid
 					Children: make([]*panels.TreeNode, 0, len(scenes)),
 				}
 				for _, scene := range scenes {
-					sceneID := ""
+					sceneID := scene.Id
 					sceneName := scene.SceneName("")
-					if scene.Id != nil {
-						sceneID = *scene.Id
-					}
 					scenesNode.Children = append(scenesNode.Children, &panels.TreeNode{
 						ID:    nodeID(bridgeID, sceneID),
 						Label: sceneName,
@@ -342,11 +326,8 @@ func (m *Model) buildBridgeChildren(bridgeNode *panels.TreeNode, state *hue.Brid
 					Children: make([]*panels.TreeNode, 0, len(smartScenes)),
 				}
 				for _, scene := range smartScenes {
-					sceneID := ""
+					sceneID := scene.Id
 					sceneName := state.GetSmartSceneName(scene)
-					if scene.Id != nil {
-						sceneID = *scene.Id
-					}
 					isActive := scene.State == "active"
 					smartScenesNode.Children = append(smartScenesNode.Children, &panels.TreeNode{
 						ID:    nodeID(bridgeID, sceneID),
@@ -392,14 +373,11 @@ func (m *Model) buildBridgeChildren(bridgeNode *panels.TreeNode, state *hue.Brid
 
 		for _, zone := range zones {
 			name := "Unknown"
-			if zone.Metadata != nil && zone.Metadata.Name != nil {
-				name = *zone.Metadata.Name
+			if zone.Metadata.Name != "" {
+				name = zone.Metadata.Name
 			}
 
-			zoneID := ""
-			if zone.Id != nil {
-				zoneID = *zone.Id
-			}
+			zoneID := zone.Id
 
 			// Get lights for this zone
 			lights := state.ZoneLights(zone)
@@ -448,12 +426,9 @@ func (m *Model) buildBridgeChildren(bridgeNode *panels.TreeNode, state *hue.Brid
 					Children: make([]*panels.TreeNode, 0, len(lights)),
 				}
 				for _, light := range lights {
-					lightID := ""
-					if light.Id != nil {
-						lightID = *light.Id
-					}
+					lightID := light.Id
 					lightName := state.GetLightName(light)
-					isOn := light.On != nil && light.On.On != nil && *light.On.On
+					isOn := light.On.On
 					lightBrightness, lightIndicatorColor := getLightBrightnessAndColor(light)
 					// Store a copy of the light in RawPtr for later access
 					lightCopy := light
@@ -497,11 +472,8 @@ func (m *Model) buildBridgeChildren(bridgeNode *panels.TreeNode, state *hue.Brid
 					Children: make([]*panels.TreeNode, 0, len(zoneScenes)),
 				}
 				for _, scene := range zoneScenes {
-					sceneID := ""
+					sceneID := scene.Id
 					sceneName := scene.SceneName("")
-					if scene.Id != nil {
-						sceneID = *scene.Id
-					}
 					scenesNode.Children = append(scenesNode.Children, &panels.TreeNode{
 						ID:    nodeID(bridgeID, sceneID),
 						Label: sceneName,
@@ -538,11 +510,8 @@ func (m *Model) buildBridgeChildren(bridgeNode *panels.TreeNode, state *hue.Brid
 					Children: make([]*panels.TreeNode, 0, len(zoneSmartScenes)),
 				}
 				for _, scene := range zoneSmartScenes {
-					sceneID := ""
+					sceneID := scene.Id
 					sceneName := state.GetSmartSceneName(scene)
-					if scene.Id != nil {
-						sceneID = *scene.Id
-					}
 					isActive := scene.State == "active"
 					smartScenesNode.Children = append(smartScenesNode.Children, &panels.TreeNode{
 						ID:    nodeID(bridgeID, sceneID),
@@ -617,7 +586,7 @@ func (m *Model) buildBridgeChildren(bridgeNode *panels.TreeNode, state *hue.Brid
 				if lightEntry.Service != nil && lightEntry.Service.RID != "" {
 					light, lightFound := state.GetLight(lightEntry.Service.RID)
 					if lightFound {
-						isOn := light.On != nil && light.On.On != nil && *light.On.On
+						isOn := light.On.On
 						lightName := state.GetLightName(light)
 
 						brightness, indicatorColor := getLightBrightnessAndColor(light)
@@ -674,16 +643,13 @@ func (m *Model) buildLightsTree(_ *hue.BridgeState) {
 		// Build device -> room name mapping
 		deviceRoomNames := make(map[string]string)
 		for _, room := range rooms {
-			if room.Children == nil {
+			if len(room.Children) == 0 {
 				continue
 			}
-			roomName := ""
-			if room.Metadata != nil && room.Metadata.Name != nil {
-				roomName = *room.Metadata.Name
-			}
-			for _, child := range *room.Children {
-				if child.Rtype != nil && *child.Rtype == "device" && child.Rid != nil {
-					deviceRoomNames[*child.Rid] = roomName
+			roomName := room.Metadata.Name
+			for _, child := range room.Children {
+				if child.Rtype == hueclient.ResourceTypeDevice && child.Rid != "" {
+					deviceRoomNames[child.Rid] = roomName
 				}
 			}
 		}
@@ -721,13 +687,13 @@ func (m *Model) buildLightsTree(_ *hue.BridgeState) {
 
 		for _, light := range lights {
 			name := state.GetLightName(light)
-			isOn := light.On != nil && light.On.On != nil && *light.On.On
+			isOn := light.On.On
 			brightness, indicatorColor := getLightBrightnessAndColor(light)
 
 			// Get room name via owning device
 			groupSuffix := ""
-			if light.Owner != nil && light.Owner.Rid != nil {
-				if roomName := deviceRoomNames[*light.Owner.Rid]; roomName != "" {
+			if light.Owner.Rid != "" {
+				if roomName := deviceRoomNames[light.Owner.Rid]; roomName != "" {
 					groupSuffix = "(" + roomName + ")"
 				}
 			}
@@ -735,12 +701,12 @@ func (m *Model) buildLightsTree(_ *hue.BridgeState) {
 			// Store a copy of the light in RawPtr for later access
 			lightCopy := light
 			bridgeNode.Children = append(bridgeNode.Children, &panels.TreeNode{
-				ID:          nodeID(bridge.Info.ID, *light.Id),
+				ID:          nodeID(bridge.Info.ID, light.Id),
 				Label:       name,
 				GroupSuffix: groupSuffix,
 				Depth:       1,
 				Item: &panels.EntityItem{
-					ID:             *light.Id,
+					ID:             light.Id,
 					Name:           name,
 					Type:           panels.EntityLight,
 					IsOn:           isOn,
@@ -784,16 +750,13 @@ func (m *Model) buildDevicesTree(_ *hue.BridgeState) {
 		// Build device -> room name mapping
 		deviceRoomNames := make(map[string]string)
 		for _, room := range rooms {
-			if room.Children == nil {
+			if len(room.Children) == 0 {
 				continue
 			}
-			roomName := ""
-			if room.Metadata != nil && room.Metadata.Name != nil {
-				roomName = *room.Metadata.Name
-			}
-			for _, child := range *room.Children {
-				if child.Rtype != nil && *child.Rtype == "device" && child.Rid != nil {
-					deviceRoomNames[*child.Rid] = roomName
+			roomName := room.Metadata.Name
+			for _, child := range room.Children {
+				if child.Rtype == hueclient.ResourceTypeDevice && child.Rid != "" {
+					deviceRoomNames[child.Rid] = roomName
 				}
 			}
 		}
@@ -801,18 +764,15 @@ func (m *Model) buildDevicesTree(_ *hue.BridgeState) {
 		// Build a set of device IDs that own lights (to exclude them)
 		lightOwnerIDs := make(map[string]bool)
 		for _, light := range state.AllLights() {
-			if light.Owner != nil && light.Owner.Rid != nil {
-				lightOwnerIDs[*light.Owner.Rid] = true
+			if light.Owner.Rid != "" {
+				lightOwnerIDs[light.Owner.Rid] = true
 			}
 		}
 
 		// Filter and collect non-light devices
 		var nonLightDevices []hueclient.DeviceGet
 		for _, device := range devices {
-			id := ""
-			if device.Id != nil {
-				id = *device.Id
-			}
+			id := device.Id
 
 			// Skip devices that own lights (these are light fixtures)
 			if lightOwnerIDs[id] {
@@ -821,12 +781,10 @@ func (m *Model) buildDevicesTree(_ *hue.BridgeState) {
 
 			// Skip bridge devices (check if device provides a "bridge" service)
 			isBridgeDevice := false
-			if device.Services != nil {
-				for _, svc := range *device.Services {
-					if svc.Rtype != nil && *svc.Rtype == "bridge" {
-						isBridgeDevice = true
-						break
-					}
+			for _, svc := range device.Services {
+				if svc.Rtype == hueclient.ResourceTypeBridge {
+					isBridgeDevice = true
+					break
 				}
 			}
 			if isBridgeDevice {
@@ -868,10 +826,7 @@ func (m *Model) buildDevicesTree(_ *hue.BridgeState) {
 		}
 
 		for _, device := range nonLightDevices {
-			id := ""
-			if device.Id != nil {
-				id = *device.Id
-			}
+			id := device.Id
 
 			name := device.DeviceName("")
 
@@ -960,21 +915,18 @@ func (m *Model) buildScenesTree(_ *hue.BridgeState) {
 		// Regular scenes
 		for _, scene := range scenes {
 			name := scene.SceneName("")
-			id := ""
-			if scene.Id != nil {
-				id = *scene.Id
-			}
+			id := scene.Id
 
 			// Get room/zone name for the scene and track the type
 			groupName := ""
 			groupType := panels.EntityRoom // Default to room
-			if scene.Group != nil && scene.Group.Rid != nil {
-				groupID := *scene.Group.Rid
+			if scene.Group.Rid != "" {
+				groupID := scene.Group.Rid
 				if room, ok := state.GetRoom(groupID); ok {
 					groupName = state.GetRoomName(room)
 					groupType = panels.EntityRoom
 				} else if zone, ok := state.GetZone(groupID); ok {
-					groupName = state.GetRoomName(zone)
+					groupName = zone.ZoneName("")
 					groupType = panels.EntityZone
 				}
 			}
@@ -1011,21 +963,18 @@ func (m *Model) buildScenesTree(_ *hue.BridgeState) {
 		// Smart scenes
 		for _, scene := range smartScenes {
 			name := state.GetSmartSceneName(scene)
-			id := ""
-			if scene.Id != nil {
-				id = *scene.Id
-			}
+			id := scene.Id
 
 			// Get room/zone name for the smart scene and track the type
 			groupName := ""
 			groupType := panels.EntityRoom // Default to room
-			if scene.Group.Rid != nil {
-				groupID := *scene.Group.Rid
+			if scene.Group.Rid != "" {
+				groupID := scene.Group.Rid
 				if room, ok := state.GetRoom(groupID); ok {
 					groupName = state.GetRoomName(room)
 					groupType = panels.EntityRoom
 				} else if zone, ok := state.GetZone(groupID); ok {
-					groupName = state.GetRoomName(zone)
+					groupName = zone.ZoneName("")
 					groupType = panels.EntityZone
 				}
 			}
@@ -1083,10 +1032,10 @@ func getLightBrightnessAndColor(light hueclient.LightGet) (float64, string) {
 	brightness := 0.0
 	indicatorColor := ""
 
-	isOn := light.On != nil && light.On.On != nil && *light.On.On
+	isOn := light.On.On
 	if isOn {
-		if light.Dimming != nil && light.Dimming.Brightness != nil {
-			brightness = float64(*light.Dimming.Brightness)
+		if light.Dimming != nil {
+			brightness = float64(light.Dimming.Brightness)
 		} else {
 			brightness = 100.0 // Default to full brightness if on but no dimming
 		}

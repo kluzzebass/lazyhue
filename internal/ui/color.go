@@ -394,26 +394,22 @@ func RenderBrightnessIndicatorFromHex(brightness float64, hexColor string) strin
 // Returns empty string if light is off or has no color information.
 func GetLightColor(light hueclient.LightGet) string {
 	brightness := 100.0
-	if light.Dimming != nil && light.Dimming.Brightness != nil {
-		brightness = float64(*light.Dimming.Brightness)
+	if light.Dimming != nil {
+		brightness = float64(light.Dimming.Brightness)
 	}
 
 	// Try XY color first (color lights)
-	if light.Color != nil && light.Color.Xy != nil {
-		if light.Color.Xy.X != nil && light.Color.Xy.Y != nil {
-			x := float64(*light.Color.Xy.X)
-			y := float64(*light.Color.Xy.Y)
-			r, g, b := XyToRGB(x, y, brightness)
-			return RGBToHex(r, g, b)
-		}
+	if light.Color != nil {
+		x := float64(light.Color.Xy.X)
+		y := float64(light.Color.Xy.Y)
+		r, g, b := XyToRGB(x, y, brightness)
+		return RGBToHex(r, g, b)
 	}
 
 	// Try color temperature (white ambiance lights)
-	if light.ColorTemperature != nil && light.ColorTemperature.Mirek != nil {
-		if light.ColorTemperature.MirekValid == nil || *light.ColorTemperature.MirekValid {
-			r, g, b := MirekToRGB(*light.ColorTemperature.Mirek)
-			return RGBToHex(r, g, b)
-		}
+	if light.ColorTemperature != nil && light.ColorTemperature.MirekValid {
+		r, g, b := MirekToRGB(light.ColorTemperature.Mirek)
+		return RGBToHex(r, g, b)
 	}
 
 	// Default to warm white for non-color lights

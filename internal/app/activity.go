@@ -100,31 +100,28 @@ func (e *LightEvent) Parse(bridgeID, bridgeName, eventType string, data json.Raw
 	if state != nil {
 		if light, ok := state.GetLight(update.ID); ok {
 			e.Name = state.GetLightName(light)
-			if light.On != nil && light.On.On != nil {
-				e.IsOn = *light.On.On
-				if e.IsOn {
-					if light.Dimming != nil && light.Dimming.Brightness != nil {
-						e.Brightness = float64(*light.Dimming.Brightness)
-						e.Details = fmt.Sprintf("on %.0f%%", *light.Dimming.Brightness)
-					} else {
-						e.Details = "on"
-					}
-					// Get color for indicator
-					brightnessForColor := 100.0
-					if light.Dimming != nil && light.Dimming.Brightness != nil {
-						brightnessForColor = float64(*light.Dimming.Brightness)
-					}
-					if light.Color != nil && light.Color.Xy != nil &&
-						light.Color.Xy.X != nil && light.Color.Xy.Y != nil {
-						r, g, b := ui.XyToRGB(float64(*light.Color.Xy.X), float64(*light.Color.Xy.Y), brightnessForColor)
-						e.IndicatorColor = fmt.Sprintf("#%02x%02x%02x", r, g, b)
-					} else if light.ColorTemperature != nil && light.ColorTemperature.Mirek != nil {
-						r, g, b := ui.MirekToRGB(*light.ColorTemperature.Mirek)
-						e.IndicatorColor = fmt.Sprintf("#%02x%02x%02x", r, g, b)
-					}
+			e.IsOn = light.On.On
+			if e.IsOn {
+				if light.Dimming != nil {
+					e.Brightness = float64(light.Dimming.Brightness)
+					e.Details = fmt.Sprintf("on %.0f%%", light.Dimming.Brightness)
 				} else {
-					e.Details = "off"
+					e.Details = "on"
 				}
+				// Get color for indicator
+				brightnessForColor := 100.0
+				if light.Dimming != nil {
+					brightnessForColor = float64(light.Dimming.Brightness)
+				}
+				if light.Color != nil {
+					r, g, b := ui.XyToRGB(float64(light.Color.Xy.X), float64(light.Color.Xy.Y), brightnessForColor)
+					e.IndicatorColor = fmt.Sprintf("#%02x%02x%02x", r, g, b)
+				} else if light.ColorTemperature != nil {
+					r, g, b := ui.MirekToRGB(light.ColorTemperature.Mirek)
+					e.IndicatorColor = fmt.Sprintf("#%02x%02x%02x", r, g, b)
+				}
+			} else {
+				e.Details = "off"
 			}
 		} else {
 			// Light not in cache - show truncated ID
@@ -174,24 +171,22 @@ func (e *GroupedLightEvent) Parse(bridgeID, bridgeName, eventType string, data j
 			if name := state.GetGroupedLightName(update.ID); name != "" {
 				e.Name = name
 			}
-			if gl.On != nil && gl.On.On != nil {
-				e.IsOn = *gl.On.On
+			if gl.On != nil {
+				e.IsOn = gl.On.On
 				if e.IsOn {
-					if gl.Dimming != nil && gl.Dimming.Brightness != nil {
-						e.Brightness = float64(*gl.Dimming.Brightness)
-						e.Details = fmt.Sprintf("on %.0f%%", *gl.Dimming.Brightness)
+					if gl.Dimming != nil {
+						e.Brightness = float64(gl.Dimming.Brightness)
+						e.Details = fmt.Sprintf("on %.0f%%", gl.Dimming.Brightness)
 					} else {
 						e.Details = "on"
 					}
 					// Calculate aggregated color from lights in the room/zone/bridge home
 					var lights []hueclient.LightGet
 					for _, room := range state.AllRooms() {
-						if room.Services != nil {
-							for _, svc := range *room.Services {
-								if svc.Rtype != nil && *svc.Rtype == "grouped_light" && svc.Rid != nil && *svc.Rid == update.ID {
-									lights = state.RoomLights(room)
-									break
-								}
+						for _, svc := range room.Services {
+							if svc.Rtype == "grouped_light" && svc.Rid == update.ID {
+								lights = state.RoomLights(room)
+								break
 							}
 						}
 						if len(lights) > 0 {
@@ -200,12 +195,10 @@ func (e *GroupedLightEvent) Parse(bridgeID, bridgeName, eventType string, data j
 					}
 					if len(lights) == 0 {
 						for _, zone := range state.AllZones() {
-							if zone.Services != nil {
-								for _, svc := range *zone.Services {
-									if svc.Rtype != nil && *svc.Rtype == "grouped_light" && svc.Rid != nil && *svc.Rid == update.ID {
-										lights = state.RoomLights(zone)
-										break
-									}
+							for _, svc := range zone.Services {
+								if svc.Rtype == "grouped_light" && svc.Rid == update.ID {
+									lights = state.ZoneLights(zone)
+									break
 								}
 							}
 							if len(lights) > 0 {
@@ -215,26 +208,22 @@ func (e *GroupedLightEvent) Parse(bridgeID, bridgeName, eventType string, data j
 					}
 					if len(lights) == 0 {
 						if bridgeHome := state.GetBridgeHome(); bridgeHome != nil {
-							if bridgeHome.Services != nil {
-								for _, svc := range *bridgeHome.Services {
-									if svc.Rtype != nil && *svc.Rtype == "grouped_light" && svc.Rid != nil && *svc.Rid == update.ID {
-										if bridgeHome.Children != nil {
-											deviceLights := make(map[string][]hueclient.LightGet)
-											for _, light := range state.AllLights() {
-												if light.Owner != nil && light.Owner.Rid != nil {
-													deviceLights[*light.Owner.Rid] = append(deviceLights[*light.Owner.Rid], light)
-												}
-											}
-											for _, child := range *bridgeHome.Children {
-												if child.Rid != nil {
-													if deviceLightList, ok := deviceLights[*child.Rid]; ok {
-														lights = append(lights, deviceLightList...)
-													}
-												}
+							for _, svc := range bridgeHome.Services {
+								if svc.Rtype == "grouped_light" && svc.Rid == update.ID {
+									deviceLights := make(map[string][]hueclient.LightGet)
+									for _, light := range state.AllLights() {
+										if light.Owner.Rid != "" {
+											deviceLights[light.Owner.Rid] = append(deviceLights[light.Owner.Rid], light)
+										}
+									}
+									for _, child := range bridgeHome.Children {
+										if child.Rid != "" {
+											if deviceLightList, ok := deviceLights[child.Rid]; ok {
+												lights = append(lights, deviceLightList...)
 											}
 										}
-										break
 									}
+									break
 								}
 							}
 						}
@@ -292,12 +281,10 @@ func (e *SceneEvent) Parse(bridgeID, bridgeName, eventType string, data json.Raw
 	if state != nil {
 		if scene, ok := state.GetScene(update.ID); ok {
 			e.Name = scene.SceneName("")
-			if scene.Status != nil && scene.Status.Active != nil {
-				if *scene.Status.Active == "active" {
-					e.Details = "activated"
-				} else {
-					e.Details = "deactivated"
-				}
+			if scene.Status.Active != nil && *scene.Status.Active == "active" {
+				e.Details = "activated"
+			} else {
+				e.Details = "deactivated"
 			}
 		} else {
 			// Scene not in cache - show truncated ID
@@ -341,17 +328,15 @@ func (e *MotionEvent) Parse(bridgeID, bridgeName, eventType string, data json.Ra
 
 	if state != nil {
 		if motion, ok := state.GetMotion(update.ID); ok {
-			if motion.Owner != nil && motion.Owner.Rid != nil {
-				if device, ok := state.GetDevice(*motion.Owner.Rid); ok {
+			if motion.Owner.Rid != "" {
+				if device, ok := state.GetDevice(motion.Owner.Rid); ok {
 					e.Name = device.DeviceName("")
 				}
 			}
-			if motion.Motion != nil && motion.Motion.Motion != nil {
-				if *motion.Motion.Motion {
-					e.Details = "motion detected"
-				} else {
-					e.Details = "clear"
-				}
+			if motion.Motion.Motion {
+				e.Details = "motion detected"
+			} else {
+				e.Details = "clear"
 			}
 		}
 	}
@@ -969,14 +954,12 @@ func (e *TemperatureEvent) Parse(bridgeID, bridgeName, eventType string, data js
 
 	if state != nil {
 		if temp, ok := state.GetTemperature(update.ID); ok {
-			if temp.Owner != nil && temp.Owner.Rid != nil {
-				if device, ok := state.GetDevice(*temp.Owner.Rid); ok {
+			if temp.Owner.Rid != "" {
+				if device, ok := state.GetDevice(temp.Owner.Rid); ok {
 					e.Name = device.DeviceName("")
 				}
 			}
-			if temp.Temperature != nil && temp.Temperature.Temperature != nil {
-				e.Details = fmt.Sprintf("%.1f°C", *temp.Temperature.Temperature)
-			}
+			e.Details = fmt.Sprintf("%.1f°C", temp.Temperature.Temperature)
 		}
 	}
 
@@ -1016,17 +999,15 @@ func (e *LightLevelEvent) Parse(bridgeID, bridgeName, eventType string, data jso
 
 	if state != nil {
 		if ll, ok := state.GetLightLevel(update.ID); ok {
-			if ll.Owner != nil && ll.Owner.Rid != nil {
-				if device, ok := state.GetDevice(*ll.Owner.Rid); ok {
+			if ll.Owner.Rid != "" {
+				if device, ok := state.GetDevice(ll.Owner.Rid); ok {
 					e.Name = device.DeviceName("")
 				}
 			}
-			if ll.Light != nil && ll.Light.LightLevel != nil {
-				// Convert from Hue's log scale to approximate lux
-				lux := float64(*ll.Light.LightLevel-1) / 10000.0
-				lux = 100 * (lux * lux * lux) // Rough approximation
-				e.Details = fmt.Sprintf("%.0f lux", lux)
-			}
+			// Convert from Hue's log scale to approximate lux
+			lux := float64(ll.Light.LightLevel-1) / 10000.0
+			lux = 100 * (lux * lux * lux) // Rough approximation
+			e.Details = fmt.Sprintf("%.0f lux", lux)
 		}
 	}
 
@@ -1067,73 +1048,65 @@ func (e *GroupedLightLevelEvent) Parse(bridgeID, bridgeName, eventType string, d
 	if state != nil {
 		allRooms := state.AllRooms()
 		for _, room := range allRooms {
-			if room.Services != nil {
-				for _, svc := range *room.Services {
-					if svc.Rtype != nil && *svc.Rtype == "grouped_light_level" && svc.Rid != nil && *svc.Rid == update.ID {
-						if room.Metadata != nil && room.Metadata.Name != nil {
-							e.Name = *room.Metadata.Name
+			for _, svc := range room.Services {
+				if svc.Rtype == "grouped_light_level" && svc.Rid == update.ID {
+					if room.Metadata.Name != "" {
+						e.Name = room.Metadata.Name
+					}
+					var totalLux float64
+					var count int
+					for _, child := range room.Children {
+						if string(child.Rtype) != "device" {
+							continue
 						}
-						var totalLux float64
-						var count int
-						if room.Children != nil {
-							for _, child := range *room.Children {
-								if child.Rid == nil || child.Rtype == nil || *child.Rtype != "device" {
-									continue
-								}
-								if device, ok := state.GetDevice(*child.Rid); ok {
-									if hasLevel, level := state.GetDeviceLightLevel(device); hasLevel && level > 0 {
-										// Convert from Hue's log scale to lux: 10^((level-1)/10000)
-										lux := math.Pow(10, float64(level-1)/10000)
-										totalLux += lux
-										count++
-									}
-								}
+						if device, ok := state.GetDevice(child.Rid); ok {
+							if hasLevel, level := state.GetDeviceLightLevel(device); hasLevel && level > 0 {
+								// Convert from Hue's log scale to lux: 10^((level-1)/10000)
+								lux := math.Pow(10, float64(level-1)/10000)
+								totalLux += lux
+								count++
 							}
 						}
-						if count > 0 {
-							avgLux := totalLux / float64(count)
-							e.Details = fmt.Sprintf("%.0f lux", avgLux)
-						} else {
-							e.Details = "no sensors"
-						}
-						return e, nil
 					}
+					if count > 0 {
+						avgLux := totalLux / float64(count)
+						e.Details = fmt.Sprintf("%.0f lux", avgLux)
+					} else {
+						e.Details = "no sensors"
+					}
+					return e, nil
 				}
 			}
 		}
 		allZones := state.AllZones()
 		for _, zone := range allZones {
-			if zone.Services != nil {
-				for _, svc := range *zone.Services {
-					if svc.Rtype != nil && *svc.Rtype == "grouped_light_level" && svc.Rid != nil && *svc.Rid == update.ID {
-						if zone.Metadata != nil && zone.Metadata.Name != nil {
-							e.Name = *zone.Metadata.Name
+			for _, svc := range zone.Services {
+				if svc.Rtype == "grouped_light_level" && svc.Rid == update.ID {
+					if zone.Metadata.Name != "" {
+						e.Name = zone.Metadata.Name
+					}
+					var totalLux float64
+					var count int
+					for _, child := range zone.Children {
+						if string(child.Rtype) != "device" {
+							continue
 						}
-						var totalLux float64
-						var count int
-						if zone.Children != nil {
-							for _, child := range *zone.Children {
-								if child.Rid == nil || child.Rtype == nil || *child.Rtype != "device" {
-									continue
-								}
-								if device, ok := state.GetDevice(*child.Rid); ok {
-									if hasLevel, level := state.GetDeviceLightLevel(device); hasLevel && level > 0 {
-										// Convert from Hue's log scale to lux: 10^((level-1)/10000)
-										lux := math.Pow(10, float64(level-1)/10000)
-										totalLux += lux
-										count++
-									}
-								}
+						if device, ok := state.GetDevice(child.Rid); ok {
+							if hasLevel, level := state.GetDeviceLightLevel(device); hasLevel && level > 0 {
+								// Convert from Hue's log scale to lux: 10^((level-1)/10000)
+								lux := math.Pow(10, float64(level-1)/10000)
+								totalLux += lux
+								count++
 							}
 						}
-						if count > 0 {
-							avgLux := totalLux / float64(count)
-							e.Details = fmt.Sprintf("%.0f lux", avgLux)
-						} else {
-							e.Details = "no sensors"
-						}
-						return e, nil
 					}
+					if count > 0 {
+						avgLux := totalLux / float64(count)
+						e.Details = fmt.Sprintf("%.0f lux", avgLux)
+					} else {
+						e.Details = "no sensors"
+					}
+					return e, nil
 				}
 			}
 		}
@@ -1178,80 +1151,72 @@ func (e *GroupedMotionEvent) Parse(bridgeID, bridgeName, eventType string, data 
 		// Check rooms for this grouped_motion service
 		allRooms := state.AllRooms()
 		for _, room := range allRooms {
-			if room.Services != nil {
-				for _, svc := range *room.Services {
-					if svc.Rtype != nil && *svc.Rtype == "grouped_motion" && svc.Rid != nil && *svc.Rid == update.ID {
-						if room.Metadata != nil && room.Metadata.Name != nil {
-							e.Name = *room.Metadata.Name
-						}
-						var anyMotion bool
-						var sensorCount int
-						if room.Children != nil {
-							for _, child := range *room.Children {
-								if child.Rid == nil || child.Rtype == nil || *child.Rtype != "device" {
-									continue
-								}
-								if device, ok := state.GetDevice(*child.Rid); ok {
-									if hasMotion, isDetecting := state.GetDeviceMotionState(device); hasMotion {
-										sensorCount++
-										if isDetecting {
-											anyMotion = true
-										}
-									}
-								}
-							}
-						}
-						if sensorCount > 0 {
-							if anyMotion {
-								e.Details = "motion detected"
-							} else {
-								e.Details = "clear"
-							}
-						} else {
-							e.Details = "no sensors"
-						}
-						return e, nil
+			for _, svc := range room.Services {
+				if svc.Rtype == "grouped_motion" && svc.Rid == update.ID {
+					if room.Metadata.Name != "" {
+						e.Name = room.Metadata.Name
 					}
+					var anyMotion bool
+					var sensorCount int
+					for _, child := range room.Children {
+						if string(child.Rtype) != "device" {
+							continue
+						}
+						if device, ok := state.GetDevice(child.Rid); ok {
+							if hasMotion, isDetecting := state.GetDeviceMotionState(device); hasMotion {
+								sensorCount++
+								if isDetecting {
+									anyMotion = true
+								}
+							}
+						}
+					}
+					if sensorCount > 0 {
+						if anyMotion {
+							e.Details = "motion detected"
+						} else {
+							e.Details = "clear"
+						}
+					} else {
+						e.Details = "no sensors"
+					}
+					return e, nil
 				}
 			}
 		}
 		// Check zones for this grouped_motion service
 		allZones := state.AllZones()
 		for _, zone := range allZones {
-			if zone.Services != nil {
-				for _, svc := range *zone.Services {
-					if svc.Rtype != nil && *svc.Rtype == "grouped_motion" && svc.Rid != nil && *svc.Rid == update.ID {
-						if zone.Metadata != nil && zone.Metadata.Name != nil {
-							e.Name = *zone.Metadata.Name
-						}
-						var anyMotion bool
-						var sensorCount int
-						if zone.Children != nil {
-							for _, child := range *zone.Children {
-								if child.Rid == nil || child.Rtype == nil || *child.Rtype != "device" {
-									continue
-								}
-								if device, ok := state.GetDevice(*child.Rid); ok {
-									if hasMotion, isDetecting := state.GetDeviceMotionState(device); hasMotion {
-										sensorCount++
-										if isDetecting {
-											anyMotion = true
-										}
-									}
-								}
-							}
-						}
-						if sensorCount > 0 {
-							if anyMotion {
-								e.Details = "motion detected"
-							} else {
-								e.Details = "clear"
-							}
-						} else {
-							e.Details = "no sensors"
-						}
-						return e, nil
+			for _, svc := range zone.Services {
+				if svc.Rtype == "grouped_motion" && svc.Rid == update.ID {
+					if zone.Metadata.Name != "" {
+						e.Name = zone.Metadata.Name
 					}
+					var anyMotion bool
+					var sensorCount int
+					for _, child := range zone.Children {
+						if string(child.Rtype) != "device" {
+							continue
+						}
+						if device, ok := state.GetDevice(child.Rid); ok {
+							if hasMotion, isDetecting := state.GetDeviceMotionState(device); hasMotion {
+								sensorCount++
+								if isDetecting {
+									anyMotion = true
+								}
+							}
+						}
+					}
+					if sensorCount > 0 {
+						if anyMotion {
+							e.Details = "motion detected"
+						} else {
+							e.Details = "clear"
+						}
+					} else {
+						e.Details = "no sensors"
+					}
+					return e, nil
 				}
 			}
 		}
@@ -1438,8 +1403,8 @@ func (e *RoomEvent) Parse(bridgeID, bridgeName, eventType string, data json.RawM
 	// Look up room name from state
 	if state != nil {
 		if room, ok := state.GetRoom(update.ID); ok {
-			if room.Metadata != nil && room.Metadata.Name != nil {
-				e.Name = *room.Metadata.Name
+			if room.Metadata.Name != "" {
+				e.Name = room.Metadata.Name
 			}
 		}
 	}
@@ -1498,8 +1463,8 @@ func (e *ZoneEvent) Parse(bridgeID, bridgeName, eventType string, data json.RawM
 	// Look up zone name from state
 	if state != nil {
 		if zone, ok := state.GetZone(update.ID); ok {
-			if zone.Metadata != nil && zone.Metadata.Name != nil {
-				e.Name = *zone.Metadata.Name
+			if zone.Metadata.Name != "" {
+				e.Name = zone.Metadata.Name
 			}
 		}
 	}

@@ -100,18 +100,15 @@ func (m *Model) confirmCreateWithValue(name string) tea.Cmd {
 		return nil
 	}
 
-	// Use "other" as default archetype
-	archetype := hueclient.RoomArchetypeOther
-
 	// Call the appropriate create function
 	var err error
 	var entityType string
 	if m.creatingRoom {
 		entityType = "Room"
-		err = bridge.CreateRoom(name, archetype, nil)
+		err = bridge.CreateRoom(name, hueclient.RoomArchetypeOther, nil)
 	} else if m.creatingZone {
 		entityType = "Zone"
-		err = bridge.CreateZone(name, archetype, nil)
+		err = bridge.CreateZone(name, hueclient.RoomArchetypeOther, nil)
 	}
 
 	if err != nil {

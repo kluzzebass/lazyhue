@@ -37,3 +37,6 @@ go.work.sum
 
 # Build directory
 build/
+
+# Other resources
+api/

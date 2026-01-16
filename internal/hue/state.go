@@ -250,7 +250,7 @@ type BridgeState struct {
 
 	Lights                      map[string]hueclient.LightGet
 	Rooms                       map[string]hueclient.RoomGet
-	Zones                       map[string]hueclient.RoomGet // Zones use the same type as Rooms
+	Zones                       map[string]hueclient.ZoneGet
 	Scenes                      map[string]hueclient.SceneGet
 	SmartScenes                 map[string]hueclient.SmartSceneGet
 	GroupedLights               map[string]hueclient.GroupedLightGet
@@ -274,7 +274,7 @@ func NewBridgeState() *BridgeState {
 	return &BridgeState{
 		Lights:                      make(map[string]hueclient.LightGet),
 		Rooms:                       make(map[string]hueclient.RoomGet),
-		Zones:                       make(map[string]hueclient.RoomGet),
+		Zones:                       make(map[string]hueclient.ZoneGet),
 		Scenes:                      make(map[string]hueclient.SceneGet),
 		SmartScenes:                 make(map[string]hueclient.SmartSceneGet),
 		GroupedLights:               make(map[string]hueclient.GroupedLightGet),
@@ -299,7 +299,7 @@ func (s *BridgeState) GetRoom(id string) (hueclient.RoomGet, bool) {
 }
 
 // GetZone returns a zone by ID.
-func (s *BridgeState) GetZone(id string) (hueclient.RoomGet, bool) {
+func (s *BridgeState) GetZone(id string) (hueclient.ZoneGet, bool) {
 	return getFromMap(s, s.Zones, id)
 }
 
@@ -332,8 +332,8 @@ func (s *BridgeState) GetSmartScene(id string) (hueclient.SmartSceneGet, bool) {
 
 // GetSmartSceneName returns the name of a smart scene.
 func (s *BridgeState) GetSmartSceneName(scene hueclient.SmartSceneGet) string {
-	if scene.Metadata.Name != nil {
-		return *scene.Metadata.Name
+	if scene.Metadata.Name != "" {
+		return scene.Metadata.Name
 	}
 	return "Unknown"
 }
@@ -370,15 +370,7 @@ func (s *BridgeState) AllSmartScenes() []hueclient.SmartSceneGet {
 		scenes = append(scenes, sc)
 	}
 	sort.Slice(scenes, func(i, j int) bool {
-		nameI := ""
-		nameJ := ""
-		if scenes[i].Metadata.Name != nil {
-			nameI = *scenes[i].Metadata.Name
-		}
-		if scenes[j].Metadata.Name != nil {
-			nameJ = *scenes[j].Metadata.Name
-		}
-		return strings.ToLower(nameI) < strings.ToLower(nameJ)
+		return strings.ToLower(scenes[i].Metadata.Name) < strings.ToLower(scenes[j].Metadata.Name)
 	})
 	return scenes
 }
@@ -394,26 +386,21 @@ func (s *BridgeState) DeleteDevice(id string) {
 	}
 
 	// Remove associated services (lights, sensors, etc.)
-	if device.Services != nil {
-		for _, svc := range *device.Services {
-			if svc.Rid == nil {
-				continue
-			}
-			rid := *svc.Rid
-			if svc.Rtype != nil {
-				switch *svc.Rtype {
-				case hueclient.ResourceIdentifierRtypeLight:
-					delete(s.Lights, rid)
-				case hueclient.ResourceIdentifierRtypeMotion:
-					delete(s.MotionSensors, rid)
-				case hueclient.ResourceIdentifierRtypeTemperature:
-					delete(s.Temperatures, rid)
-				case hueclient.ResourceIdentifierRtypeLightLevel:
-					delete(s.LightLevels, rid)
-				case hueclient.ResourceIdentifierRtypeDevicePower:
-					delete(s.DevicePowers, rid)
-				}
-			}
+	for _, svc := range device.Services {
+		if svc.Rid == "" {
+			continue
+		}
+		switch svc.Rtype {
+		case hueclient.ResourceTypeLight:
+			delete(s.Lights, svc.Rid)
+		case hueclient.ResourceTypeMotion:
+			delete(s.MotionSensors, svc.Rid)
+		case hueclient.ResourceTypeTemperature:
+			delete(s.Temperatures, svc.Rid)
+		case hueclient.ResourceTypeLightLevel:
+			delete(s.LightLevels, svc.Rid)
+		case hueclient.ResourceTypeDevicePower:
+			delete(s.DevicePowers, svc.Rid)
 		}
 	}
 
@@ -436,24 +423,24 @@ func (s *BridgeState) GetAllDevices() []hueclient.DeviceGet {
 // Caller must hold the lock or call this on data that won't change.
 func (s *BridgeState) GetLightName(light hueclient.LightGet) string {
 	// Get name from owning device (this is where user-assigned names are stored)
-	if light.Owner != nil && light.Owner.Rid != nil {
-		if device, ok := s.Devices[*light.Owner.Rid]; ok {
-			if device.Metadata != nil && device.Metadata.Name != nil {
-				return *device.Metadata.Name
+	if light.Owner.Rid != "" {
+		if device, ok := s.Devices[light.Owner.Rid]; ok {
+			if device.Metadata.Name != "" {
+				return device.Metadata.Name
 			}
 		}
 	}
 	// Fallback to light's own metadata (alternate name)
-	if light.Metadata != nil && light.Metadata.Name != nil {
-		return *light.Metadata.Name
+	if light.Metadata.Name != "" {
+		return light.Metadata.Name
 	}
 	return "Unknown"
 }
 
 // GetDeviceName returns the name of a device, or "Unknown" if not available.
 func (s *BridgeState) GetDeviceName(device hueclient.DeviceGet) string {
-	if device.Metadata != nil && device.Metadata.Name != nil {
-		return *device.Metadata.Name
+	if device.Metadata.Name != "" {
+		return device.Metadata.Name
 	}
 	return "Unknown"
 }
@@ -465,20 +452,16 @@ func (s *BridgeState) GetDeviceAlternateName(device hueclient.DeviceGet) string 
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	deviceID := ""
-	if device.Id != nil {
-		deviceID = *device.Id
-	}
-	if deviceID == "" {
+	if device.Id == "" {
 		return ""
 	}
 
 	// Find lights owned by this device
 	for _, light := range s.Lights {
-		if light.Owner != nil && light.Owner.Rid != nil && *light.Owner.Rid == deviceID {
+		if light.Owner.Rid == device.Id {
 			// Return the first alternate name we find
-			if light.Metadata != nil && light.Metadata.Name != nil {
-				return *light.Metadata.Name
+			if light.Metadata.Name != "" {
+				return light.Metadata.Name
 			}
 		}
 	}
@@ -487,16 +470,16 @@ func (s *BridgeState) GetDeviceAlternateName(device hueclient.DeviceGet) string 
 
 // GetRoomName returns the name of a room, or "Unknown" if not available.
 func (s *BridgeState) GetRoomName(room hueclient.RoomGet) string {
-	if room.Metadata != nil && room.Metadata.Name != nil {
-		return *room.Metadata.Name
+	if room.Metadata.Name != "" {
+		return room.Metadata.Name
 	}
 	return "Unknown"
 }
 
 // GetSceneName returns the name of a scene, or "Unknown" if not available.
 func (s *BridgeState) GetSceneName(scene hueclient.SceneGet) string {
-	if scene.Metadata != nil && scene.Metadata.Name != nil {
-		return *scene.Metadata.Name
+	if scene.Metadata.Name != "" {
+		return scene.Metadata.Name
 	}
 	return "Unknown"
 }
@@ -509,19 +492,17 @@ func (s *BridgeState) RoomLights(room hueclient.RoomGet) []hueclient.LightGet {
 	// Build device -> lights mapping
 	deviceLights := make(map[string][]hueclient.LightGet)
 	for _, light := range s.Lights {
-		if light.Owner != nil && light.Owner.Rid != nil {
-			deviceLights[*light.Owner.Rid] = append(deviceLights[*light.Owner.Rid], light)
+		if light.Owner.Rid != "" {
+			deviceLights[light.Owner.Rid] = append(deviceLights[light.Owner.Rid], light)
 		}
 	}
 
 	// Room children are devices
 	var lights []hueclient.LightGet
-	if room.Children != nil {
-		for _, child := range *room.Children {
-			if child.Rid != nil {
-				if deviceLightList, ok := deviceLights[*child.Rid]; ok {
-					lights = append(lights, deviceLightList...)
-				}
+	for _, child := range room.Children {
+		if child.Rid != "" {
+			if deviceLightList, ok := deviceLights[child.Rid]; ok {
+				lights = append(lights, deviceLightList...)
 			}
 		}
 	}
@@ -536,17 +517,15 @@ func (s *BridgeState) RoomLights(room hueclient.RoomGet) []hueclient.LightGet {
 
 // ZoneLights returns all lights in a zone.
 // Zones reference lights directly in their children (unlike rooms which reference devices).
-func (s *BridgeState) ZoneLights(zone hueclient.RoomGet) []hueclient.LightGet {
+func (s *BridgeState) ZoneLights(zone hueclient.ZoneGet) []hueclient.LightGet {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
 	var lights []hueclient.LightGet
-	if zone.Children != nil {
-		for _, child := range *zone.Children {
-			if child.Rid != nil && child.Rtype != nil && *child.Rtype == hueclient.ResourceIdentifierRtypeLight {
-				if light, ok := s.Lights[*child.Rid]; ok {
-					lights = append(lights, light)
-				}
+	for _, child := range zone.Children {
+		if child.Rtype == hueclient.ResourceTypeLight {
+			if light, ok := s.Lights[child.Rid]; ok {
+				lights = append(lights, light)
 			}
 		}
 	}
@@ -561,12 +540,9 @@ func (s *BridgeState) ZoneLights(zone hueclient.RoomGet) []hueclient.LightGet {
 
 // RoomGroupedLight returns the grouped light for a room.
 func (s *BridgeState) RoomGroupedLight(room hueclient.RoomGet) (hueclient.GroupedLightGet, bool) {
-	if room.Services == nil {
-		return hueclient.GroupedLightGet{}, false
-	}
-	for _, svc := range *room.Services {
-		if svc.Rtype != nil && *svc.Rtype == hueclient.ResourceIdentifierRtypeGroupedLight && svc.Rid != nil {
-			return s.GetGroupedLight(*svc.Rid)
+	for _, svc := range room.Services {
+		if svc.Rtype == hueclient.ResourceTypeGroupedLight && svc.Rid != "" {
+			return s.GetGroupedLight(svc.Rid)
 		}
 	}
 	return hueclient.GroupedLightGet{}, false
@@ -579,22 +555,14 @@ func (s *BridgeState) RoomScenes(roomID string) []hueclient.SceneGet {
 
 	var scenes []hueclient.SceneGet
 	for _, scene := range s.Scenes {
-		if scene.Group != nil && scene.Group.Rid != nil && *scene.Group.Rid == roomID {
+		if scene.Group.Rid == roomID {
 			scenes = append(scenes, scene)
 		}
 	}
 
 	// Sort by name for stable ordering
 	sort.Slice(scenes, func(i, j int) bool {
-		nameI := ""
-		nameJ := ""
-		if scenes[i].Metadata != nil && scenes[i].Metadata.Name != nil {
-			nameI = *scenes[i].Metadata.Name
-		}
-		if scenes[j].Metadata != nil && scenes[j].Metadata.Name != nil {
-			nameJ = *scenes[j].Metadata.Name
-		}
-		return nameI < nameJ
+		return scenes[i].Metadata.Name < scenes[j].Metadata.Name
 	})
 
 	return scenes
@@ -613,22 +581,14 @@ func (s *BridgeState) RoomSmartScenes(roomID string) []hueclient.SmartSceneGet {
 
 	var scenes []hueclient.SmartSceneGet
 	for _, scene := range s.SmartScenes {
-		if scene.Group.Rid != nil && *scene.Group.Rid == roomID {
+		if scene.Group.Rid == roomID {
 			scenes = append(scenes, scene)
 		}
 	}
 
 	// Sort by name for stable ordering
 	sort.Slice(scenes, func(i, j int) bool {
-		nameI := ""
-		nameJ := ""
-		if scenes[i].Metadata.Name != nil {
-			nameI = *scenes[i].Metadata.Name
-		}
-		if scenes[j].Metadata.Name != nil {
-			nameJ = *scenes[j].Metadata.Name
-		}
-		return nameI < nameJ
+		return scenes[i].Metadata.Name < scenes[j].Metadata.Name
 	})
 
 	return scenes
@@ -641,21 +601,37 @@ func (s *BridgeState) ZoneSmartScenes(zoneID string) []hueclient.SmartSceneGet {
 }
 
 // ZoneGroupedLight returns the grouped light for a zone.
-func (s *BridgeState) ZoneGroupedLight(zone hueclient.RoomGet) (hueclient.GroupedLightGet, bool) {
-	// Zones use the same services structure as rooms
-	return s.RoomGroupedLight(zone)
+func (s *BridgeState) ZoneGroupedLight(zone hueclient.ZoneGet) (hueclient.GroupedLightGet, bool) {
+	// Zones have their own services structure
+	for _, svc := range zone.Services {
+		if svc.Rtype == hueclient.ResourceTypeGroupedLight && svc.Rid != "" {
+			return s.GetGroupedLight(svc.Rid)
+		}
+	}
+	return hueclient.GroupedLightGet{}, false
 }
 
 // IsZoneOn returns true if any light in the zone is on.
-func (s *BridgeState) IsZoneOn(zone hueclient.RoomGet) bool {
-	// Zones work the same way as rooms
-	return s.IsRoomOn(zone)
+func (s *BridgeState) IsZoneOn(zone hueclient.ZoneGet) bool {
+	lights := s.ZoneLights(zone)
+	for _, light := range lights {
+		if light.On.On {
+			return true
+		}
+	}
+	return false
 }
 
 // ZoneBrightness returns the grouped light brightness for a zone.
-func (s *BridgeState) ZoneBrightness(zone hueclient.RoomGet) float64 {
-	// Zones work the same way as rooms
-	return s.RoomBrightness(zone)
+func (s *BridgeState) ZoneBrightness(zone hueclient.ZoneGet) float64 {
+	gl, ok := s.ZoneGroupedLight(zone)
+	if !ok {
+		return 0
+	}
+	if gl.Dimming != nil {
+		return float64(gl.Dimming.Brightness)
+	}
+	return 0
 }
 
 // AllRooms returns all rooms sorted by name.
@@ -670,41 +646,25 @@ func (s *BridgeState) AllRooms() []hueclient.RoomGet {
 
 	// Sort by name for stable ordering
 	sort.Slice(rooms, func(i, j int) bool {
-		nameI := ""
-		nameJ := ""
-		if rooms[i].Metadata != nil && rooms[i].Metadata.Name != nil {
-			nameI = *rooms[i].Metadata.Name
-		}
-		if rooms[j].Metadata != nil && rooms[j].Metadata.Name != nil {
-			nameJ = *rooms[j].Metadata.Name
-		}
-		return nameI < nameJ
+		return rooms[i].Metadata.Name < rooms[j].Metadata.Name
 	})
 
 	return rooms
 }
 
 // AllZones returns all zones sorted by name.
-func (s *BridgeState) AllZones() []hueclient.RoomGet {
+func (s *BridgeState) AllZones() []hueclient.ZoneGet {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	zones := make([]hueclient.RoomGet, 0, len(s.Zones))
+	zones := make([]hueclient.ZoneGet, 0, len(s.Zones))
 	for _, z := range s.Zones {
 		zones = append(zones, z)
 	}
 
 	// Sort by name for stable ordering
 	sort.Slice(zones, func(i, j int) bool {
-		nameI := ""
-		nameJ := ""
-		if zones[i].Metadata != nil && zones[i].Metadata.Name != nil {
-			nameI = *zones[i].Metadata.Name
-		}
-		if zones[j].Metadata != nil && zones[j].Metadata.Name != nil {
-			nameJ = *zones[j].Metadata.Name
-		}
-		return nameI < nameJ
+		return zones[i].Metadata.Name < zones[j].Metadata.Name
 	})
 
 	return zones
@@ -740,20 +700,20 @@ func (s *BridgeState) AllScenes() []hueclient.SceneGet {
 
 	// Helper to get group name (room or zone name) for a scene
 	getGroupName := func(sc hueclient.SceneGet) string {
-		if sc.Group == nil || sc.Group.Rid == nil {
+		if sc.Group.Rid == "" {
 			return ""
 		}
-		rid := *sc.Group.Rid
+		rid := sc.Group.Rid
 		// Check rooms first
 		if room, ok := s.Rooms[rid]; ok {
-			if room.Metadata != nil && room.Metadata.Name != nil {
-				return *room.Metadata.Name
+			if room.Metadata.Name != "" {
+				return room.Metadata.Name
 			}
 		}
 		// Check zones
 		if zone, ok := s.Zones[rid]; ok {
-			if zone.Metadata != nil && zone.Metadata.Name != nil {
-				return *zone.Metadata.Name
+			if zone.Metadata.Name != "" {
+				return zone.Metadata.Name
 			}
 		}
 		return ""
@@ -761,14 +721,8 @@ func (s *BridgeState) AllScenes() []hueclient.SceneGet {
 
 	// Sort by scene name first, then by group name (room/zone), then by ID for stable ordering
 	sort.Slice(scenes, func(i, j int) bool {
-		nameI := ""
-		nameJ := ""
-		if scenes[i].Metadata != nil && scenes[i].Metadata.Name != nil {
-			nameI = *scenes[i].Metadata.Name
-		}
-		if scenes[j].Metadata != nil && scenes[j].Metadata.Name != nil {
-			nameJ = *scenes[j].Metadata.Name
-		}
+		nameI := scenes[i].Metadata.Name
+		nameJ := scenes[j].Metadata.Name
 		if nameI != nameJ {
 			return nameI < nameJ
 		}
@@ -778,15 +732,7 @@ func (s *BridgeState) AllScenes() []hueclient.SceneGet {
 			return groupI < groupJ
 		}
 		// Tertiary sort by ID for full stability
-		idI := ""
-		idJ := ""
-		if scenes[i].Id != nil {
-			idI = *scenes[i].Id
-		}
-		if scenes[j].Id != nil {
-			idJ = *scenes[j].Id
-		}
-		return idI < idJ
+		return scenes[i].Id < scenes[j].Id
 	})
 
 	return scenes
@@ -813,16 +759,13 @@ func (s *BridgeState) ApplyRoomMetadata(id string, name *string, archetype *stri
 	}
 
 	updated := false
-	if room.Metadata != nil {
-		if name != nil {
-			room.Metadata.Name = name
-			updated = true
-		}
-		if archetype != nil {
-			arch := hueclient.RoomArchetype(*archetype)
-			room.Metadata.Archetype = &arch
-			updated = true
-		}
+	if name != nil {
+		room.Metadata.Name = *name
+		updated = true
+	}
+	if archetype != nil {
+		room.Metadata.Archetype = hueclient.RoomArchetype(*archetype)
+		updated = true
 	}
 
 	if updated {
@@ -847,21 +790,19 @@ func (s *BridgeState) ApplyRoomChildren(id string, children []struct {
 	// Convert to ResourceIdentifier slice
 	newChildren := make([]hueclient.ResourceIdentifier, len(children))
 	for i, c := range children {
-		rid := c.Rid
-		rtype := hueclient.ResourceIdentifierRtype(c.Rtype)
 		newChildren[i] = hueclient.ResourceIdentifier{
-			Rid:   &rid,
-			Rtype: &rtype,
+			Rid:   c.Rid,
+			Rtype: hueclient.ResourceType(c.Rtype),
 		}
 	}
 
-	room.Children = &newChildren
+	room.Children = newChildren
 	s.Rooms[id] = room
 	return true
 }
 
 // UpdateZones replaces the zones cache.
-func (s *BridgeState) UpdateZones(zones map[string]hueclient.RoomGet) {
+func (s *BridgeState) UpdateZones(zones map[string]hueclient.ZoneGet) {
 	updateMap(s, &s.Zones, zones)
 }
 
@@ -876,16 +817,13 @@ func (s *BridgeState) ApplyZoneMetadata(id string, name *string, archetype *stri
 	}
 
 	updated := false
-	if zone.Metadata != nil {
-		if name != nil {
-			zone.Metadata.Name = name
-			updated = true
-		}
-		if archetype != nil {
-			arch := hueclient.RoomArchetype(*archetype)
-			zone.Metadata.Archetype = &arch
-			updated = true
-		}
+	if name != nil {
+		zone.Metadata.Name = *name
+		updated = true
+	}
+	if archetype != nil {
+		zone.Metadata.Archetype = hueclient.RoomArchetype(*archetype)
+		updated = true
 	}
 
 	if updated {
@@ -910,15 +848,13 @@ func (s *BridgeState) ApplyZoneServices(id string, services []struct {
 	// Convert to ResourceIdentifier slice
 	newServices := make([]hueclient.ResourceIdentifier, len(services))
 	for i, svc := range services {
-		rid := svc.Rid
-		rtype := hueclient.ResourceIdentifierRtype(svc.Rtype)
 		newServices[i] = hueclient.ResourceIdentifier{
-			Rid:   &rid,
-			Rtype: &rtype,
+			Rid:   svc.Rid,
+			Rtype: hueclient.ResourceType(svc.Rtype),
 		}
 	}
 
-	zone.Services = &newServices
+	zone.Services = newServices
 	s.Zones[id] = zone
 	return true
 }
@@ -943,8 +879,8 @@ func (s *BridgeState) ApplySceneMetadata(id string, name *string) bool {
 		return false
 	}
 
-	if name != nil && scene.Metadata != nil {
-		scene.Metadata.Name = name
+	if name != nil {
+		scene.Metadata.Name = *name
 		s.Scenes[id] = scene
 		return true
 	}
@@ -966,8 +902,8 @@ func (s *BridgeState) ApplyDeviceMetadata(id string, name *string) bool {
 		return false
 	}
 
-	if name != nil && device.Metadata != nil {
-		device.Metadata.Name = name
+	if name != nil {
+		device.Metadata.Name = *name
 		s.Devices[id] = device
 		return true
 	}
@@ -1010,7 +946,7 @@ func (s *BridgeState) AddRoom(id string, room hueclient.RoomGet) {
 }
 
 // AddZone adds a zone to the cache.
-func (s *BridgeState) AddZone(id string, zone hueclient.RoomGet) {
+func (s *BridgeState) AddZone(id string, zone hueclient.ZoneGet) {
 	addToMap(s, &s.Zones, id, zone)
 }
 
@@ -1049,46 +985,31 @@ func (s *BridgeState) GetDeviceMotionState(device hueclient.DeviceGet) (hasMotio
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	deviceID := ""
-	if device.Id != nil {
-		deviceID = *device.Id
-	}
+	deviceID := device.Id
 
 	// First, try to find via device services
-	if device.Services != nil {
-		for _, svc := range *device.Services {
-			if svc.Rtype != nil && *svc.Rtype == hueclient.ResourceIdentifierRtypeMotion && svc.Rid != nil {
-				// Found motion service, check its state
-				if motion, ok := s.MotionSensors[*svc.Rid]; ok {
-					if motion.Motion != nil {
-						// Check motion_report first (newer API), then fallback to motion
-						if motion.Motion.MotionReport != nil && motion.Motion.MotionReport.Motion != nil {
-							return true, *motion.Motion.MotionReport.Motion
-						}
-						if motion.Motion.Motion != nil {
-							return true, *motion.Motion.Motion
-						}
-					}
-					return true, false
+	for _, svc := range device.Services {
+		if svc.Rtype == hueclient.ResourceTypeMotion && svc.Rid != "" {
+			// Found motion service, check its state
+			if motion, ok := s.MotionSensors[svc.Rid]; ok {
+				// Check motion_report first (newer API), then fallback to motion
+				if motion.Motion.MotionReport != nil {
+					return true, motion.Motion.MotionReport.Motion
 				}
-				return true, false
+				return true, motion.Motion.Motion
 			}
+			return true, false
 		}
 	}
 
 	// Fallback: check if any motion sensor is owned by this device
 	if deviceID != "" {
 		for _, motion := range s.MotionSensors {
-			if motion.Owner != nil && motion.Owner.Rid != nil && *motion.Owner.Rid == deviceID {
-				if motion.Motion != nil {
-					if motion.Motion.MotionReport != nil && motion.Motion.MotionReport.Motion != nil {
-						return true, *motion.Motion.MotionReport.Motion
-					}
-					if motion.Motion.Motion != nil {
-						return true, *motion.Motion.Motion
-					}
+			if motion.Owner.Rid == deviceID {
+				if motion.Motion.MotionReport != nil {
+					return true, motion.Motion.MotionReport.Motion
 				}
-				return true, false
+				return true, motion.Motion.Motion
 			}
 		}
 	}
@@ -1102,27 +1023,22 @@ func (s *BridgeState) GetDeviceMotionSensor(device hueclient.DeviceGet) (motionI
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	deviceID := ""
-	if device.Id != nil {
-		deviceID = *device.Id
-	}
+	deviceID := device.Id
 
 	// First, try to find via device services
-	if device.Services != nil {
-		for _, svc := range *device.Services {
-			if svc.Rtype != nil && *svc.Rtype == hueclient.ResourceIdentifierRtypeMotion && svc.Rid != nil {
-				if m, ok := s.MotionSensors[*svc.Rid]; ok {
-					return *svc.Rid, m, true
-				}
-				return *svc.Rid, hueclient.MotionGet{}, true
+	for _, svc := range device.Services {
+		if svc.Rtype == hueclient.ResourceTypeMotion && svc.Rid != "" {
+			if m, ok := s.MotionSensors[svc.Rid]; ok {
+				return svc.Rid, m, true
 			}
+			return svc.Rid, hueclient.MotionGet{}, true
 		}
 	}
 
 	// Fallback: check if any motion sensor is owned by this device
 	if deviceID != "" {
 		for id, m := range s.MotionSensors {
-			if m.Owner != nil && m.Owner.Rid != nil && *m.Owner.Rid == deviceID {
+			if m.Owner.Rid == deviceID {
 				return id, m, true
 			}
 		}
@@ -1136,44 +1052,29 @@ func (s *BridgeState) GetDeviceTemperature(device hueclient.DeviceGet) (hasTemp 
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	deviceID := ""
-	if device.Id != nil {
-		deviceID = *device.Id
-	}
+	deviceID := device.Id
 
 	// First, try to find via device services
-	if device.Services != nil {
-		for _, svc := range *device.Services {
-			if svc.Rtype != nil && *svc.Rtype == hueclient.ResourceIdentifierRtypeTemperature && svc.Rid != nil {
-				if temp, ok := s.Temperatures[*svc.Rid]; ok {
-					if temp.Temperature != nil {
-						if temp.Temperature.TemperatureReport != nil && temp.Temperature.TemperatureReport.Temperature != nil {
-							return true, *temp.Temperature.TemperatureReport.Temperature
-						}
-						if temp.Temperature.Temperature != nil {
-							return true, *temp.Temperature.Temperature
-						}
-					}
-					return true, 0
+	for _, svc := range device.Services {
+		if svc.Rtype == hueclient.ResourceTypeTemperature && svc.Rid != "" {
+			if temp, ok := s.Temperatures[svc.Rid]; ok {
+				if temp.Temperature.TemperatureReport != nil {
+					return true, temp.Temperature.TemperatureReport.Temperature
 				}
-				return true, 0
+				return true, temp.Temperature.Temperature
 			}
+			return true, 0
 		}
 	}
 
 	// Fallback: check if any temperature sensor is owned by this device
 	if deviceID != "" {
 		for _, temp := range s.Temperatures {
-			if temp.Owner != nil && temp.Owner.Rid != nil && *temp.Owner.Rid == deviceID {
-				if temp.Temperature != nil {
-					if temp.Temperature.TemperatureReport != nil && temp.Temperature.TemperatureReport.Temperature != nil {
-						return true, *temp.Temperature.TemperatureReport.Temperature
-					}
-					if temp.Temperature.Temperature != nil {
-						return true, *temp.Temperature.Temperature
-					}
+			if temp.Owner.Rid == deviceID {
+				if temp.Temperature.TemperatureReport != nil {
+					return true, temp.Temperature.TemperatureReport.Temperature
 				}
-				return true, 0
+				return true, temp.Temperature.Temperature
 			}
 		}
 	}
@@ -1186,44 +1087,29 @@ func (s *BridgeState) GetDeviceLightLevel(device hueclient.DeviceGet) (hasLevel 
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	deviceID := ""
-	if device.Id != nil {
-		deviceID = *device.Id
-	}
+	deviceID := device.Id
 
 	// First, try to find via device services
-	if device.Services != nil {
-		for _, svc := range *device.Services {
-			if svc.Rtype != nil && *svc.Rtype == hueclient.ResourceIdentifierRtypeLightLevel && svc.Rid != nil {
-				if ll, ok := s.LightLevels[*svc.Rid]; ok {
-					if ll.Light != nil {
-						if ll.Light.LightLevelReport != nil && ll.Light.LightLevelReport.LightLevel != nil {
-							return true, *ll.Light.LightLevelReport.LightLevel
-						}
-						if ll.Light.LightLevel != nil {
-							return true, *ll.Light.LightLevel
-						}
-					}
-					return true, 0
+	for _, svc := range device.Services {
+		if svc.Rtype == hueclient.ResourceTypeLightLevel && svc.Rid != "" {
+			if ll, ok := s.LightLevels[svc.Rid]; ok {
+				if ll.Light.LightLevelReport != nil {
+					return true, ll.Light.LightLevelReport.LightLevel
 				}
-				return true, 0
+				return true, ll.Light.LightLevel
 			}
+			return true, 0
 		}
 	}
 
 	// Fallback: check if any light level sensor is owned by this device
 	if deviceID != "" {
 		for _, ll := range s.LightLevels {
-			if ll.Owner != nil && ll.Owner.Rid != nil && *ll.Owner.Rid == deviceID {
-				if ll.Light != nil {
-					if ll.Light.LightLevelReport != nil && ll.Light.LightLevelReport.LightLevel != nil {
-						return true, *ll.Light.LightLevelReport.LightLevel
-					}
-					if ll.Light.LightLevel != nil {
-						return true, *ll.Light.LightLevel
-					}
+			if ll.Owner.Rid == deviceID {
+				if ll.Light.LightLevelReport != nil {
+					return true, ll.Light.LightLevelReport.LightLevel
 				}
-				return true, 0
+				return true, ll.Light.LightLevel
 			}
 		}
 	}
@@ -1237,18 +1123,13 @@ func (s *BridgeState) GetDeviceTemperatureSensor(device hueclient.DeviceGet) (se
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	deviceID := ""
-	if device.Id != nil {
-		deviceID = *device.Id
-	}
+	deviceID := device.Id
 
 	// First, try to find via device services
-	if device.Services != nil {
-		for _, svc := range *device.Services {
-			if svc.Rtype != nil && *svc.Rtype == hueclient.ResourceIdentifierRtypeTemperature && svc.Rid != nil {
-				if temp, ok := s.Temperatures[*svc.Rid]; ok {
-					return *svc.Rid, temp, true
-				}
+	for _, svc := range device.Services {
+		if svc.Rtype == hueclient.ResourceTypeTemperature && svc.Rid != "" {
+			if temp, ok := s.Temperatures[svc.Rid]; ok {
+				return svc.Rid, temp, true
 			}
 		}
 	}
@@ -1256,7 +1137,7 @@ func (s *BridgeState) GetDeviceTemperatureSensor(device hueclient.DeviceGet) (se
 	// Fallback: check if any temperature sensor is owned by this device
 	if deviceID != "" {
 		for id, temp := range s.Temperatures {
-			if temp.Owner != nil && temp.Owner.Rid != nil && *temp.Owner.Rid == deviceID {
+			if temp.Owner.Rid == deviceID {
 				return id, temp, true
 			}
 		}
@@ -1271,18 +1152,13 @@ func (s *BridgeState) GetDeviceLightLevelSensor(device hueclient.DeviceGet) (sen
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	deviceID := ""
-	if device.Id != nil {
-		deviceID = *device.Id
-	}
+	deviceID := device.Id
 
 	// First, try to find via device services
-	if device.Services != nil {
-		for _, svc := range *device.Services {
-			if svc.Rtype != nil && *svc.Rtype == hueclient.ResourceIdentifierRtypeLightLevel && svc.Rid != nil {
-				if ll, ok := s.LightLevels[*svc.Rid]; ok {
-					return *svc.Rid, ll, true
-				}
+	for _, svc := range device.Services {
+		if svc.Rtype == hueclient.ResourceTypeLightLevel && svc.Rid != "" {
+			if ll, ok := s.LightLevels[svc.Rid]; ok {
+				return svc.Rid, ll, true
 			}
 		}
 	}
@@ -1290,7 +1166,7 @@ func (s *BridgeState) GetDeviceLightLevelSensor(device hueclient.DeviceGet) (sen
 	// Fallback: check if any light level sensor is owned by this device
 	if deviceID != "" {
 		for id, ll := range s.LightLevels {
-			if ll.Owner != nil && ll.Owner.Rid != nil && *ll.Owner.Rid == deviceID {
+			if ll.Owner.Rid == deviceID {
 				return id, ll, true
 			}
 		}
@@ -1301,28 +1177,21 @@ func (s *BridgeState) GetDeviceLightLevelSensor(device hueclient.DeviceGet) (sen
 
 // GetDeviceBattery returns the battery status for a device if it has a device_power service.
 func (s *BridgeState) GetDeviceBattery(device hueclient.DeviceGet) (hasBattery bool, level int, state string) {
-	if device.Services == nil {
-		return false, 0, ""
-	}
-
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	for _, svc := range *device.Services {
-		if svc.Rtype != nil && *svc.Rtype == hueclient.ResourceIdentifierRtypeDevicePower && svc.Rid != nil {
-			if power, ok := s.DevicePowers[*svc.Rid]; ok {
-				if power.PowerState != nil {
-					lvl := 0
-					st := ""
-					if power.PowerState.BatteryLevel != nil {
-						lvl = *power.PowerState.BatteryLevel
-					}
-					if power.PowerState.BatteryState != nil {
-						st = string(*power.PowerState.BatteryState)
-					}
-					return true, lvl, st
+	for _, svc := range device.Services {
+		if svc.Rtype == hueclient.ResourceTypeDevicePower && svc.Rid != "" {
+			if power, ok := s.DevicePowers[svc.Rid]; ok {
+				lvl := 0
+				st := ""
+				if power.PowerState.BatteryLevel != nil {
+					lvl = *power.PowerState.BatteryLevel
 				}
-				return true, 0, ""
+				if power.PowerState.BatteryState != nil {
+					st = string(*power.PowerState.BatteryState)
+				}
+				return true, lvl, st
 			}
 			return true, 0, ""
 		}
@@ -1394,18 +1263,13 @@ func (s *BridgeState) GetDeviceZigbeeConnectivity(device hueclient.DeviceGet) (Z
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	deviceID := ""
-	if device.Id != nil {
-		deviceID = *device.Id
-	}
+	deviceID := device.Id
 
 	// First, try to find via device services
-	if device.Services != nil {
-		for _, svc := range *device.Services {
-			if svc.Rtype != nil && string(*svc.Rtype) == "zigbee_connectivity" && svc.Rid != nil {
-				if zc, ok := s.ZigbeeConnectivity[*svc.Rid]; ok {
-					return zc, true
-				}
+	for _, svc := range device.Services {
+		if svc.Rtype == hueclient.ResourceTypeZigbeeConnectivity && svc.Rid != "" {
+			if zc, ok := s.ZigbeeConnectivity[svc.Rid]; ok {
+				return zc, true
 			}
 		}
 	}
@@ -1456,11 +1320,8 @@ func (s *BridgeState) GetBridgeDevice() (hueclient.DeviceGet, bool) {
 	defer s.mu.RUnlock()
 
 	for _, device := range s.Devices {
-		if device.Services == nil {
-			continue
-		}
-		for _, svc := range *device.Services {
-			if svc.Rtype != nil && *svc.Rtype == hueclient.ResourceIdentifierRtypeBridge {
+		for _, svc := range device.Services {
+			if svc.Rtype == hueclient.ResourceTypeBridge {
 				return device, true
 			}
 		}
@@ -1493,15 +1354,7 @@ func (s *BridgeState) AllDevices() []hueclient.DeviceGet {
 	}
 
 	sort.Slice(devices, func(i, j int) bool {
-		nameI := ""
-		nameJ := ""
-		if devices[i].Metadata != nil && devices[i].Metadata.Name != nil {
-			nameI = *devices[i].Metadata.Name
-		}
-		if devices[j].Metadata != nil && devices[j].Metadata.Name != nil {
-			nameJ = *devices[j].Metadata.Name
-		}
-		return nameI < nameJ
+		return devices[i].Metadata.Name < devices[j].Metadata.Name
 	})
 
 	return devices
@@ -1551,13 +1404,10 @@ func (s *BridgeState) BridgeName() string {
 	defer s.mu.RUnlock()
 
 	for _, device := range s.Devices {
-		if device.Services == nil {
-			continue
-		}
-		for _, svc := range *device.Services {
-			if svc.Rtype != nil && *svc.Rtype == hueclient.ResourceIdentifierRtypeBridge {
-				if device.Metadata != nil && device.Metadata.Name != nil {
-					return *device.Metadata.Name
+		for _, svc := range device.Services {
+			if svc.Rtype == hueclient.ResourceTypeBridge {
+				if device.Metadata.Name != "" {
+					return device.Metadata.Name
 				}
 			}
 		}
@@ -1568,8 +1418,8 @@ func (s *BridgeState) BridgeName() string {
 // RoomBrightness returns the grouped light brightness for a room.
 func (s *BridgeState) RoomBrightness(room hueclient.RoomGet) float64 {
 	if gl, ok := s.RoomGroupedLight(room); ok {
-		if gl.Dimming != nil && gl.Dimming.Brightness != nil {
-			return float64(*gl.Dimming.Brightness)
+		if gl.Dimming != nil {
+			return float64(gl.Dimming.Brightness)
 		}
 	}
 	return 0
@@ -1596,8 +1446,7 @@ func (s *BridgeState) SetLightBrightness(id string, brightness float64) {
 
 	if light, ok := s.Lights[id]; ok {
 		if light.Dimming != nil {
-			br := hueclient.Brightness(brightness)
-			light.Dimming.Brightness = &br
+			light.Dimming.Brightness = float32(brightness)
 			s.Lights[id] = light
 		}
 	}
@@ -1609,10 +1458,9 @@ func (s *BridgeState) SetLightColor(id string, x, y float64) {
 	defer s.mu.Unlock()
 
 	if light, ok := s.Lights[id]; ok {
-		if light.Color != nil && light.Color.Xy != nil {
-			xf, yf := float32(x), float32(y)
-			light.Color.Xy.X = &xf
-			light.Color.Xy.Y = &yf
+		if light.Color != nil {
+			light.Color.Xy.X = float32(x)
+			light.Color.Xy.Y = float32(y)
 			s.Lights[id] = light
 		}
 	}
@@ -1625,81 +1473,72 @@ func (s *BridgeState) SetLightColorTemperature(id string, mirek int) {
 
 	if light, ok := s.Lights[id]; ok {
 		if light.ColorTemperature != nil {
-			light.ColorTemperature.Mirek = &mirek
+			light.ColorTemperature.Mirek = mirek
 			s.Lights[id] = light
 		}
 	}
 }
 
 // SetLightEffect optimistically updates a light's effect in the cache.
-func (s *BridgeState) SetLightEffect(id string, effect hueclient.SupportedEffects) {
+func (s *BridgeState) SetLightEffect(id string, effect hueclient.Effect) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	if light, ok := s.Lights[id]; ok {
 		if light.Effects != nil {
-			light.Effects.Effect = &effect
-			light.Effects.Status = &effect
+			light.Effects.Status = effect
 			s.Lights[id] = light
 		}
 	}
 }
 
 // SetLightGradientMode optimistically updates a light's gradient mode in the cache.
-func (s *BridgeState) SetLightGradientMode(id string, mode hueclient.SupportedGradientMode) {
+func (s *BridgeState) SetLightGradientMode(id string, mode hueclient.LightGetGradientMode) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	if light, ok := s.Lights[id]; ok {
 		if light.Gradient != nil {
-			light.Gradient.Mode = &mode
+			light.Gradient.Mode = mode
 			s.Lights[id] = light
 		}
 	}
 }
 
 // SetLightGradientPoints optimistically updates a light's gradient points in the cache.
-func (s *BridgeState) SetLightGradientPoints(id string, points []hueclient.Color) {
+func (s *BridgeState) SetLightGradientPoints(id string, points []hueclient.GradientPointGet) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	if light, ok := s.Lights[id]; ok {
 		if light.Gradient != nil {
-			light.Gradient.Points = &points
+			light.Gradient.Points = points
 			s.Lights[id] = light
 		}
 	}
 }
 
 // SetLightPowerupPreset optimistically updates a light's power-on preset in the cache.
-func (s *BridgeState) SetLightPowerupPreset(id string, preset hueclient.PowerupPreset) {
+func (s *BridgeState) SetLightPowerupPreset(id string, preset hueclient.LightGetPowerupPreset) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	if light, ok := s.Lights[id]; ok {
 		if light.Powerup != nil {
-			// Convert PowerupPreset (used in updates) to LightGetPowerupPreset (used in LightGet)
-			getPreset := hueclient.LightGetPowerupPreset(preset)
-			light.Powerup.Preset = &getPreset
+			light.Powerup.Preset = preset
 			s.Lights[id] = light
 		}
 	}
 }
 
 // SetDeviceArchetype optimistically updates a device's archetype in the cache.
-func (s *BridgeState) SetDeviceArchetype(id string, archetype hueclient.ProductArchetype) {
+func (s *BridgeState) SetDeviceArchetype(id string, archetype hueclient.DeviceArchetype) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	if device, ok := s.Devices[id]; ok {
 		// Update metadata archetype (user-changeable, what the API actually updates)
-		if device.Metadata == nil {
-			device.Metadata = &struct {
-				Archetype *hueclient.ProductArchetype `json:"archetype,omitempty"`
-				Name      *string                     `json:"name,omitempty"`
-			}{}
-		}
-		device.Metadata.Archetype = &archetype
+		device.Metadata.Archetype = archetype
 		s.Devices[id] = device
 	}
 }
@@ -1711,8 +1550,7 @@ func (s *BridgeState) SetGroupedLightBrightness(id string, brightness float64) {
 
 	if gl, ok := s.GroupedLights[id]; ok {
 		if gl.Dimming != nil {
-			br := hueclient.Brightness(brightness)
-			gl.Dimming.Brightness = &br
+			gl.Dimming.Brightness = float32(brightness)
 			s.GroupedLights[id] = gl
 		}
 	}
@@ -1724,10 +1562,7 @@ func (s *BridgeState) SetLightOn(id string, on bool) {
 	defer s.mu.Unlock()
 
 	if light, ok := s.Lights[id]; ok {
-		if light.On == nil {
-			light.On = &hueclient.On{}
-		}
-		light.On.On = &on
+		light.On.On = on
 		s.Lights[id] = light
 	}
 }
@@ -1739,9 +1574,9 @@ func (s *BridgeState) SetGroupedLightOn(id string, on bool) {
 
 	if gl, ok := s.GroupedLights[id]; ok {
 		if gl.On == nil {
-			gl.On = &hueclient.On{}
+			gl.On = &hueclient.GroupedLightGetOn{}
 		}
-		gl.On.On = &on
+		gl.On.On = on
 		s.GroupedLights[id] = gl
 	}
 }
@@ -1752,7 +1587,7 @@ func (s *BridgeState) SetMotionSensorEnabled(id string, enabled bool) {
 	defer s.mu.Unlock()
 
 	if motion, ok := s.MotionSensors[id]; ok {
-		motion.Enabled = &enabled
+		motion.Enabled = enabled
 		s.MotionSensors[id] = motion
 	}
 }
@@ -1764,13 +1599,9 @@ func (s *BridgeState) SetMotionSensorSensitivity(id string, sensitivity int) {
 
 	if motion, ok := s.MotionSensors[id]; ok {
 		if motion.Sensitivity == nil {
-			motion.Sensitivity = &struct {
-				Sensitivity    *int                                  `json:"sensitivity,omitempty"`
-				SensitivityMax *int                                  `json:"sensitivity_max,omitempty"`
-				Status         *hueclient.MotionGetSensitivityStatus `json:"status,omitempty"`
-			}{}
+			motion.Sensitivity = &hueclient.CameraMotionGetSensitivity{}
 		}
-		motion.Sensitivity.Sensitivity = &sensitivity
+		motion.Sensitivity.Sensitivity = sensitivity
 		s.MotionSensors[id] = motion
 	}
 }
@@ -1781,7 +1612,7 @@ func (s *BridgeState) SetTemperatureSensorEnabled(id string, enabled bool) {
 	defer s.mu.Unlock()
 
 	if temp, ok := s.Temperatures[id]; ok {
-		temp.Enabled = &enabled
+		temp.Enabled = enabled
 		s.Temperatures[id] = temp
 	}
 }
@@ -1792,7 +1623,7 @@ func (s *BridgeState) SetLightLevelSensorEnabled(id string, enabled bool) {
 	defer s.mu.Unlock()
 
 	if ll, ok := s.LightLevels[id]; ok {
-		ll.Enabled = &enabled
+		ll.Enabled = enabled
 		s.LightLevels[id] = ll
 	}
 }
@@ -1817,35 +1648,20 @@ func (s *BridgeState) ApplyLightUpdate(id string, update LightUpdate) bool {
 	}
 
 	if update.On != nil {
-		if light.On == nil {
-			light.On = &hueclient.On{}
-		}
-		light.On.On = update.On
+		light.On.On = *update.On
 	}
 
 	if update.Brightness != nil && light.Dimming != nil {
-		b := float32(*update.Brightness)
-		light.Dimming.Brightness = &b
+		light.Dimming.Brightness = float32(*update.Brightness)
 	}
 
-	if update.ColorXY != nil && light.Color != nil && light.Color.Xy != nil {
-		x := float32(update.ColorXY[0])
-		y := float32(update.ColorXY[1])
-		light.Color.Xy.X = &x
-		light.Color.Xy.Y = &y
-		// Clear mirek when switching to XY color mode
-		if light.ColorTemperature != nil {
-			light.ColorTemperature.Mirek = nil
-		}
+	if update.ColorXY != nil && light.Color != nil {
+		light.Color.Xy.X = float32(update.ColorXY[0])
+		light.Color.Xy.Y = float32(update.ColorXY[1])
 	}
 
 	if update.Mirek != nil && light.ColorTemperature != nil {
-		light.ColorTemperature.Mirek = update.Mirek
-		// Clear XY when switching to color temperature mode
-		if light.Color != nil && light.Color.Xy != nil {
-			light.Color.Xy.X = nil
-			light.Color.Xy.Y = nil
-		}
+		light.ColorTemperature.Mirek = *update.Mirek
 	}
 
 	s.Lights[id] = light
@@ -1864,14 +1680,13 @@ func (s *BridgeState) ApplyGroupedLightUpdate(id string, on *bool, brightness *f
 
 	if on != nil {
 		if gl.On == nil {
-			gl.On = &hueclient.On{}
+			gl.On = &hueclient.GroupedLightGetOn{}
 		}
-		gl.On.On = on
+		gl.On.On = *on
 	}
 
 	if brightness != nil && gl.Dimming != nil {
-		b := hueclient.Brightness(*brightness)
-		gl.Dimming.Brightness = &b
+		gl.Dimming.Brightness = float32(*brightness)
 	}
 
 	s.GroupedLights[id] = gl
@@ -1888,13 +1703,11 @@ func (s *BridgeState) ApplyMotionUpdate(id string, motion bool) bool {
 		return false
 	}
 
-	// Only update if the Motion struct exists
-	if m.Motion != nil {
-		m.Motion.Motion = &motion
-		// Also update MotionReport if it exists (keeps both in sync)
-		if m.Motion.MotionReport != nil {
-			m.Motion.MotionReport.Motion = &motion
-		}
+	// Update Motion field (value type in new API)
+	m.Motion.Motion = motion
+	// Also update MotionReport if it exists (keeps both in sync)
+	if m.Motion.MotionReport != nil {
+		m.Motion.MotionReport.Motion = motion
 	}
 
 	s.MotionSensors[id] = m
@@ -1911,11 +1724,8 @@ func (s *BridgeState) ApplySceneStatus(id string, status string) bool {
 		return false
 	}
 
-	// Only update if the Status struct exists
-	if scene.Status != nil {
-		active := hueclient.SceneGetStatusActive(status)
-		scene.Status.Active = &active
-	}
+	active := hueclient.SceneGetStatusActive(status)
+	scene.Status.Active = &active
 
 	s.Scenes[id] = scene
 	return true
@@ -1932,11 +1742,8 @@ func (s *BridgeState) GetDeviceRoom(deviceID string) (hueclient.RoomGet, bool) {
 	defer s.mu.RUnlock()
 
 	for _, room := range s.Rooms {
-		if room.Children == nil {
-			continue
-		}
-		for _, child := range *room.Children {
-			if child.Rtype != nil && *child.Rtype == "device" && child.Rid != nil && *child.Rid == deviceID {
+		for _, child := range room.Children {
+			if child.Rtype == hueclient.ResourceTypeDevice && child.Rid == deviceID {
 				return room, true
 			}
 		}
@@ -1945,18 +1752,14 @@ func (s *BridgeState) GetDeviceRoom(deviceID string) (hueclient.RoomGet, bool) {
 }
 
 // GetLightZones returns all zones that contain a light.
-func (s *BridgeState) GetLightZones(lightID string) []hueclient.RoomGet {
+func (s *BridgeState) GetLightZones(lightID string) []hueclient.ZoneGet {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	var zones []hueclient.RoomGet
+	var zones []hueclient.ZoneGet
 	for _, zone := range s.Zones {
-		if zone.Children == nil {
-			continue
-		}
-		for _, child := range *zone.Children {
-			if child.Rtype != nil && *child.Rtype == hueclient.ResourceIdentifierRtypeLight &&
-				child.Rid != nil && *child.Rid == lightID {
+		for _, child := range zone.Children {
+			if child.Rtype == hueclient.ResourceTypeLight && child.Rid == lightID {
 				zones = append(zones, zone)
 				break
 			}
@@ -1965,7 +1768,7 @@ func (s *BridgeState) GetLightZones(lightID string) []hueclient.RoomGet {
 
 	// Sort by name for stable ordering
 	sort.Slice(zones, func(i, j int) bool {
-		return zones[i].RoomName("") < zones[j].RoomName("")
+		return zones[i].Metadata.Name < zones[j].Metadata.Name
 	})
 
 	return zones
@@ -1978,13 +1781,10 @@ func (s *BridgeState) GetGroupedLightName(groupedLightID string) string {
 
 	// Check rooms
 	for _, room := range s.Rooms {
-		if room.Services != nil {
-			for _, svc := range *room.Services {
-				if svc.Rtype != nil && *svc.Rtype == hueclient.ResourceIdentifierRtypeGroupedLight &&
-					svc.Rid != nil && *svc.Rid == groupedLightID {
-					if room.Metadata != nil && room.Metadata.Name != nil {
-						return *room.Metadata.Name
-					}
+		for _, svc := range room.Services {
+			if svc.Rtype == hueclient.ResourceTypeGroupedLight && svc.Rid == groupedLightID {
+				if room.Metadata.Name != "" {
+					return room.Metadata.Name
 				}
 			}
 		}
@@ -1992,13 +1792,10 @@ func (s *BridgeState) GetGroupedLightName(groupedLightID string) string {
 
 	// Check zones
 	for _, zone := range s.Zones {
-		if zone.Services != nil {
-			for _, svc := range *zone.Services {
-				if svc.Rtype != nil && *svc.Rtype == hueclient.ResourceIdentifierRtypeGroupedLight &&
-					svc.Rid != nil && *svc.Rid == groupedLightID {
-					if zone.Metadata != nil && zone.Metadata.Name != nil {
-						return *zone.Metadata.Name
-					}
+		for _, svc := range zone.Services {
+			if svc.Rtype == hueclient.ResourceTypeGroupedLight && svc.Rid == groupedLightID {
+				if zone.Metadata.Name != "" {
+					return zone.Metadata.Name
 				}
 			}
 		}

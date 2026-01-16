@@ -8,30 +8,25 @@ import (
 
 // Helper to create a test light
 func makeTestLight(on bool, brightness float32) hueclient.LightGet {
-	onVal := on
-	brightnessVal := hueclient.Brightness(brightness)
 	return hueclient.LightGet{
-		On: &hueclient.On{On: &onVal},
-		Dimming: &struct {
-			Brightness  *hueclient.Brightness `json:"brightness,omitempty"`
-			MinDimLevel *float32              `json:"min_dim_level,omitempty"`
-		}{Brightness: &brightnessVal},
+		On: hueclient.ActionGetActionOn{On: on},
+		Dimming: &hueclient.LightGetDimming{
+			Brightness: brightness,
+		},
 	}
 }
 
 // Helper to create a test light that's off
 func makeOffLight() hueclient.LightGet {
-	offVal := false
 	return hueclient.LightGet{
-		On: &hueclient.On{On: &offVal},
+		On: hueclient.ActionGetActionOn{On: false},
 	}
 }
 
 // Helper to create a test light with no dimming info
 func makeNoDimmingLight() hueclient.LightGet {
-	onVal := true
 	return hueclient.LightGet{
-		On: &hueclient.On{On: &onVal},
+		On: hueclient.ActionGetActionOn{On: true},
 	}
 }
 
