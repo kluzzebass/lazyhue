@@ -328,6 +328,95 @@ func (b *Bridge) SetLightEffect(lightID string, effect hueclient.Effect) error {
 	return nil
 }
 
+// SetLightEffectSpeed sets a light's effect speed (0.0 to 1.0).
+// This uses EffectsV2 API and requires the current effect to be specified.
+func (b *Bridge) SetLightEffectSpeed(lightID string, speed float32) error {
+	b.mu.RLock()
+	client := b.client
+	b.mu.RUnlock()
+
+	if client == nil {
+		return ErrAuthFailed
+	}
+
+	// Get the current effect from the light
+	light, ok := b.state.GetLight(lightID)
+	if !ok {
+		return ErrAuthFailed
+	}
+
+	// Need to know the current effect to set speed
+	var currentEffect hueclient.Effect
+	if light.EffectsV2 != nil {
+		currentEffect = light.EffectsV2.Status.Effect
+	} else if light.Effects != nil {
+		currentEffect = hueclient.Effect(light.Effects.Status)
+	}
+
+	if currentEffect == "" || currentEffect == "no_effect" {
+		return errors.New("no active effect to set speed for")
+	}
+
+	lightName := "Unknown"
+	if l, ok := b.state.GetLight(lightID); ok {
+		lightName = b.state.GetLightName(l)
+	}
+
+	b.logRequest(fmt.Sprintf("%s: effect speed %.0f%%", lightName, speed*100))
+	_, err := client.UpdateLightWithResponse(context.Background(), toResourceId(lightID), hueclient.UpdateLightJSONRequestBody{
+		EffectsV2: &struct {
+			Action *struct {
+				Effect     hueclient.Effect `json:"effect"`
+				Parameters *struct {
+					Color *struct {
+						Xy *struct {
+							X float32 `json:"x"`
+							Y float32 `json:"y"`
+						} `json:"xy,omitempty"`
+					} `json:"color,omitempty"`
+					ColorTemperature *struct {
+						Mirek *int `json:"mirek,omitempty"`
+					} `json:"color_temperature,omitempty"`
+					Speed *float32 `json:"speed,omitempty"`
+				} `json:"parameters,omitempty"`
+			} `json:"action,omitempty"`
+		}{
+			Action: &struct {
+				Effect     hueclient.Effect `json:"effect"`
+				Parameters *struct {
+					Color *struct {
+						Xy *struct {
+							X float32 `json:"x"`
+							Y float32 `json:"y"`
+						} `json:"xy,omitempty"`
+					} `json:"color,omitempty"`
+					ColorTemperature *struct {
+						Mirek *int `json:"mirek,omitempty"`
+					} `json:"color_temperature,omitempty"`
+					Speed *float32 `json:"speed,omitempty"`
+				} `json:"parameters,omitempty"`
+			}{
+				Effect: currentEffect,
+				Parameters: &struct {
+					Color *struct {
+						Xy *struct {
+							X float32 `json:"x"`
+							Y float32 `json:"y"`
+						} `json:"xy,omitempty"`
+					} `json:"color,omitempty"`
+					ColorTemperature *struct {
+						Mirek *int `json:"mirek,omitempty"`
+					} `json:"color_temperature,omitempty"`
+					Speed *float32 `json:"speed,omitempty"`
+				}{
+					Speed: &speed,
+				},
+			},
+		},
+	})
+	return err
+}
+
 // gradientModePutBody is the request body for updating gradient mode (requires points too).
 type gradientModePutBody struct {
 	Gradient *gradientModePut `json:"gradient,omitempty"`
@@ -548,5 +637,92 @@ func (b *Bridge) SetLightPowerupPreset(lightID string, preset hueclient.UpdateLi
 			Preset: preset,
 		},
 	})
+	return err
+}
+
+// SetLightTimedEffect sets a light's timed effect (sunrise, sunset, or no_effect).
+// Duration is in milliseconds, max 21600000 (6 hours). Duration is required for sunrise/sunset.
+func (b *Bridge) SetLightTimedEffect(lightID string, effect hueclient.SupportedTimedEffects, durationMs int) error {
+	b.mu.RLock()
+	client := b.client
+	b.mu.RUnlock()
+
+	if client == nil {
+		return ErrAuthFailed
+	}
+
+	lightName := "Unknown"
+	if light, ok := b.state.GetLight(lightID); ok {
+		lightName = b.state.GetLightName(light)
+	}
+
+	effectName := string(effect)
+	if effectName == "no_effect" {
+		b.logRequest(fmt.Sprintf("%s: timed effect stopped", lightName))
+	} else {
+		durationMin := durationMs / 60000
+		b.logRequest(fmt.Sprintf("%s: timed effect %s (%d min)", lightName, effectName, durationMin))
+	}
+
+	body := hueclient.UpdateLightJSONRequestBody{
+		TimedEffects: &struct {
+			Duration *int                             `json:"duration,omitempty"`
+			Effect   *hueclient.SupportedTimedEffects `json:"effect,omitempty"`
+		}{
+			Effect: &effect,
+		},
+	}
+
+	// Duration is required for sunrise/sunset, omitted for no_effect
+	if effect != hueclient.SupportedTimedEffectsNoEffect {
+		body.TimedEffects.Duration = &durationMs
+	}
+
+	_, err := client.UpdateLight(context.Background(), toResourceId(lightID), body)
+	return err
+}
+
+// SetLightSignaling triggers a signaling effect on a light.
+// Signal can be "no_signal", "on_off", "on_off_color", or "alternating".
+// Duration is in milliseconds (max 65534000 ms). Duration is ignored for no_signal.
+func (b *Bridge) SetLightSignaling(lightID string, signal hueclient.SupportedSignals, durationMs int) error {
+	b.mu.RLock()
+	client := b.client
+	b.mu.RUnlock()
+
+	if client == nil {
+		return ErrAuthFailed
+	}
+
+	lightName := "Unknown"
+	if light, ok := b.state.GetLight(lightID); ok {
+		lightName = b.state.GetLightName(light)
+	}
+
+	signalName := string(signal)
+	if signalName == "no_signal" {
+		b.logRequest(fmt.Sprintf("%s: signal stopped", lightName))
+	} else {
+		durationSec := durationMs / 1000
+		b.logRequest(fmt.Sprintf("%s: signal %s (%d sec)", lightName, signalName, durationSec))
+	}
+
+	body := hueclient.UpdateLightJSONRequestBody{
+		Signaling: &struct {
+			Colors *[]struct {
+				Xy *struct {
+					X float32 `json:"x"`
+					Y float32 `json:"y"`
+				} `json:"xy,omitempty"`
+			} `json:"colors,omitempty"`
+			Duration int                      `json:"duration"`
+			Signal   hueclient.SupportedSignals `json:"signal"`
+		}{
+			Signal:   signal,
+			Duration: durationMs,
+		},
+	}
+
+	_, err := client.UpdateLight(context.Background(), toResourceId(lightID), body)
 	return err
 }

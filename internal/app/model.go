@@ -75,6 +75,10 @@ type Model struct {
 	lastTreeClick    time.Time            // Track last tree item click for double-click detection
 	lastTreeClickID  string               // Track which tree item was last clicked
 
+	// Duration settings for controls (stored per light)
+	signalDurations      map[string]int // Signal duration in seconds per light ID
+	timedEffectDurations map[string]int // Timed effect duration in minutes per light ID
+
 	// Rename mode state
 	renaming bool // Whether we're in rename mode
 	// renameInput removed - now owned by renameModal (TextInputModal)
@@ -202,9 +206,11 @@ func New(creds *config.CredentialStore) Model {
 		requestChan:      make(chan requestMsg, 100),
 		errorChan:        make(chan errorMsg, 100),
 		eventCancelFuncs: make(map[string]context.CancelFunc),
-		bridgeBlinkUntil: make(map[string]time.Time),
-		lightGrid:        gridlayout.NewGrid().SetGaps(2, 0).SetFocusIndicator(true, "> ", "  "),
-		selectedLightID:  "",
+		bridgeBlinkUntil:     make(map[string]time.Time),
+		signalDurations:      make(map[string]int),
+		timedEffectDurations: make(map[string]int),
+		lightGrid:            gridlayout.NewGrid().SetGaps(2, 0).SetFocusIndicator(true, "> ", "  "),
+		selectedLightID:      "",
 		historyIndex:     -1, // No history initially
 		inputStack:       NewInputStack(),
 		showActivity:     true, // Activity log visible by default

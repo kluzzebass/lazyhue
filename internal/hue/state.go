@@ -24,6 +24,7 @@ type BridgeState struct {
 	Temperatures                map[string]hueclient.TemperatureGet
 	LightLevels                 map[string]hueclient.LightLevelGet
 	DevicePowers                map[string]hueclient.DevicePowerGet
+	DeviceSoftwareUpdates       map[string]hueclient.DeviceSoftwareUpdateGet
 	EntertainmentConfigurations map[string]EntertainmentConfiguration
 	WifiConnectivity            []WifiConnectivity            // WiFi status (Bridge Pro only)
 	ZigbeeConnectivity          map[string]ZigbeeConnectivity // Zigbee connectivity per device
@@ -48,6 +49,7 @@ func NewBridgeState() *BridgeState {
 		Temperatures:                make(map[string]hueclient.TemperatureGet),
 		LightLevels:                 make(map[string]hueclient.LightLevelGet),
 		DevicePowers:                make(map[string]hueclient.DevicePowerGet),
+		DeviceSoftwareUpdates:       make(map[string]hueclient.DeviceSoftwareUpdateGet),
 		EntertainmentConfigurations: make(map[string]EntertainmentConfiguration),
 		ZigbeeConnectivity:          make(map[string]ZigbeeConnectivity),
 	}
@@ -987,6 +989,32 @@ func (s *BridgeState) GetMotion(id string) (hueclient.MotionGet, bool) {
 // UpdateDevicePowers replaces the device powers cache.
 func (s *BridgeState) UpdateDevicePowers(powers map[string]hueclient.DevicePowerGet) {
 	updateMap(s, &s.DevicePowers, powers)
+}
+
+// UpdateDeviceSoftwareUpdates replaces device software update data.
+func (s *BridgeState) UpdateDeviceSoftwareUpdates(updates map[string]hueclient.DeviceSoftwareUpdateGet) {
+	updateMap(s, &s.DeviceSoftwareUpdates, updates)
+}
+
+// GetDeviceSoftwareUpdate returns a device software update by ID.
+func (s *BridgeState) GetDeviceSoftwareUpdate(id string) (hueclient.DeviceSoftwareUpdateGet, bool) {
+	return getFromMap(s, s.DeviceSoftwareUpdates, id)
+}
+
+// GetDeviceSoftwareUpdateStatus returns the software update status for a device.
+// Returns the update resource and whether an update is available.
+func (s *BridgeState) GetDeviceSoftwareUpdateStatus(device hueclient.DeviceGet) (update hueclient.DeviceSoftwareUpdateGet, found bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	for _, svc := range device.Services {
+		if svc.Rtype == "device_software_update" {
+			if upd, ok := s.DeviceSoftwareUpdates[svc.Rid]; ok {
+				return upd, true
+			}
+		}
+	}
+	return hueclient.DeviceSoftwareUpdateGet{}, false
 }
 
 // UpdateEntertainmentConfigurations replaces entertainment configuration data.

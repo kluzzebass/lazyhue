@@ -191,6 +191,29 @@ func (m *Model) buildDeviceGridRows(device hueclient.DeviceGet, state *hue.Bridg
 		if pd.SoftwareVersion != "" {
 			rows = append(rows, gridlayout.NewInfoRow("Firmware", pd.SoftwareVersion, infoLabelWidth))
 		}
+		// Firmware update status
+		if state != nil {
+			if update, found := state.GetDeviceSoftwareUpdateStatus(device); found {
+				updateStatus := string(update.State)
+				statusStyle := m.styles.Dimmed
+				displayStatus := "Up to date"
+				switch updateStatus {
+				case "no_update":
+					displayStatus = "Up to date"
+					statusStyle = m.styles.Success
+				case "update_pending":
+					displayStatus = "Update pending"
+					statusStyle = m.styles.Warning
+				case "ready_to_install":
+					displayStatus = "Ready to install"
+					statusStyle = m.styles.Warning
+				case "installing":
+					displayStatus = "Installing..."
+					statusStyle = m.styles.Success
+				}
+				rows = append(rows, gridlayout.NewStyledInfoRow("Update", displayStatus, infoLabelWidth, statusStyle))
+			}
+		}
 		if pd.ProductArchetype != "" {
 			rows = append(rows, gridlayout.NewStyledInfoRow("Archetype", hue.ProductArchetypeDisplayName(string(pd.ProductArchetype)), infoLabelWidth, m.styles.Dimmed))
 		}
@@ -282,6 +305,18 @@ func (m *Model) buildDeviceGridRows(device hueclient.DeviceGet, state *hue.Bridg
 
 			if zc.MacAddress != "" {
 				rows = append(rows, gridlayout.NewStyledInfoRow("MAC", zc.MacAddress, infoLabelWidth, m.styles.Dimmed))
+			}
+
+			if zc.Channel != nil && zc.Channel.Value != "" {
+				// Extract channel number from "channel_25" format
+				channelDisplay := zc.Channel.Value
+				if len(channelDisplay) > 8 && channelDisplay[:8] == "channel_" {
+					channelDisplay = channelDisplay[8:]
+				}
+				if zc.Channel.Status == "changing" {
+					channelDisplay += " (changing)"
+				}
+				rows = append(rows, gridlayout.NewStyledInfoRow("Channel", channelDisplay, infoLabelWidth, m.styles.Dimmed))
 			}
 		}
 	}

@@ -61,24 +61,30 @@ func (m *Model) buildLightGridRows(light hueclient.LightGet) {
 	// Get owning device for product info
 	device := m.getDeviceForLight(light)
 
+	// === CONTROLS (interactive, at the top) ===
+
 	// 1. Controls section - instant adjustments (power, brightness, color, effects, identify)
 	rows = append(rows, m.buildControlsRows(light)...)
 
-	// 2. Gradient section - interactive color gradient editing (if supported)
+	// 2. Timed Effects - interactive triggers (sunrise/sunset)
+	rows = append(rows, m.buildTimedEffectsListRows(light)...)
+
+	// 3. Signaling - interactive triggers (alerts)
+	rows = append(rows, m.buildSignalingRows(light)...)
+
+	// 4. Gradient section - interactive color gradient editing (if supported)
 	lightID := light.Id
 	rows = append(rows, m.buildGradientRows(light, lightID)...)
 
-	// 3. Settings section - persistent configuration (name, power-on behavior)
+	// === SETTINGS (editable configuration) ===
+
+	// 5. Settings section - persistent configuration (name, power-on behavior)
 	rows = append(rows, m.buildLightSettingsRows(light, device)...)
 
-	// 4. State Info section - current readings
+	// === STATE & INFO (read-only, lower priority) ===
+
+	// 6. State Info section - current readings
 	rows = append(rows, m.buildStateRows(light)...)
-
-	// 5. Product Info section
-	rows = append(rows, m.buildProductInfoRows(device)...)
-
-	// 6. Classification section
-	rows = append(rows, m.buildClassificationRows(light, device)...)
 
 	// 7. Dynamics section
 	rows = append(rows, m.buildDynamicsRows(light)...)
@@ -86,16 +92,19 @@ func (m *Model) buildLightGridRows(light hueclient.LightGet) {
 	// 8. Capabilities section
 	rows = append(rows, m.buildCapabilitiesRows(light)...)
 
-	// 9. Effects list section
+	// 9. Product Info section
+	rows = append(rows, m.buildProductInfoRows(device)...)
+
+	// 10. Classification section
+	rows = append(rows, m.buildClassificationRows(light, device)...)
+
+	// 11. Effects list section (reference info, not interactive)
 	rows = append(rows, m.buildEffectsListRows(light)...)
 
-	// 10. Signaling section
-	rows = append(rows, m.buildSignalingRows(light)...)
-
-	// 11. Device Services section
+	// 12. Device Services section
 	rows = append(rows, m.buildDeviceServicesRows(light, device)...)
 
-	// 12. IDs section - least urgent, at the end
+	// 13. IDs section - least urgent, at the end
 	rows = append(rows, m.buildIDsRows(light)...)
 
 	m.lightGrid.SetRows(rows)
@@ -520,6 +529,25 @@ func (m *Model) buildControlsRows(light hueclient.LightGet) []gridlayout.GridRow
 		}
 	}
 
+	// EffectsV2 speed control (when effect is active)
+	if light.EffectsV2 != nil && light.EffectsV2.Status.Effect != "" && light.EffectsV2.Status.Effect != "no_effect" {
+		speed := 50 // Default 50%
+		if light.EffectsV2.Status.Parameters != nil {
+			speed = int(light.EffectsV2.Status.Parameters.Speed * 100)
+		}
+		speedSlider := field.NewSliderComponent(
+			"effect-speed:"+light.Id, "Speed", speed, 0, 100, 1,
+			&m.styles, m.zones,
+		)
+		rows = append(rows, gridlayout.GridRow{
+			Type: gridlayout.RowTypeNormal,
+			Cells: []gridlayout.GridCell{
+				{Component: gridlayout.NewLabelWithWidth("Effect Speed", infoLabelWidth)},
+				{Component: speedSlider},
+			},
+		})
+	}
+
 	// Identify button (uses device ID from light owner)
 	if light.Owner.Rid != "" {
 		identifyBtn := field.NewButtonComponent(
@@ -635,6 +663,23 @@ func (m *Model) buildCapabilitiesRows(light hueclient.LightGet) []gridlayout.Gri
 		Section: header,
 	})
 
+	// Color Gamut Type (if color capable)
+	if light.Color != nil {
+		gamutType := string(light.Color.GamutType)
+		gamutDisplay := gamutType
+		switch gamutType {
+		case "A":
+			gamutDisplay = "A (early Philips)"
+		case "B":
+			gamutDisplay = "B (first gen Hue)"
+		case "C":
+			gamutDisplay = "C (wide gamut)"
+		case "other":
+			gamutDisplay = "Other (non-Hue)"
+		}
+		rows = append(rows, gridlayout.NewInfoRow("Color Gamut", gamutDisplay, infoLabelWidth))
+	}
+
 	// Collect capabilities
 	var caps []string
 	if light.Dimming != nil {
@@ -688,6 +733,97 @@ func (m *Model) buildEffectsListRows(light hueclient.LightGet) []gridlayout.Grid
 	}
 
 	return rows
+}
+
+// buildTimedEffectsListRows builds rows for the available timed effects section.
+func (m *Model) buildTimedEffectsListRows(light hueclient.LightGet) []gridlayout.GridRow {
+	if light.TimedEffects == nil || len(light.TimedEffects.EffectValues) == 0 {
+		return nil
+	}
+
+	var rows []gridlayout.GridRow
+
+	// Section header
+	header := field.NewHeaderComponent("timed-effects-header", "Timed Effects", &m.styles, m.zones)
+	rows = append(rows, gridlayout.GridRow{
+		Type:    gridlayout.RowTypeSection,
+		Section: header,
+	})
+
+	// Show current status if active
+	statusStr := string(light.TimedEffects.Status)
+	if statusStr != "" && statusStr != "no_effect" {
+		displayStatus := formatTimedEffect(statusStr)
+		statusStyle := m.styles.Success
+		rows = append(rows, gridlayout.NewStyledInfoRow("Status", displayStatus+" (active)", infoLabelWidth, statusStyle))
+
+		// Stop button when effect is active
+		stopBtn := field.NewButtonComponent(
+			"timed-effect-stop:"+light.Id, "Stop", "Stop",
+			&m.styles, m.zones,
+		)
+		rows = append(rows, gridlayout.GridRow{
+			Type: gridlayout.RowTypeNormal,
+			Cells: []gridlayout.GridCell{
+				{Component: gridlayout.NewLabelWithWidth("", infoLabelWidth)},
+				{Component: stopBtn},
+			},
+		})
+	}
+
+	// Duration slider (5-120 minutes, default 30)
+	currentDuration := 30
+	if d, ok := m.timedEffectDurations[light.Id]; ok {
+		currentDuration = d
+	}
+	durationSlider := field.NewSliderComponent(
+		"timed-effect-duration:"+light.Id, "Duration",
+		currentDuration, 5, 120, 5,
+		&m.styles, m.zones,
+	)
+	rows = append(rows, gridlayout.GridRow{
+		Type: gridlayout.RowTypeNormal,
+		Cells: []gridlayout.GridCell{
+			{Component: gridlayout.NewLabelWithWidth("Duration (min)", infoLabelWidth)},
+			{Component: durationSlider},
+		},
+	})
+
+	// Effect trigger buttons for available effects
+	for _, effect := range light.TimedEffects.EffectValues {
+		effectStr := string(effect)
+		if effectStr == "no_effect" {
+			continue
+		}
+		displayName := formatTimedEffect(effectStr)
+		triggerBtn := field.NewButtonComponent(
+			"timed-effect-trigger:"+light.Id+":"+effectStr, displayName, displayName,
+			&m.styles, m.zones,
+		)
+		rows = append(rows, gridlayout.GridRow{
+			Type: gridlayout.RowTypeNormal,
+			Cells: []gridlayout.GridCell{
+				{Component: gridlayout.NewLabelWithWidth(displayName, infoLabelWidth)},
+				{Component: triggerBtn},
+			},
+		})
+	}
+
+	return rows
+}
+
+// formatTimedEffect formats a timed effect name for display.
+func formatTimedEffect(effect string) string {
+	switch effect {
+	case "sunrise":
+		return "Sunrise"
+	case "sunset":
+		return "Sunset"
+	case "no_effect":
+		return "None"
+	default:
+		return effect
+	}
 }
 
 // buildGradientRows builds rows for the gradient section.
@@ -811,15 +947,71 @@ func (m *Model) buildSignalingRows(light hueclient.LightGet) []gridlayout.GridRo
 	var rows []gridlayout.GridRow
 
 	// Section header
-	header := field.NewHeaderComponent("signaling-header", "Signaling Modes", &m.styles, m.zones)
+	header := field.NewHeaderComponent("signaling-header", "Signaling", &m.styles, m.zones)
 	rows = append(rows, gridlayout.GridRow{
 		Type:    gridlayout.RowTypeSection,
 		Section: header,
 	})
 
+	// Show active signal status if present
+	if light.Signaling.Status != nil {
+		signalStr := string(light.Signaling.Status.Signal)
+		if signalStr != "" && signalStr != "no_signal" {
+			displayName := hue.SignalingModeDisplayName(signalStr)
+			statusStyle := m.styles.Success
+			rows = append(rows, gridlayout.NewStyledInfoRow("Status", displayName+" (active)", infoLabelWidth, statusStyle))
+
+			// Stop button when signal is active
+			stopBtn := field.NewButtonComponent(
+				"signal-stop:"+light.Id, "Stop", "Stop",
+				&m.styles, m.zones,
+			)
+			rows = append(rows, gridlayout.GridRow{
+				Type: gridlayout.RowTypeNormal,
+				Cells: []gridlayout.GridCell{
+					{Component: gridlayout.NewLabelWithWidth("", infoLabelWidth)},
+					{Component: stopBtn},
+				},
+			})
+		}
+	}
+
+	// Duration slider (5-60 seconds, default 15)
+	currentDuration := 15
+	if d, ok := m.signalDurations[light.Id]; ok {
+		currentDuration = d
+	}
+	durationSlider := field.NewSliderComponent(
+		"signal-duration:"+light.Id, "Duration",
+		currentDuration, 5, 60, 5,
+		&m.styles, m.zones,
+	)
+	rows = append(rows, gridlayout.GridRow{
+		Type: gridlayout.RowTypeNormal,
+		Cells: []gridlayout.GridCell{
+			{Component: gridlayout.NewLabelWithWidth("Duration (sec)", infoLabelWidth)},
+			{Component: durationSlider},
+		},
+	})
+
+	// Signal trigger buttons for available signals
 	for _, sig := range light.Signaling.SignalValues {
-		displayName := hue.SignalingModeDisplayName(string(sig))
-		rows = append(rows, gridlayout.NewListItemRow("•", displayName))
+		sigStr := string(sig)
+		if sigStr == "no_signal" {
+			continue
+		}
+		displayName := hue.SignalingModeDisplayName(sigStr)
+		triggerBtn := field.NewButtonComponent(
+			"signal-trigger:"+light.Id+":"+sigStr, displayName, displayName,
+			&m.styles, m.zones,
+		)
+		rows = append(rows, gridlayout.GridRow{
+			Type: gridlayout.RowTypeNormal,
+			Cells: []gridlayout.GridCell{
+				{Component: gridlayout.NewLabelWithWidth(displayName, infoLabelWidth)},
+				{Component: triggerBtn},
+			},
+		})
 	}
 
 	return rows

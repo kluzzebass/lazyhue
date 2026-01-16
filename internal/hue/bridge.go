@@ -556,6 +556,7 @@ func (b *Bridge) SyncAll(ctx context.Context) error {
 	_ = b.SyncTemperatures(ctx)
 	_ = b.SyncLightLevels(ctx)
 	_ = b.SyncDevicePowers(ctx)
+	_ = b.SyncDeviceSoftwareUpdates(ctx)
 
 	// Entertainment configurations (non-fatal)
 	_ = b.SyncEntertainmentConfigurations(ctx)
@@ -1068,6 +1069,36 @@ func (b *Bridge) SyncDevicePowers(ctx context.Context) error {
 	}
 
 	b.state.UpdateDevicePowers(powers)
+	return nil
+}
+
+// SyncDeviceSoftwareUpdates fetches device software update statuses from the bridge.
+func (b *Bridge) SyncDeviceSoftwareUpdates(ctx context.Context) error {
+	b.mu.RLock()
+	client := b.client
+	b.mu.RUnlock()
+
+	if client == nil {
+		return ErrAuthFailed
+	}
+
+	resp, err := client.GetDeviceSoftwareUpdatesWithResponse(ctx)
+	if err != nil {
+		return err
+	}
+
+	if resp.JSON200 == nil {
+		return nil
+	}
+
+	updates := make(map[string]hueclient.DeviceSoftwareUpdateGet)
+	for _, update := range resp.JSON200.Data {
+		if update.Id != "" {
+			updates[update.Id] = update
+		}
+	}
+
+	b.state.UpdateDeviceSoftwareUpdates(updates)
 	return nil
 }
 

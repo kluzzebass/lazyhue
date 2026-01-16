@@ -875,6 +875,111 @@ func (m *Model) handleNewFieldChange(msg field.FieldChangedMsg) {
 			}
 			return
 		}
+	} else if strings.HasPrefix(msg.FieldID, "effect-speed:") {
+		lightID := strings.TrimPrefix(msg.FieldID, "effect-speed:")
+		if v, ok := msg.Value.(field.SliderValue); ok {
+			speed := float32(v.Value) / 100.0
+			m.status = fmt.Sprintf("Effect speed: %d%%", v.Value)
+			err = bridge.SetLightEffectSpeed(lightID, speed)
+			if err != nil {
+				m.status = fmt.Sprintf("Error: %v", err)
+			}
+			return
+		}
+	} else if strings.HasPrefix(msg.FieldID, "timed-effect-stop:") {
+		lightID := strings.TrimPrefix(msg.FieldID, "timed-effect-stop:")
+		if _, ok := msg.Value.(field.ButtonValue); ok {
+			m.status = "Stopping timed effect..."
+			err = bridge.SetLightTimedEffect(lightID, hueclient.SupportedTimedEffectsNoEffect, 0)
+			if err != nil {
+				m.status = fmt.Sprintf("Error: %v", err)
+			} else {
+				m.status = "Timed effect stopped"
+			}
+			return
+		}
+	} else if strings.HasPrefix(msg.FieldID, "timed-effect-duration:") {
+		lightID := strings.TrimPrefix(msg.FieldID, "timed-effect-duration:")
+		if v, ok := msg.Value.(field.SliderValue); ok {
+			m.timedEffectDurations[lightID] = v.Value
+			m.status = fmt.Sprintf("Timed effect duration: %d min", v.Value)
+			return
+		}
+	} else if strings.HasPrefix(msg.FieldID, "timed-effect-trigger:") {
+		// Format: "timed-effect-trigger:lightID:effect"
+		rest := strings.TrimPrefix(msg.FieldID, "timed-effect-trigger:")
+		parts := strings.SplitN(rest, ":", 2)
+		if len(parts) == 2 {
+			lightID := parts[0]
+			effectStr := parts[1]
+			if _, ok := msg.Value.(field.ButtonValue); ok {
+				effect := hueclient.SupportedTimedEffects(effectStr)
+				// Use stored duration or default to 30 minutes
+				durationMin := 30
+				if d, ok := m.timedEffectDurations[lightID]; ok {
+					durationMin = d
+				}
+				durationMs := durationMin * 60 * 1000
+				m.status = fmt.Sprintf("Starting %s effect (%d min)...", effectStr, durationMin)
+				err = bridge.SetLightTimedEffect(lightID, effect, durationMs)
+				if err != nil {
+					m.status = fmt.Sprintf("Error: %v", err)
+				} else {
+					// Capitalize first letter manually
+					effectDisplay := effectStr
+					if len(effectStr) > 0 {
+						effectDisplay = strings.ToUpper(effectStr[:1]) + effectStr[1:]
+					}
+					m.status = fmt.Sprintf("%s effect started", effectDisplay)
+				}
+				return
+			}
+		}
+	} else if strings.HasPrefix(msg.FieldID, "signal-stop:") {
+		lightID := strings.TrimPrefix(msg.FieldID, "signal-stop:")
+		if _, ok := msg.Value.(field.ButtonValue); ok {
+			m.status = "Stopping signal..."
+			err = bridge.SetLightSignaling(lightID, hueclient.NoSignal, 0)
+			if err != nil {
+				m.status = fmt.Sprintf("Error: %v", err)
+			} else {
+				m.status = "Signal stopped"
+			}
+			return
+		}
+	} else if strings.HasPrefix(msg.FieldID, "signal-duration:") {
+		lightID := strings.TrimPrefix(msg.FieldID, "signal-duration:")
+		if v, ok := msg.Value.(field.SliderValue); ok {
+			m.signalDurations[lightID] = v.Value
+			m.status = fmt.Sprintf("Signal duration: %d sec", v.Value)
+			return
+		}
+	} else if strings.HasPrefix(msg.FieldID, "signal-trigger:") {
+		// Format: "signal-trigger:lightID:signal"
+		rest := strings.TrimPrefix(msg.FieldID, "signal-trigger:")
+		parts := strings.SplitN(rest, ":", 2)
+		if len(parts) == 2 {
+			lightID := parts[0]
+			signalStr := parts[1]
+			if _, ok := msg.Value.(field.ButtonValue); ok {
+				signal := hueclient.SupportedSignals(signalStr)
+				// Use stored duration or default to 15 seconds
+				durationSec := 15
+				if d, ok := m.signalDurations[lightID]; ok {
+					durationSec = d
+				}
+				durationMs := durationSec * 1000
+				displayName := hue.SignalingModeDisplayName(signalStr)
+				m.status = fmt.Sprintf("Starting %s signal (%d sec)...", displayName, durationSec)
+				err = bridge.SetLightSignaling(lightID, signal, durationMs)
+				if err != nil {
+					m.status = fmt.Sprintf("Error: %v", err)
+				} else {
+					m.status = fmt.Sprintf("%s signal started", displayName)
+				}
+				return
+			}
+		}
 	} else if strings.HasPrefix(msg.FieldID, FieldPrefixDeviceName) {
 		deviceID := strings.TrimPrefix(msg.FieldID, FieldPrefixDeviceName)
 		if v, ok := msg.Value.(field.TextValue); ok {

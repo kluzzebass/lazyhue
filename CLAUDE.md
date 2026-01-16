@@ -62,6 +62,24 @@ just watch
 
 **Service Layer Independence:** The `hue/`, `hueclient/`, `config/`, and `debug/` packages have no Charm dependencies.
 
+## Generating the Hue Client
+
+The `internal/hueclient/` package is generated from the [oapi-hue](https://github.com/kluzzebass/oapi-hue) OpenAPI spec using `oapi-codegen`.
+
+**To regenerate the client:**
+
+```bash
+# Download the latest spec and generate
+curl -sL "https://github.com/kluzzebass/oapi-hue/releases/download/v0.3.0/oapi-hue.yaml" -o /tmp/oapi-hue.yaml
+oapi-codegen -generate types,client -package hueclient /tmp/oapi-hue.yaml 2>&1 | grep -v "^WARNING:" > internal/hueclient/client.go
+```
+
+The `grep -v "^WARNING:"` filters out the OpenAPI 3.1.x warning that oapi-codegen emits to stdout.
+
+**After regenerating**, you may need to fix type name changes throughout the codebase. The spec uses unified type names (e.g., `DeviceArchetype` instead of `DeviceGetProductDataProductArchetype`).
+
+**Do not edit `client.go` directly** - changes will be lost on regeneration. For API workarounds, add custom code in `internal/hue/` (see "Hue API Workarounds" below).
+
 ## Key Patterns
 
 ### Message-Driven Updates
@@ -242,6 +260,20 @@ fields := []component.Component{
 // Set on FormComponent
 m.lightFormComponent.SetFields(fields)
 ```
+
+## Detail Panel Layout
+
+**Controls and settings go at the TOP of detail pages.** Users expect to interact with things immediately, not scroll through walls of read-only info first.
+
+**Section ordering by immediacy:**
+1. **Controls** - Buttons for instant actions (Identify, Recall Scene, etc.)
+2. **Settings** - Editable fields (Name, Room assignment, toggles)
+3. **State** - Current values that change (On/Off, Brightness, Color)
+4. **Capabilities** - What the device supports
+5. **Product Info** - Static device information
+6. **IDs** - Technical identifiers (least important, at the bottom)
+
+**DON'T** bury interactive elements like Timed Effects triggers, Signaling buttons, or Effect controls deep in the detail panel. If a user can click it to make something happen, it should be near the top.
 
 ## Dependencies
 
