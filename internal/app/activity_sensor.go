@@ -95,13 +95,17 @@ func (e *ButtonEvent) Parse(bridgeID, bridgeName, eventType string, data json.Ra
 
 	// Get device name and button control ID from state
 	if state != nil {
-		// Get control ID from button resource in state
+		// Get button from state - it has the owner reference and control ID
 		if btn, ok := state.GetButton(update.ID); ok {
 			e.ControlID = btn.Metadata.ControlId
-		}
-
-		// Get device name from owner
-		if update.Owner != nil {
+			// Get device name from the button's owner
+			if btn.Owner.Rid != "" {
+				if device, ok := state.GetDevice(btn.Owner.Rid); ok {
+					e.Name = device.DeviceName("")
+				}
+			}
+		} else if update.Owner != nil {
+			// Fallback: try owner from event data (won't work with mock data)
 			if device, ok := state.GetDevice(update.Owner.Rid); ok {
 				e.Name = device.DeviceName("")
 			}
