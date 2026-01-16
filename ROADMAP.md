@@ -99,7 +99,6 @@ These features have API support already implemented or partially implemented:
 
 ### Scene Enhancements (data already fetched)
 - [ ] Display scene color palette for dynamic scenes
-- [ ] Show scene image reference
 - [ ] SmartScene active timeslot indicator
 - [ ] SmartScene weekly schedule visualization
 - [ ] SmartScene transition duration display
