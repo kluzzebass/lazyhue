@@ -171,7 +171,6 @@ These features have API support already implemented or partially implemented:
 - [ ] Homekit code display
 - [ ] Bridge diagnostics
 - [ ] Network statistics
-- [ ] Zigbee mesh visualization
 - [ ] Integration with other smart home systems
 - [ ] Scripting/macro support
 - [ ] REST API mode (headless)
