@@ -91,7 +91,11 @@ type ResourceUpdate struct {
 	} `json:"services,omitempty"`
 	// Button event data
 	Button *struct {
-		LastEvent string `json:"last_event"` // "initial_press", "repeat", "short_release", "long_release", "double_short_release"
+		LastEvent    string `json:"last_event"` // "initial_press", "repeat", "short_release", "long_release", "double_short_release"
+		ButtonReport *struct {
+			Event   string `json:"event"`
+			Updated string `json:"updated"`
+		} `json:"button_report,omitempty"`
 	} `json:"button,omitempty"`
 	// Device power (battery) event data
 	PowerState *struct {

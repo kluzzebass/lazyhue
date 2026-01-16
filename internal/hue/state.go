@@ -25,6 +25,7 @@ type BridgeState struct {
 	LightLevels                 map[string]hueclient.LightLevelGet
 	DevicePowers                map[string]hueclient.DevicePowerGet
 	DeviceSoftwareUpdates       map[string]hueclient.DeviceSoftwareUpdateGet
+	Buttons                     map[string]hueclient.ButtonGet // Button resources for switches/remotes
 	EntertainmentConfigurations map[string]EntertainmentConfiguration
 	WifiConnectivity            []WifiConnectivity            // WiFi status (Bridge Pro only)
 	ZigbeeConnectivity          map[string]ZigbeeConnectivity // Zigbee connectivity per device
@@ -50,6 +51,7 @@ func NewBridgeState() *BridgeState {
 		LightLevels:                 make(map[string]hueclient.LightLevelGet),
 		DevicePowers:                make(map[string]hueclient.DevicePowerGet),
 		DeviceSoftwareUpdates:       make(map[string]hueclient.DeviceSoftwareUpdateGet),
+		Buttons:                     make(map[string]hueclient.ButtonGet),
 		EntertainmentConfigurations: make(map[string]EntertainmentConfiguration),
 		ZigbeeConnectivity:          make(map[string]ZigbeeConnectivity),
 	}
@@ -1015,6 +1017,50 @@ func (s *BridgeState) GetDeviceSoftwareUpdateStatus(device hueclient.DeviceGet) 
 		}
 	}
 	return hueclient.DeviceSoftwareUpdateGet{}, false
+}
+
+// UpdateButtons replaces the buttons cache.
+func (s *BridgeState) UpdateButtons(buttons map[string]hueclient.ButtonGet) {
+	updateMap(s, &s.Buttons, buttons)
+}
+
+// GetButton returns a button by ID.
+func (s *BridgeState) GetButton(id string) (hueclient.ButtonGet, bool) {
+	return getFromMap(s, s.Buttons, id)
+}
+
+// GetDeviceButtons returns all buttons owned by a device, sorted by control ID.
+func (s *BridgeState) GetDeviceButtons(device hueclient.DeviceGet) []hueclient.ButtonGet {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	var buttons []hueclient.ButtonGet
+	deviceID := device.Id
+
+	// Find buttons via device services
+	for _, svc := range device.Services {
+		if svc.Rtype == hueclient.ResourceTypeButton && svc.Rid != "" {
+			if btn, ok := s.Buttons[svc.Rid]; ok {
+				buttons = append(buttons, btn)
+			}
+		}
+	}
+
+	// Fallback: check if any button is owned by this device
+	if len(buttons) == 0 && deviceID != "" {
+		for _, btn := range s.Buttons {
+			if btn.Owner.Rid == deviceID {
+				buttons = append(buttons, btn)
+			}
+		}
+	}
+
+	// Sort by control ID for consistent ordering
+	sort.Slice(buttons, func(i, j int) bool {
+		return buttons[i].Metadata.ControlId < buttons[j].Metadata.ControlId
+	})
+
+	return buttons
 }
 
 // UpdateEntertainmentConfigurations replaces entertainment configuration data.

@@ -63,8 +63,9 @@ func (e *MotionEvent) Render(styles *ui.Styles, width int) string {
 // ButtonEvent represents a button press event.
 type ButtonEvent struct {
 	baseEvent
-	Name    string
-	Details string
+	Name      string
+	Details   string
+	ControlID int // Which button on the device (1-4 for dimmer switch)
 }
 
 func (e *ButtonEvent) Parse(bridgeID, bridgeName, eventType string, data json.RawMessage, state *hue.BridgeState) (Event, error) {
@@ -92,10 +93,18 @@ func (e *ButtonEvent) Parse(bridgeID, bridgeName, eventType string, data json.Ra
 		e.Details = formatButtonEvent(update.Button.LastEvent)
 	}
 
-	// Get device name from owner
-	if state != nil && update.Owner != nil {
-		if device, ok := state.GetDevice(update.Owner.Rid); ok {
-			e.Name = device.DeviceName("")
+	// Get device name and button control ID from state
+	if state != nil {
+		// Get control ID from button resource in state
+		if btn, ok := state.GetButton(update.ID); ok {
+			e.ControlID = btn.Metadata.ControlId
+		}
+
+		// Get device name from owner
+		if update.Owner != nil {
+			if device, ok := state.GetDevice(update.Owner.Rid); ok {
+				e.Name = device.DeviceName("")
+			}
 		}
 	}
 
@@ -123,7 +132,12 @@ func formatButtonEvent(event string) string {
 }
 
 func (e *ButtonEvent) Render(styles *ui.Styles, width int) string {
-	return renderEvent(styles, width, e.baseEvent, e.Name, e.Details, "", 0, false)
+	// Include button number in the details if we have it
+	details := e.Details
+	if e.ControlID > 0 {
+		details = fmt.Sprintf("btn %d → %s", e.ControlID, e.Details)
+	}
+	return renderEvent(styles, width, e.baseEvent, e.Name, details, "", 0, false)
 }
 
 // DevicePowerEvent represents a device power (battery) event.

@@ -617,6 +617,7 @@ func (b *Bridge) SyncAllBulk(ctx context.Context) error {
 	temperatures := make(map[string]hueclient.TemperatureGet)
 	lightLevels := make(map[string]hueclient.LightLevelGet)
 	devicePowers := make(map[string]hueclient.DevicePowerGet)
+	buttons := make(map[string]hueclient.ButtonGet)
 	bridges := make(map[string]hueclient.BridgeGet)
 	bridgeHomes := make(map[string]hueclient.BridgeHomeGet)
 
@@ -687,6 +688,11 @@ func (b *Bridge) SyncAllBulk(ctx context.Context) error {
 			if err := json.Unmarshal(raw, &dp); err == nil && dp.Id != "" {
 				devicePowers[dp.Id] = dp
 			}
+		case "button":
+			var btn hueclient.ButtonGet
+			if err := json.Unmarshal(raw, &btn); err == nil && btn.Id != "" {
+				buttons[btn.Id] = btn
+			}
 		case "bridge":
 			var br hueclient.BridgeGet
 			if err := json.Unmarshal(raw, &br); err == nil && br.Id != "" {
@@ -712,6 +718,7 @@ func (b *Bridge) SyncAllBulk(ctx context.Context) error {
 	b.state.UpdateTemperatures(temperatures)
 	b.state.UpdateLightLevels(lightLevels)
 	b.state.UpdateDevicePowers(devicePowers)
+	b.state.UpdateButtons(buttons)
 
 	// Bridge and BridgeHome are single resources, extract first from map
 	for _, br := range bridges {

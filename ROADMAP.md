@@ -115,7 +115,7 @@ These features have API support already implemented or partially implemented:
 - [ ] Smart scene creation
 
 ### Button & Switch Support
-- [ ] Display button device events
+- [x] Display button device events (Buttons section + activity log with button number)
 - [ ] Show doorbell notifications
 - [ ] Rotary dial status
 - [ ] Button configuration viewing

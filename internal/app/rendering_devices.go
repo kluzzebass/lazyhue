@@ -3,6 +3,7 @@ package app
 import (
 	"fmt"
 	"math"
+	"time"
 
 	"github.com/kluzzebass/lazyhue/internal/hue"
 	"github.com/kluzzebass/lazyhue/internal/hueclient"
@@ -287,6 +288,35 @@ func (m *Model) buildDeviceGridRows(device hueclient.DeviceGet, state *hue.Bridg
 			rows = append(rows, sensorRows...)
 		}
 
+		// Buttons section - for switches/remotes/dials
+		buttons := state.GetDeviceButtons(device)
+		if len(buttons) > 0 {
+			buttonsHeader := field.NewHeaderComponent("buttons-header", "Buttons", &m.styles, m.zones)
+			rows = append(rows, gridlayout.GridRow{
+				Type:    gridlayout.RowTypeSection,
+				Section: buttonsHeader,
+			})
+
+			for _, btn := range buttons {
+				// Button label: "Button 1", "Button 2", etc.
+				label := fmt.Sprintf("Button %d", btn.Metadata.ControlId)
+
+				// Get last event and format it
+				lastEvent := "—"
+				if btn.Button.ButtonReport != nil && btn.Button.ButtonReport.Event != "" {
+					lastEvent = formatButtonEventForDetails(string(btn.Button.ButtonReport.Event))
+					// Add timestamp - Updated is time.Time
+					if !btn.Button.ButtonReport.Updated.IsZero() {
+						lastEvent += " " + formatButtonTime(btn.Button.ButtonReport.Updated)
+					}
+				} else if btn.Button.LastEvent != nil && *btn.Button.LastEvent != "" {
+					lastEvent = formatButtonEventForDetails(string(*btn.Button.LastEvent))
+				}
+
+				rows = append(rows, gridlayout.NewInfoRow(label, lastEvent, infoLabelWidth))
+			}
+		}
+
 		// Zigbee connectivity
 		if zc, ok := state.GetDeviceZigbeeConnectivity(device); ok {
 			zigbeeHeader := field.NewHeaderComponent("zigbee-header", "Zigbee", &m.styles, m.zones)
@@ -337,4 +367,44 @@ func (m *Model) buildDeviceGridRows(device hueclient.DeviceGet, state *hue.Bridg
 	}
 
 	return rows
+}
+
+// formatButtonEventForDetails converts Hue button event names to human-readable form for the details panel.
+func formatButtonEventForDetails(event string) string {
+	switch event {
+	case "initial_press":
+		return "pressed"
+	case "repeat":
+		return "held"
+	case "short_release":
+		return "short press"
+	case "long_release":
+		return "long press"
+	case "double_short_release":
+		return "double press"
+	case "long_press":
+		return "long press (held)"
+	default:
+		return event
+	}
+}
+
+// formatButtonTime formats a button event time for display.
+func formatButtonTime(t time.Time) string {
+	if t.IsZero() {
+		return ""
+	}
+
+	// Calculate time since event
+	since := time.Since(t)
+	switch {
+	case since < time.Minute:
+		return fmt.Sprintf("(%ds ago)", int(since.Seconds()))
+	case since < time.Hour:
+		return fmt.Sprintf("(%dm ago)", int(since.Minutes()))
+	case since < 24*time.Hour:
+		return fmt.Sprintf("(%dh ago)", int(since.Hours()))
+	default:
+		return fmt.Sprintf("(%dd ago)", int(since.Hours()/24))
+	}
 }
