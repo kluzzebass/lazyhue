@@ -129,10 +129,27 @@ type ResourceUpdate struct {
 	SoftwareUpdate *struct {
 		State string `json:"state"` // "no_update", "update_available", "installing", etc.
 	} `json:"software_update,omitempty"`
+	// Matter data
+	Matter *struct {
+		HasQrCode             bool   `json:"has_qr_code"`
+		MaxFabrics            int    `json:"max_fabrics"`
+		SoftwareVersionString string `json:"software_version_string"`
+	} `json:"matter,omitempty"`
+	// Matter fabric data
+	MatterFabric *struct {
+		Status       string `json:"status"` // "paired", "timedout"
+		CreationTime string `json:"creation_time"`
+		FabricData   *struct {
+			Label    string `json:"label"`
+			VendorID int    `json:"vendor_id"`
+		} `json:"fabric_data,omitempty"`
+	} `json:"matter_fabric,omitempty"`
 	// Geolocation data
-	Geolocation *struct {
-		IsConfigured bool `json:"is_configured"`
-	} `json:"is_configured,omitempty"`
+	IsConfigured *bool `json:"is_configured,omitempty"`
+	SunToday     *struct {
+		DayType    string `json:"day_type"`
+		SunsetTime string `json:"sunset_time"`
+	} `json:"sun_today,omitempty"`
 	// Smart scene state - can be a string or an object depending on resource type
 	// Using json.RawMessage to handle both cases
 	State json.RawMessage `json:"state,omitempty"`

@@ -96,6 +96,21 @@ func parseEventFromUpdate(bridgeID, bridgeName string, update hue.ResourceUpdate
 	case "bridge_home":
 		evt := &BridgeHomeEvent{}
 		event, err = evt.Parse(bridgeID, bridgeName, eventType, data, state)
+	case "homekit":
+		evt := &HomekitEvent{}
+		event, err = evt.Parse(bridgeID, bridgeName, eventType, data, state)
+	case "matter":
+		evt := &MatterEvent{}
+		event, err = evt.Parse(bridgeID, bridgeName, eventType, data, state)
+	case "matter_fabric":
+		evt := &MatterFabricEvent{}
+		event, err = evt.Parse(bridgeID, bridgeName, eventType, data, state)
+	case "geolocation":
+		evt := &GeolocationEvent{}
+		event, err = evt.Parse(bridgeID, bridgeName, eventType, data, state)
+	case "zigbee_device_discovery":
+		evt := &ZigbeeDiscoveryEvent{}
+		event, err = evt.Parse(bridgeID, bridgeName, eventType, data, state)
 	// Device-owned simple events (show device name + event type)
 	case "bell_button", "camera_motion", "speaker":
 		evt := &SimpleDeviceEvent{}
@@ -106,8 +121,7 @@ func parseEventFromUpdate(bridgeID, bridgeName string, update hue.ResourceUpdate
 		evt := &SimpleNamedEvent{}
 		event, err = evt.ParseWithType(bridgeID, bridgeName, update.Type, eventType, data, state)
 	// Simple events without specific data (show resource type + event type)
-	case "bridge", "homekit", "matter", "matter_fabric", "geolocation", "public_image",
-		"auth_v1", "motion_area_configuration", "motion_area_candidate", "zigbee_device_discovery",
+	case "bridge", "public_image", "auth_v1", "motion_area_configuration", "motion_area_candidate",
 		"convenience_area_motion", "security_area_motion", "clip":
 		evt := &SimpleEvent{}
 		event, err = evt.ParseWithType(bridgeID, bridgeName, update.Type, eventType, data, state)
