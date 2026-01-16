@@ -56,6 +56,11 @@ A terminal UI for Philips Hue bridge management.
 - [x] Scene activation (Enter on scene)
 - [x] Gradient control for gradient-capable lights
 - [x] Effects control (candle, fire, prism, sparkle, etc.)
+- [x] EffectsV2 speed control slider
+- [x] Light identify (flash) button
+- [x] Signaling with custom duration (5-60 sec)
+- [x] Timed effects with custom duration (5-120 min)
+- [x] Color gamut type display (A/B/C)
 
 ### Device Configuration
 - [x] Motion sensor enable/disable
@@ -63,6 +68,9 @@ A terminal UI for Philips Hue bridge management.
 - [x] Temperature sensor display
 - [x] Light level sensor display
 - [x] Battery level monitoring
+- [x] Device identify (flash) button
+- [x] Firmware update status display
+- [x] Zigbee channel display
 
 ### Form System
 - [x] Generic form dialog with Save/Cancel
@@ -84,20 +92,10 @@ These features have API support already implemented or partially implemented:
 
 ### Connectivity Status Display
 - [ ] Show WiFi connectivity status (code in `extended_client.go`)
-- [ ] Show Zigbee channel info (data already fetched)
 - [ ] Display extended PAN ID for network identification
 
 ### Device Enhancements
-- [ ] Software/firmware update status display (new endpoint)
-- [ ] Device identify (flash) - trigger LED blink to locate device
 - [ ] Show device mode for switches (pushbutton vs rocker)
-
-### Light Enhancements (data already fetched)
-- [ ] EffectsV2 speed control - adjust effect animation speed
-- [ ] TimedEffects - sunrise/sunset wake-up controls
-- [ ] Signaling - alert patterns (alternating, on_off, on_off_color)
-- [ ] Color gamut type display (A/B/C classification)
-- [ ] Light identify (flash) button
 
 ### Scene Enhancements (data already fetched)
 - [ ] Display scene color palette for dynamic scenes
