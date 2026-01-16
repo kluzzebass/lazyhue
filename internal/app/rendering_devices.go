@@ -1,0 +1,305 @@
+package app
+
+import (
+	"fmt"
+	"math"
+
+	"github.com/kluzzebass/lazyhue/internal/hue"
+	"github.com/kluzzebass/lazyhue/internal/hueclient"
+	"github.com/kluzzebass/lazyhue/internal/ui/component/field"
+	gridlayout "github.com/kluzzebass/lazyhue/internal/ui/component/layout"
+)
+
+// buildDeviceGridRows builds grid rows for a device details panel.
+// Sections are ordered by immediacy: Controls > Settings > Sensors > Product > Zigbee > IDs
+func (m *Model) buildDeviceGridRows(device hueclient.DeviceGet, state *hue.BridgeState) []gridlayout.GridRow {
+	var rows []gridlayout.GridRow
+
+	deviceID := device.Id
+
+	// 1. Controls section - instant actions (identify)
+	controlsHeader := field.NewHeaderComponent("controls-header", "Controls", &m.styles, m.zones)
+	rows = append(rows, gridlayout.GridRow{
+		Type:    gridlayout.RowTypeSection,
+		Section: controlsHeader,
+	})
+
+	if deviceID != "" {
+		identifyBtn := field.NewButtonComponent(
+			"identify:"+deviceID, "Identify", "Identify",
+			&m.styles, m.zones,
+		)
+		rows = append(rows, gridlayout.GridRow{
+			Type: gridlayout.RowTypeNormal,
+			Cells: []gridlayout.GridCell{
+				{Component: gridlayout.NewLabelWithWidth("Identify", infoLabelWidth)},
+				{Component: identifyBtn},
+			},
+		})
+	}
+
+	// 2. Settings section (name, sensor toggles)
+	settingsHeader := field.NewHeaderComponent("settings-header", "Settings", &m.styles, m.zones)
+	rows = append(rows, gridlayout.GridRow{
+		Type:    gridlayout.RowTypeSection,
+		Section: settingsHeader,
+	})
+
+	if device.Metadata.Name != "" {
+		textInput := field.NewTextComponent(
+			FieldIDDeviceName(deviceID), "Name", device.Metadata.Name,
+			&m.styles, m.zones,
+		)
+		rows = append(rows, gridlayout.GridRow{
+			Type: gridlayout.RowTypeNormal,
+			Cells: []gridlayout.GridCell{
+				{Component: gridlayout.NewLabelWithWidth("Name", infoLabelWidth)},
+				{Component: textInput},
+			},
+		})
+	}
+
+	// Room assignment dropdown
+	if state != nil && deviceID != "" {
+		currentRoom, hasRoom := state.GetDeviceRoom(deviceID)
+		currentRoomID := ""
+		if hasRoom && currentRoom.Id != "" {
+			currentRoomID = currentRoom.Id
+		}
+
+		// Build room options: "No Room" + all rooms
+		allRooms := state.AllRooms()
+		options := make([]field.Option, 0, len(allRooms)+1)
+		options = append(options, field.Option{Label: "No Room", Value: 0})
+		selectedIndex := 0
+
+		for i, room := range allRooms {
+			roomName := "Unknown"
+			roomID := ""
+			if room.Metadata.Name != "" {
+				roomName = room.Metadata.Name
+			}
+			if room.Id != "" {
+				roomID = room.Id
+			}
+			options = append(options, field.Option{Label: roomName, Value: i + 1, Color: m.styles.Theme.EntityRoom})
+			if roomID == currentRoomID {
+				selectedIndex = i + 1
+			}
+		}
+
+		roomSelect := field.NewSelectComponent(
+			"device-room:"+deviceID, "Room", selectedIndex, options,
+			&m.styles, m.zones,
+		)
+		rows = append(rows, gridlayout.GridRow{
+			Type: gridlayout.RowTypeNormal,
+			Cells: []gridlayout.GridCell{
+				{Component: gridlayout.NewLabelWithWidth("Room", infoLabelWidth)},
+				{Component: roomSelect},
+			},
+		})
+	}
+
+	// Sensor enable/disable toggles in Settings
+	if state != nil {
+		// Motion sensor toggle and sensitivity
+		if motionID, motion, found := state.GetDeviceMotionSensor(device); found {
+			enabled := motion.Enabled
+			motionToggle := field.NewToggleComponent(
+				"motion-enabled:"+motionID, "Motion Sensor", enabled,
+				&m.styles, m.zones,
+			)
+			rows = append(rows, gridlayout.GridRow{
+				Type: gridlayout.RowTypeNormal,
+				Cells: []gridlayout.GridCell{
+					{Component: gridlayout.NewLabelWithWidth("Motion Sensor", infoLabelWidth)},
+					{Component: motionToggle},
+				},
+			})
+
+			// Sensitivity slider
+			if motion.Sensitivity != nil && motion.Sensitivity.SensitivityMax != nil {
+				sensitivity := motion.Sensitivity.Sensitivity
+				maxSensitivity := *motion.Sensitivity.SensitivityMax
+				sensitivitySlider := field.NewSliderComponent(
+					"motion-sensitivity:"+motionID, "Sensitivity",
+					sensitivity, 0, maxSensitivity, 1,
+					&m.styles, m.zones,
+				)
+				rows = append(rows, gridlayout.GridRow{
+					Type: gridlayout.RowTypeNormal,
+					Cells: []gridlayout.GridCell{
+						{Component: gridlayout.NewLabelWithWidth("Sensitivity", infoLabelWidth)},
+						{Component: sensitivitySlider},
+					},
+				})
+			}
+		}
+
+		// Temperature sensor toggle
+		if tempID, tempSensor, found := state.GetDeviceTemperatureSensor(device); found {
+			enabled := tempSensor.Enabled
+			tempToggle := field.NewToggleComponent(
+				"temp-enabled:"+tempID, "Temp Sensor", enabled,
+				&m.styles, m.zones,
+			)
+			rows = append(rows, gridlayout.GridRow{
+				Type: gridlayout.RowTypeNormal,
+				Cells: []gridlayout.GridCell{
+					{Component: gridlayout.NewLabelWithWidth("Temp Sensor", infoLabelWidth)},
+					{Component: tempToggle},
+				},
+			})
+		}
+
+		// Light level sensor toggle
+		if llID, llSensor, found := state.GetDeviceLightLevelSensor(device); found {
+			enabled := llSensor.Enabled
+			llToggle := field.NewToggleComponent(
+				"ll-enabled:"+llID, "Light Sensor", enabled,
+				&m.styles, m.zones,
+			)
+			rows = append(rows, gridlayout.GridRow{
+				Type: gridlayout.RowTypeNormal,
+				Cells: []gridlayout.GridCell{
+					{Component: gridlayout.NewLabelWithWidth("Light Sensor", infoLabelWidth)},
+					{Component: llToggle},
+				},
+			})
+		}
+	}
+
+	// 3. Product section
+	pd := device.ProductData
+	if pd.ProductName != "" || pd.ManufacturerName != "" || pd.ModelId != "" {
+		header := field.NewHeaderComponent("product-header", "Product", &m.styles, m.zones)
+		rows = append(rows, gridlayout.GridRow{
+			Type:    gridlayout.RowTypeSection,
+			Section: header,
+		})
+
+		if pd.ProductName != "" {
+			rows = append(rows, gridlayout.NewInfoRow("Product", pd.ProductName, infoLabelWidth))
+		}
+		if pd.ManufacturerName != "" {
+			rows = append(rows, gridlayout.NewInfoRow("Manufacturer", pd.ManufacturerName, infoLabelWidth))
+		}
+		if pd.ModelId != "" {
+			rows = append(rows, gridlayout.NewInfoRow("Model", pd.ModelId, infoLabelWidth))
+		}
+		if pd.SoftwareVersion != "" {
+			rows = append(rows, gridlayout.NewInfoRow("Firmware", pd.SoftwareVersion, infoLabelWidth))
+		}
+		if pd.ProductArchetype != "" {
+			rows = append(rows, gridlayout.NewStyledInfoRow("Archetype", hue.ProductArchetypeDisplayName(string(pd.ProductArchetype)), infoLabelWidth, m.styles.Dimmed))
+		}
+	}
+
+	// Sensors section
+	if state != nil {
+		var sensorRows []gridlayout.GridRow
+
+		// Motion sensor (read-only status)
+		if _, motion, found := state.GetDeviceMotionSensor(device); found {
+			isDetecting := false
+			if motion.Motion.MotionReport != nil {
+				isDetecting = motion.Motion.MotionReport.Motion
+			} else {
+				isDetecting = motion.Motion.Motion
+			}
+			status := "clear"
+			statusStyle := m.styles.Dimmed
+			if isDetecting {
+				status = "detected"
+				statusStyle = m.styles.Success
+			}
+			sensorRows = append(sensorRows, gridlayout.NewStyledInfoRow("Motion", status, infoLabelWidth, statusStyle))
+		}
+
+		// Temperature (read-only value)
+		if _, tempSensor, found := state.GetDeviceTemperatureSensor(device); found {
+			tempValue := "N/A"
+			if tempSensor.Temperature.TemperatureReport != nil {
+				tempValue = fmt.Sprintf("%.1f°C", tempSensor.Temperature.TemperatureReport.Temperature)
+			} else {
+				tempValue = fmt.Sprintf("%.1f°C", tempSensor.Temperature.Temperature)
+			}
+			sensorRows = append(sensorRows, gridlayout.NewInfoRow("Temperature", tempValue, infoLabelWidth))
+		}
+
+		// Light level (read-only value)
+		if _, llSensor, found := state.GetDeviceLightLevelSensor(device); found {
+			llValue := "N/A"
+			level := 0
+			if llSensor.Light.LightLevelReport != nil {
+				level = llSensor.Light.LightLevelReport.LightLevel
+			} else {
+				level = llSensor.Light.LightLevel
+			}
+			if level > 1 {
+				lux := math.Pow(10, float64(level-1)/10000.0)
+				llValue = fmt.Sprintf("%.0f lux", lux)
+			} else {
+				llValue = "0 lux"
+			}
+			sensorRows = append(sensorRows, gridlayout.NewInfoRow("Light Level", llValue, infoLabelWidth))
+		}
+
+		// Battery
+		if hasBattery, battLevel, battState := state.GetDeviceBattery(device); hasBattery {
+			value := fmt.Sprintf("%d%%", battLevel)
+			if battState != "" {
+				value += fmt.Sprintf(" (%s)", battState)
+			}
+			sensorRows = append(sensorRows, gridlayout.NewInfoRow("Battery", value, infoLabelWidth))
+		}
+
+		if len(sensorRows) > 0 {
+			sensorsHeader := field.NewHeaderComponent("sensors-header", "Sensors", &m.styles, m.zones)
+			rows = append(rows, gridlayout.GridRow{
+				Type:    gridlayout.RowTypeSection,
+				Section: sensorsHeader,
+			})
+			rows = append(rows, sensorRows...)
+		}
+
+		// Zigbee connectivity
+		if zc, ok := state.GetDeviceZigbeeConnectivity(device); ok {
+			zigbeeHeader := field.NewHeaderComponent("zigbee-header", "Zigbee", &m.styles, m.zones)
+			rows = append(rows, gridlayout.GridRow{
+				Type:    gridlayout.RowTypeSection,
+				Section: zigbeeHeader,
+			})
+
+			statusStyle := m.styles.Dimmed
+			if zc.Status == "connected" {
+				statusStyle = m.styles.Success
+			} else if zc.Status == "connectivity_issue" || zc.Status == "disconnected" {
+				statusStyle = m.styles.Error
+			}
+			rows = append(rows, gridlayout.NewStyledInfoRow("Status", zc.Status, infoLabelWidth, statusStyle))
+
+			if zc.MacAddress != "" {
+				rows = append(rows, gridlayout.NewStyledInfoRow("MAC", zc.MacAddress, infoLabelWidth, m.styles.Dimmed))
+			}
+		}
+	}
+
+	// IDs section
+	idsHeader := field.NewHeaderComponent("ids-header", "IDs", &m.styles, m.zones)
+	rows = append(rows, gridlayout.GridRow{
+		Type:    gridlayout.RowTypeSection,
+		Section: idsHeader,
+	})
+
+	dimStyle := m.styles.Dimmed
+	if device.Id != "" {
+		rows = append(rows, gridlayout.NewStyledInfoRow("ID", device.Id, infoLabelWidth, dimStyle))
+	}
+	if device.Type != "" {
+		rows = append(rows, gridlayout.NewStyledInfoRow("Type", string(device.Type), infoLabelWidth, dimStyle))
+	}
+
+	return rows
+}
