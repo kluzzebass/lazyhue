@@ -60,7 +60,23 @@ just watch
 - `internal/config/` - Configuration and credential persistence
 - `plans/` - Technical documentation
 
-**Service Layer Independence:** The `hue/`, `hueclient/`, `config/`, and `debug/` packages have no Charm dependencies.
+**Service Layer Independence:** The `hue/`, `hueclient/`, and `config/` packages have no Charm dependencies.
+
+## Logging
+
+**This project uses `log/slog` for ALL logging. This is the ONLY acceptable way to log.**
+
+- Use `slog.Debug()` for debug/trace information
+- Use `slog.Info()` for general information
+- Use `slog.Warn()` for warnings
+- Use `slog.Error()` for errors
+
+**DO NOT:**
+- Create custom logging packages
+- Use `fmt.Printf` for logging
+- Use `log.Println` or the standard `log` package
+
+The logger is initialized in `internal/ui/component/logger.go` with debug level enabled when a log file is specified via `--debug-log`.
 
 ## Generating the Hue Client
 

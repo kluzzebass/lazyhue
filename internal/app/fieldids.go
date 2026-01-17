@@ -39,8 +39,12 @@ const (
 	FieldPrefixZoneCreateScene = "zone-create-scene:" // create scene for zone (format: "zone-create-scene:<zoneID>")
 
 	// Scene fields
-	FieldPrefixSceneRecall     = "scene-recall:"      // recall scene (format: "scene-recall:<sceneID>")
-	FieldPrefixSmartSceneToggle = "smartscene-toggle:" // toggle smart scene (format: "smartscene-toggle:<sceneID>")
+	FieldPrefixSceneRecall      = "scene-recall:"       // recall scene (format: "scene-recall:<sceneID>")
+	FieldPrefixSmartSceneToggle = "smartscene-toggle:"  // toggle smart scene (format: "smartscene-toggle:<sceneID>")
+	FieldPrefixSceneActionOn    = "scene-action-on:"    // scene action on/off (format: "scene-action-on:<sceneID>:<lightID>")
+	FieldPrefixSceneActionBri   = "scene-action-bri:"   // scene action brightness (format: "scene-action-bri:<sceneID>:<lightID>")
+	FieldPrefixSceneActionColor = "scene-action-color:" // scene action color (format: "scene-action-color:<sceneID>:<lightID>")
+	FieldPrefixSceneActionCT    = "scene-action-ct:"    // scene action color temp (format: "scene-action-ct:<sceneID>:<lightID>")
 
 	// Timed effects fields
 	FieldPrefixTimedEffectStop     = "timed-effect-stop:"     // stop timed effect (format: "timed-effect-stop:<lightID>")
@@ -173,6 +177,22 @@ func FieldIDSceneRecall(sceneID string) string {
 
 func FieldIDSmartSceneToggle(sceneID string) string {
 	return FieldPrefixSmartSceneToggle + sceneID
+}
+
+func FieldIDSceneActionOn(sceneID, lightID string) string {
+	return FieldPrefixSceneActionOn + sceneID + ":" + lightID
+}
+
+func FieldIDSceneActionBrightness(sceneID, lightID string) string {
+	return FieldPrefixSceneActionBri + sceneID + ":" + lightID
+}
+
+func FieldIDSceneActionColor(sceneID, lightID string) string {
+	return FieldPrefixSceneActionColor + sceneID + ":" + lightID
+}
+
+func FieldIDSceneActionColorTemp(sceneID, lightID string) string {
+	return FieldPrefixSceneActionCT + sceneID + ":" + lightID
 }
 
 // Timed effects field constructors

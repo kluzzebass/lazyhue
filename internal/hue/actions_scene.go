@@ -1,8 +1,12 @@
 package hue
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
+	"io"
+	"log/slog"
 
 	"github.com/kluzzebass/lazyhue/internal/hueclient"
 )
@@ -165,8 +169,471 @@ func (b *Bridge) DeleteSmartScene(sceneID string) error {
 	return err
 }
 
+// sceneAction defines the structure for a scene action when creating a scene.
+// This matches the CreateSceneJSONBody.Actions structure.
+type sceneAction struct {
+	Action sceneActionDetail `json:"action"`
+	Target sceneTarget       `json:"target"`
+}
+
+type sceneTarget struct {
+	Rid   string                 `json:"rid"`
+	Rtype hueclient.ResourceType `json:"rtype"`
+}
+
+type sceneActionDetail struct {
+	On               *sceneOn               `json:"on,omitempty"`
+	Dimming          *sceneDimming          `json:"dimming,omitempty"`
+	Color            *sceneColor            `json:"color,omitempty"`
+	ColorTemperature *sceneColorTemperature `json:"color_temperature,omitempty"`
+	Gradient         *sceneGradient         `json:"gradient,omitempty"`
+}
+
+type sceneOn struct {
+	On bool `json:"on"`
+}
+
+type sceneDimming struct {
+	Brightness float32 `json:"brightness"`
+}
+
+type sceneColor struct {
+	Xy sceneXY `json:"xy"`
+}
+
+type sceneColorTemperature struct {
+	Mirek int `json:"mirek"`
+}
+
+type sceneXY struct {
+	X float32 `json:"x"`
+	Y float32 `json:"y"`
+}
+
+type sceneGradient struct {
+	Mode   *hueclient.CreateSceneJSONBodyActionsActionGradientMode `json:"mode,omitempty"`
+	Points []sceneGradientPoint                                    `json:"points"`
+}
+
+type sceneGradientPoint struct {
+	Color sceneColor `json:"color"`
+}
+
+// Types for UPDATE operations - use pointers to match UpdateSceneJSONBody structure
+type sceneActionUpdate struct {
+	Action sceneActionDetailUpdate `json:"action"`
+	Target sceneTarget             `json:"target"`
+}
+
+type sceneActionDetailUpdate struct {
+	On               *sceneOnUpdate               `json:"on,omitempty"`
+	Dimming          *sceneDimmingUpdate          `json:"dimming,omitempty"`
+	Color            *sceneColorUpdate            `json:"color,omitempty"`
+	ColorTemperature *sceneColorTemperatureUpdate `json:"color_temperature,omitempty"`
+}
+
+type sceneOnUpdate struct {
+	On *bool `json:"on,omitempty"`
+}
+
+type sceneDimmingUpdate struct {
+	Brightness *float32 `json:"brightness,omitempty"`
+}
+
+type sceneColorUpdate struct {
+	Xy *sceneXYUpdate `json:"xy,omitempty"`
+}
+
+type sceneXYUpdate struct {
+	X float32 `json:"x"`
+	Y float32 `json:"y"`
+}
+
+type sceneColorTemperatureUpdate struct {
+	Mirek *int `json:"mirek,omitempty"`
+}
+
 // CreateSceneFromCurrentState creates a new scene for a room/zone using the current light states.
-// TODO: Re-implement with new hueclient types after oapi-hue migration
 func (b *Bridge) CreateSceneFromCurrentState(groupID string, isZone bool, sceneName string) error {
-	return fmt.Errorf("CreateSceneFromCurrentState: not yet implemented with new hueclient types")
+	b.mu.RLock()
+	client := b.client
+	b.mu.RUnlock()
+
+	if client == nil {
+		return ErrAuthFailed
+	}
+
+	// Get the lights for this room/zone
+	var lights []hueclient.LightGet
+	var groupType hueclient.ResourceType
+
+	if isZone {
+		zone, ok := b.state.GetZone(groupID)
+		if !ok {
+			return fmt.Errorf("zone %s not found", groupID)
+		}
+		lights = b.state.ZoneLights(zone)
+		groupType = hueclient.ResourceTypeZone
+	} else {
+		room, ok := b.state.GetRoom(groupID)
+		if !ok {
+			return fmt.Errorf("room %s not found", groupID)
+		}
+		lights = b.state.RoomLights(room)
+		groupType = hueclient.ResourceTypeRoom
+	}
+
+	if len(lights) == 0 {
+		return fmt.Errorf("no lights found in group")
+	}
+
+	// Build actions from current light states
+	actions := make([]sceneAction, 0, len(lights))
+
+	for _, light := range lights {
+		action := sceneAction{
+			Target: sceneTarget{
+				Rid:   light.Id,
+				Rtype: hueclient.ResourceTypeLight,
+			},
+			Action: sceneActionDetail{
+				On: &sceneOn{On: light.On.On},
+			},
+		}
+
+		// Capture dimming if present
+		if light.Dimming != nil {
+			action.Action.Dimming = &sceneDimming{Brightness: light.Dimming.Brightness}
+		}
+
+		// Capture gradient if present (takes precedence over color)
+		if light.Gradient != nil && len(light.Gradient.Points) > 0 && light.On.On {
+			gradientMode := hueclient.CreateSceneJSONBodyActionsActionGradientMode(light.Gradient.Mode)
+			points := make([]sceneGradientPoint, len(light.Gradient.Points))
+
+			for i, pt := range light.Gradient.Points {
+				points[i] = sceneGradientPoint{
+					Color: sceneColor{
+						Xy: sceneXY{X: pt.Color.Xy.X, Y: pt.Color.Xy.Y},
+					},
+				}
+			}
+
+			action.Action.Gradient = &sceneGradient{
+				Mode:   &gradientMode,
+				Points: points,
+			}
+		} else if light.Color != nil && light.On.On {
+			// Capture color if present (only if light is on and no gradient)
+			action.Action.Color = &sceneColor{
+				Xy: sceneXY{X: light.Color.Xy.X, Y: light.Color.Xy.Y},
+			}
+		} else if light.ColorTemperature != nil && light.ColorTemperature.MirekValid && light.On.On {
+			// Capture color temperature if present (only if light is on and not using color/gradient)
+			action.Action.ColorTemperature = &sceneColorTemperature{Mirek: light.ColorTemperature.Mirek}
+		}
+
+		actions = append(actions, action)
+	}
+
+	b.logRequest(fmt.Sprintf("Creating scene \"%s\" with %d lights", sceneName, len(lights)))
+
+	// Create the scene using raw JSON body since the generated types don't match our custom action type
+	sceneType := hueclient.CreateSceneJSONBodyTypeScene
+	body := struct {
+		Type     *hueclient.CreateSceneJSONBodyType `json:"type,omitempty"`
+		Group    sceneTarget                        `json:"group"`
+		Metadata struct {
+			Name string `json:"name"`
+		} `json:"metadata"`
+		Actions []sceneAction `json:"actions"`
+	}{
+		Type: &sceneType,
+		Group: sceneTarget{
+			Rid:   groupID,
+			Rtype: groupType,
+		},
+		Metadata: struct {
+			Name string `json:"name"`
+		}{
+			Name: sceneName,
+		},
+		Actions: actions,
+	}
+
+	// Use CreateSceneWithBody with JSON marshaling
+	jsonBody, err := json.Marshal(body)
+	if err != nil {
+		return fmt.Errorf("failed to marshal scene body: %w", err)
+	}
+
+	_, err = client.CreateSceneWithBody(context.Background(), "application/json", bytes.NewReader(jsonBody))
+	return err
+}
+
+// findSceneActionTarget finds the target for a light in a scene's actions.
+// Returns the target Rtype if found, or empty string if not found.
+func (b *Bridge) findSceneActionTarget(sceneID, lightID string) (hueclient.ResourceType, bool) {
+	scene, ok := b.state.GetScene(sceneID)
+	if !ok {
+		return "", false
+	}
+
+	for _, action := range scene.Actions {
+		if action.Target.Rid == lightID {
+			return action.Target.Rtype, true
+		}
+	}
+	return "", false
+}
+
+// UpdateSceneActionOn updates the on/off state for a light within a scene.
+func (b *Bridge) UpdateSceneActionOn(sceneID, lightID string, on bool) error {
+	b.mu.RLock()
+	client := b.client
+	b.mu.RUnlock()
+
+	if client == nil {
+		return ErrAuthFailed
+	}
+
+	sceneName := "Unknown"
+	lightName := "Unknown"
+	if scene, ok := b.state.GetScene(sceneID); ok {
+		sceneName = b.state.GetSceneName(scene)
+	}
+	if light, ok := b.state.GetLight(lightID); ok {
+		lightName = b.state.GetLightName(light)
+	}
+
+	// Get the existing target rtype from the scene
+	targetRtype, found := b.findSceneActionTarget(sceneID, lightID)
+	if !found {
+		return fmt.Errorf("light %s not found in scene %s actions", lightID, sceneID)
+	}
+
+	slog.Debug("scene update", "sceneID", sceneID, "lightID", lightID, "targetRtype", targetRtype)
+
+	state := "off"
+	if on {
+		state = "on"
+	}
+	b.logRequest(fmt.Sprintf("Scene \"%s\": setting %s to %s", sceneName, lightName, state))
+
+	body := struct {
+		Actions []sceneActionUpdate `json:"actions"`
+	}{
+		Actions: []sceneActionUpdate{{
+			Target: sceneTarget{
+				Rid:   lightID,
+				Rtype: targetRtype,
+			},
+			Action: sceneActionDetailUpdate{
+				On: &sceneOnUpdate{On: &on},
+			},
+		}},
+	}
+
+	jsonBody, err := json.Marshal(body)
+	if err != nil {
+		return fmt.Errorf("failed to marshal scene update: %w", err)
+	}
+
+	slog.Debug("scene update request", "body", string(jsonBody))
+
+	resp, err := client.UpdateSceneWithBody(context.Background(), toResourceId(sceneID), "application/json", bytes.NewReader(jsonBody))
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 400 {
+		respBody, _ := io.ReadAll(resp.Body)
+		slog.Debug("scene update error", "response", string(respBody))
+		return fmt.Errorf("scene update failed: HTTP %d: %s", resp.StatusCode, string(respBody))
+	}
+
+	return nil
+}
+
+// UpdateSceneActionBrightness updates the brightness for a light within a scene.
+func (b *Bridge) UpdateSceneActionBrightness(sceneID, lightID string, brightness float32) error {
+	b.mu.RLock()
+	client := b.client
+	b.mu.RUnlock()
+
+	if client == nil {
+		return ErrAuthFailed
+	}
+
+	sceneName := "Unknown"
+	lightName := "Unknown"
+	if scene, ok := b.state.GetScene(sceneID); ok {
+		sceneName = b.state.GetSceneName(scene)
+	}
+	if light, ok := b.state.GetLight(lightID); ok {
+		lightName = b.state.GetLightName(light)
+	}
+
+	// Get the existing target rtype from the scene
+	targetRtype, found := b.findSceneActionTarget(sceneID, lightID)
+	if !found {
+		return fmt.Errorf("light %s not found in scene %s actions", lightID, sceneID)
+	}
+
+	b.logRequest(fmt.Sprintf("Scene \"%s\": setting %s brightness to %.0f%%", sceneName, lightName, brightness))
+
+	body := struct {
+		Actions []sceneActionUpdate `json:"actions"`
+	}{
+		Actions: []sceneActionUpdate{{
+			Target: sceneTarget{
+				Rid:   lightID,
+				Rtype: targetRtype,
+			},
+			Action: sceneActionDetailUpdate{
+				Dimming: &sceneDimmingUpdate{Brightness: &brightness},
+			},
+		}},
+	}
+
+	jsonBody, err := json.Marshal(body)
+	if err != nil {
+		return fmt.Errorf("failed to marshal scene update: %w", err)
+	}
+
+	resp, err := client.UpdateSceneWithBody(context.Background(), toResourceId(sceneID), "application/json", bytes.NewReader(jsonBody))
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 400 {
+		respBody, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("scene update failed: HTTP %d: %s", resp.StatusCode, string(respBody))
+	}
+
+	return nil
+}
+
+// UpdateSceneActionColor updates the color (XY) for a light within a scene.
+func (b *Bridge) UpdateSceneActionColor(sceneID, lightID string, x, y float32) error {
+	b.mu.RLock()
+	client := b.client
+	b.mu.RUnlock()
+
+	if client == nil {
+		return ErrAuthFailed
+	}
+
+	sceneName := "Unknown"
+	lightName := "Unknown"
+	if scene, ok := b.state.GetScene(sceneID); ok {
+		sceneName = b.state.GetSceneName(scene)
+	}
+	if light, ok := b.state.GetLight(lightID); ok {
+		lightName = b.state.GetLightName(light)
+	}
+
+	// Get the existing target rtype from the scene
+	targetRtype, found := b.findSceneActionTarget(sceneID, lightID)
+	if !found {
+		return fmt.Errorf("light %s not found in scene %s actions", lightID, sceneID)
+	}
+
+	b.logRequest(fmt.Sprintf("Scene \"%s\": setting %s color to (%.3f, %.3f)", sceneName, lightName, x, y))
+
+	body := struct {
+		Actions []sceneActionUpdate `json:"actions"`
+	}{
+		Actions: []sceneActionUpdate{{
+			Target: sceneTarget{
+				Rid:   lightID,
+				Rtype: targetRtype,
+			},
+			Action: sceneActionDetailUpdate{
+				Color: &sceneColorUpdate{Xy: &sceneXYUpdate{X: x, Y: y}},
+			},
+		}},
+	}
+
+	jsonBody, err := json.Marshal(body)
+	if err != nil {
+		return fmt.Errorf("failed to marshal scene update: %w", err)
+	}
+
+	resp, err := client.UpdateSceneWithBody(context.Background(), toResourceId(sceneID), "application/json", bytes.NewReader(jsonBody))
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 400 {
+		respBody, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("scene update failed: HTTP %d: %s", resp.StatusCode, string(respBody))
+	}
+
+	return nil
+}
+
+// UpdateSceneActionColorTemp updates the color temperature for a light within a scene.
+func (b *Bridge) UpdateSceneActionColorTemp(sceneID, lightID string, mirek int) error {
+	b.mu.RLock()
+	client := b.client
+	b.mu.RUnlock()
+
+	if client == nil {
+		return ErrAuthFailed
+	}
+
+	sceneName := "Unknown"
+	lightName := "Unknown"
+	if scene, ok := b.state.GetScene(sceneID); ok {
+		sceneName = b.state.GetSceneName(scene)
+	}
+	if light, ok := b.state.GetLight(lightID); ok {
+		lightName = b.state.GetLightName(light)
+	}
+
+	// Get the existing target rtype from the scene
+	targetRtype, found := b.findSceneActionTarget(sceneID, lightID)
+	if !found {
+		return fmt.Errorf("light %s not found in scene %s actions", lightID, sceneID)
+	}
+
+	// Convert mirek to Kelvin for display (K = 1,000,000 / mirek)
+	kelvin := 1000000 / mirek
+	b.logRequest(fmt.Sprintf("Scene \"%s\": setting %s color temp to %dK", sceneName, lightName, kelvin))
+
+	body := struct {
+		Actions []sceneActionUpdate `json:"actions"`
+	}{
+		Actions: []sceneActionUpdate{{
+			Target: sceneTarget{
+				Rid:   lightID,
+				Rtype: targetRtype,
+			},
+			Action: sceneActionDetailUpdate{
+				ColorTemperature: &sceneColorTemperatureUpdate{Mirek: &mirek},
+			},
+		}},
+	}
+
+	jsonBody, err := json.Marshal(body)
+	if err != nil {
+		return fmt.Errorf("failed to marshal scene update: %w", err)
+	}
+
+	resp, err := client.UpdateSceneWithBody(context.Background(), toResourceId(sceneID), "application/json", bytes.NewReader(jsonBody))
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 400 {
+		respBody, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("scene update failed: HTTP %d: %s", resp.StatusCode, string(respBody))
+	}
+
+	return nil
 }

@@ -1021,6 +1021,84 @@ func (m *Model) handleNewFieldChange(msg field.FieldChangedMsg) {
 			}
 			return
 		}
+	} else if strings.HasPrefix(msg.FieldID, FieldPrefixSceneActionOn) {
+		// Scene action on/off toggle - format: "scene-action-on:<sceneID>:<lightID>"
+		rest := strings.TrimPrefix(msg.FieldID, FieldPrefixSceneActionOn)
+		parts := strings.SplitN(rest, ":", 2)
+		if len(parts) == 2 {
+			sceneID := parts[0]
+			lightID := parts[1]
+			if v, ok := msg.Value.(field.ToggleValue); ok {
+				state := "off"
+				if v.On {
+					state = "on"
+				}
+				m.status = fmt.Sprintf("Setting scene light to %s...", state)
+				err = bridge.UpdateSceneActionOn(sceneID, lightID, v.On)
+				if err != nil {
+					m.status = fmt.Sprintf("Error: %v", err)
+				} else {
+					m.status = "Scene updated"
+				}
+				return
+			}
+		}
+	} else if strings.HasPrefix(msg.FieldID, FieldPrefixSceneActionBri) {
+		// Scene action brightness - format: "scene-action-bri:<sceneID>:<lightID>"
+		rest := strings.TrimPrefix(msg.FieldID, FieldPrefixSceneActionBri)
+		parts := strings.SplitN(rest, ":", 2)
+		if len(parts) == 2 {
+			sceneID := parts[0]
+			lightID := parts[1]
+			if v, ok := msg.Value.(field.SliderValue); ok {
+				m.status = fmt.Sprintf("Setting scene brightness to %d%%...", v.Value)
+				err = bridge.UpdateSceneActionBrightness(sceneID, lightID, float32(v.Value))
+				if err != nil {
+					m.status = fmt.Sprintf("Error: %v", err)
+				} else {
+					m.status = "Scene updated"
+				}
+				return
+			}
+		}
+	} else if strings.HasPrefix(msg.FieldID, FieldPrefixSceneActionColor) {
+		// Scene action color - format: "scene-action-color:<sceneID>:<lightID>"
+		rest := strings.TrimPrefix(msg.FieldID, FieldPrefixSceneActionColor)
+		parts := strings.SplitN(rest, ":", 2)
+		if len(parts) == 2 {
+			sceneID := parts[0]
+			lightID := parts[1]
+			if v, ok := msg.Value.(field.ColorValue); ok {
+				m.status = "Setting scene color..."
+				err = bridge.UpdateSceneActionColor(sceneID, lightID, float32(v.X), float32(v.Y))
+				if err != nil {
+					m.status = fmt.Sprintf("Error: %v", err)
+				} else {
+					m.status = "Scene updated"
+				}
+				return
+			}
+		}
+	} else if strings.HasPrefix(msg.FieldID, FieldPrefixSceneActionCT) {
+		// Scene action color temperature - format: "scene-action-ct:<sceneID>:<lightID>"
+		rest := strings.TrimPrefix(msg.FieldID, FieldPrefixSceneActionCT)
+		parts := strings.SplitN(rest, ":", 2)
+		if len(parts) == 2 {
+			sceneID := parts[0]
+			lightID := parts[1]
+			if v, ok := msg.Value.(field.SliderValue); ok {
+				// Convert Kelvin from display to mirek for API
+				kelvin := 1000000 / v.Value
+				m.status = fmt.Sprintf("Setting scene color temp to %dK...", kelvin)
+				err = bridge.UpdateSceneActionColorTemp(sceneID, lightID, v.Value)
+				if err != nil {
+					m.status = fmt.Sprintf("Error: %v", err)
+				} else {
+					m.status = "Scene updated"
+				}
+				return
+			}
+		}
 	} else if strings.HasPrefix(msg.FieldID, FieldPrefixMotionEnabled) {
 		motionID := strings.TrimPrefix(msg.FieldID, FieldPrefixMotionEnabled)
 		if v, ok := msg.Value.(field.ToggleValue); ok {

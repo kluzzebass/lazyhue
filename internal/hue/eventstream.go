@@ -6,11 +6,10 @@ import (
 	"crypto/tls"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"strings"
 	"time"
-
-	"github.com/kluzzebass/lazyhue/internal/debug"
 )
 
 // EventType represents the type of SSE event from the bridge.
@@ -223,7 +222,7 @@ func (es *EventStream) Start(ctx context.Context) {
 
 		err := es.connect(ctx)
 		if err != nil {
-			debug.Log("EventStream disconnected: %v", err)
+			slog.Debug("eventstream disconnected", "error", err)
 			if es.onDisconnect != nil {
 				es.onDisconnect(err)
 			}
@@ -239,7 +238,7 @@ func (es *EventStream) Start(ctx context.Context) {
 		}
 
 		// Exponential backoff for reconnection
-		debug.Log("EventStream reconnecting in %v", reconnectDelay)
+		slog.Debug("eventstream reconnecting", "delay", reconnectDelay)
 		select {
 		case <-ctx.Done():
 			return
@@ -280,7 +279,7 @@ func (es *EventStream) connect(ctx context.Context) error {
 	}
 
 	es.connected = true
-	debug.Log("EventStream connected to %s", es.bridgeIP)
+	slog.Debug("eventstream connected", "bridgeIP", es.bridgeIP)
 
 	if es.onConnect != nil {
 		es.onConnect()
@@ -318,7 +317,7 @@ func (es *EventStream) processEvent(id, data string) {
 	// Parse the event container (it's an array of events)
 	var events []BridgeEvent
 	if err := json.Unmarshal([]byte(data), &events); err != nil {
-		debug.Log("EventStream parse error: %v", err)
+		slog.Debug("eventstream parse error", "error", err)
 		return
 	}
 

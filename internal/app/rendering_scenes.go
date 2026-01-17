@@ -114,46 +114,103 @@ func (m *Model) buildSceneGridRows(scene hueclient.SceneGet, state *hue.BridgeSt
 		}
 	}
 
-	// Actions
+	// Actions - editable light states
 	if len(scene.Actions) > 0 {
-		actionsHeaderText := fmt.Sprintf("Actions %s%d%s", m.styles.Dimmed.Render("["), len(scene.Actions), m.styles.Dimmed.Render("]"))
+		actionsHeaderText := fmt.Sprintf("Light States %s%d%s", m.styles.Dimmed.Render("["), len(scene.Actions), m.styles.Dimmed.Render("]"))
 		actionsHeader := field.NewHeaderComponent("actions-header", actionsHeaderText, &m.styles, m.zones)
 		rows = append(rows, gridlayout.GridRow{
 			Type:    gridlayout.RowTypeSection,
 			Section: actionsHeader,
 		})
 
-		actionLightStyle := lipgloss.NewStyle().Foreground(m.styles.Theme.EntityLight)
 		for _, action := range scene.Actions {
-			targetName := "unknown"
-			if action.Target.Rid != "" {
-				targetName = action.Target.Rid
-				if state != nil {
-					if light, ok := state.GetLight(action.Target.Rid); ok {
-						targetName = state.GetLightName(light)
-					}
+			lightID := action.Target.Rid
+			if lightID == "" {
+				continue
+			}
+
+			// Get light name and capabilities
+			targetName := lightID
+			var light *hueclient.LightGet
+			if state != nil {
+				if l, ok := state.GetLight(lightID); ok {
+					light = &l
+					targetName = state.GetLightName(l)
 				}
 			}
 
-			actionDesc := ""
-			var parts []string
-			if action.Action.On != nil && action.Action.On.On {
-				parts = append(parts, "on")
-			} else if action.Action.On != nil && !action.Action.On.On {
-				parts = append(parts, "off")
-			}
-			if action.Action.Dimming != nil {
-				parts = append(parts, fmt.Sprintf("%.0f%%", action.Action.Dimming.Brightness))
-			}
-			if action.Action.ColorTemperature != nil && action.Action.ColorTemperature.Mirek != 0 {
-				kelvin := 1000000 / action.Action.ColorTemperature.Mirek
-				parts = append(parts, fmt.Sprintf("%dK", kelvin))
-			}
-			if len(parts) > 0 {
-				actionDesc = " → " + strings.Join(parts, ", ")
+			// Light name as a sub-header
+			lightNameStyle := lipgloss.NewStyle().Foreground(m.styles.Theme.EntityLight).Bold(true)
+			rows = append(rows, gridlayout.NewStyledInfoRow("", lightNameStyle.Render(targetName), infoLabelWidth, lipgloss.NewStyle()))
+
+			// On/Off toggle
+			if action.Action.On != nil {
+				toggle := field.NewToggleComponent(
+					FieldIDSceneActionOn(sceneID, lightID), "Power", action.Action.On.On,
+					&m.styles, m.zones,
+				)
+				rows = append(rows, gridlayout.GridRow{
+					Type: gridlayout.RowTypeNormal,
+					Cells: []gridlayout.GridCell{
+						{Component: gridlayout.NewLabelWithWidth("Power", infoLabelWidth)},
+						{Component: toggle},
+					},
+				})
 			}
 
-			rows = append(rows, gridlayout.NewListItemRow("•", actionLightStyle.Render(targetName)+m.styles.Dimmed.Render(actionDesc)))
+			// Brightness slider
+			if action.Action.Dimming != nil {
+				brightness := int(action.Action.Dimming.Brightness)
+				slider := field.NewBrightnessSliderComponent(
+					FieldIDSceneActionBrightness(sceneID, lightID), "Brightness", brightness,
+					&m.styles, m.zones,
+				)
+				rows = append(rows, gridlayout.GridRow{
+					Type: gridlayout.RowTypeNormal,
+					Cells: []gridlayout.GridCell{
+						{Component: gridlayout.NewLabelWithWidth("Brightness", infoLabelWidth)},
+						{Component: slider},
+					},
+				})
+			}
+
+			// Color (XY) - use color wheel
+			if action.Action.Color != nil {
+				x := float64(action.Action.Color.Xy.X)
+				y := float64(action.Action.Color.Xy.Y)
+				colorWheel := field.NewColorWheelComponent(
+					FieldIDSceneActionColor(sceneID, lightID), "Color", x, y,
+					&m.styles, m.zones,
+				)
+				rows = append(rows, gridlayout.GridRow{
+					Type: gridlayout.RowTypeNormal,
+					Cells: []gridlayout.GridCell{
+						{Component: gridlayout.NewLabelWithWidth("Color", infoLabelWidth)},
+						{Component: colorWheel},
+					},
+				})
+			} else if action.Action.ColorTemperature != nil && action.Action.ColorTemperature.Mirek != 0 {
+				// Color temperature slider
+				mirek := action.Action.ColorTemperature.Mirek
+				// Get mirek range from light if available, otherwise use defaults
+				minMirek := 153
+				maxMirek := 500
+				if light != nil && light.ColorTemperature != nil {
+					minMirek = light.ColorTemperature.MirekSchema.MirekMinimum
+					maxMirek = light.ColorTemperature.MirekSchema.MirekMaximum
+				}
+				slider := field.NewColorTempSliderComponent(
+					FieldIDSceneActionColorTemp(sceneID, lightID), "Color Temp", mirek, minMirek, maxMirek,
+					&m.styles, m.zones,
+				)
+				rows = append(rows, gridlayout.GridRow{
+					Type: gridlayout.RowTypeNormal,
+					Cells: []gridlayout.GridCell{
+						{Component: gridlayout.NewLabelWithWidth("Color Temp", infoLabelWidth)},
+						{Component: slider},
+					},
+				})
+			}
 		}
 	}
 

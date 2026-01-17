@@ -4,11 +4,11 @@ import (
 	"context"
 	"crypto/tls"
 	"encoding/json"
+	"log/slog"
 	"net/http"
 	"sync"
 	"time"
 
-	"github.com/kluzzebass/lazyhue/internal/debug"
 	"github.com/kluzzebass/lazyhue/internal/hueclient"
 )
 
@@ -215,12 +215,12 @@ func (b *Bridge) handleEvents(container EventContainer) {
 	for _, event := range container.Events {
 		updates, err := ParseResourceUpdates(event)
 		if err != nil {
-			debug.Log("ParseResourceUpdates error for %s event: %v", event.Type, err)
+			slog.Debug("parse resource updates error", "eventType", event.Type, "error", err)
 			continue
 		}
 
 		for _, update := range updates {
-			debug.Log("SSE %s: %s %s", event.Type, update.Type, update.ID)
+			slog.Debug("SSE event", "eventType", event.Type, "resourceType", update.Type, "resourceID", update.ID)
 
 			// Apply the update/delete to our cached state based on event type
 			switch event.Type {
@@ -288,7 +288,7 @@ func (b *Bridge) applyResourceUpdate(update ResourceUpdate) bool {
 				Active string `json:"active"`
 			}
 			if err := json.Unmarshal(update.Status, &statusObj); err == nil && statusObj.Active != "" {
-				debug.Log("Scene %s status: %s", update.ID, statusObj.Active)
+				slog.Debug("scene status update", "sceneID", update.ID, "status", statusObj.Active)
 				return b.state.ApplySceneStatus(update.ID, statusObj.Active)
 			}
 		}
@@ -408,13 +408,13 @@ func (b *Bridge) applyResourceAdd(update ResourceUpdate) bool {
 	case "room":
 		resp, err := client.GetRoomByIdWithResponse(ctx, toResourceId(update.ID))
 		if err != nil || resp.JSON200 == nil {
-			debug.Log("Failed to fetch new room %s: %v", update.ID, err)
+			slog.Debug("failed to fetch new room", "roomID", update.ID, "error", err)
 			return false
 		}
 		for _, room := range resp.JSON200.Data {
 			if room.Id != "" {
 				b.state.AddRoom(room.Id, room)
-				debug.Log("Added new room %s to cache", room.Id)
+				slog.Debug("added new room to cache", "roomID", room.Id)
 				return true
 			}
 		}
@@ -423,13 +423,13 @@ func (b *Bridge) applyResourceAdd(update ResourceUpdate) bool {
 	case "zone":
 		resp, err := client.GetZoneByIdWithResponse(ctx, toResourceId(update.ID))
 		if err != nil || resp.JSON200 == nil {
-			debug.Log("Failed to fetch new zone %s: %v", update.ID, err)
+			slog.Debug("failed to fetch new zone", "zoneID", update.ID, "error", err)
 			return false
 		}
 		for _, zone := range resp.JSON200.Data {
 			if zone.Id != "" {
 				b.state.AddZone(zone.Id, zone)
-				debug.Log("Added new zone %s to cache", zone.Id)
+				slog.Debug("added new zone to cache", "zoneID", zone.Id)
 				return true
 			}
 		}
@@ -438,13 +438,13 @@ func (b *Bridge) applyResourceAdd(update ResourceUpdate) bool {
 	case "scene":
 		resp, err := client.GetSceneByIdWithResponse(ctx, toResourceId(update.ID))
 		if err != nil || resp.JSON200 == nil {
-			debug.Log("Failed to fetch new scene %s: %v", update.ID, err)
+			slog.Debug("failed to fetch new scene", "sceneID", update.ID, "error", err)
 			return false
 		}
 		for _, scene := range resp.JSON200.Data {
 			if scene.Id != "" {
 				b.state.AddScene(scene.Id, scene)
-				debug.Log("Added new scene %s to cache", scene.Id)
+				slog.Debug("added new scene to cache", "sceneID", scene.Id)
 				return true
 			}
 		}
@@ -453,13 +453,13 @@ func (b *Bridge) applyResourceAdd(update ResourceUpdate) bool {
 	case "smart_scene":
 		resp, err := client.GetSmartSceneByIdWithResponse(ctx, toResourceId(update.ID))
 		if err != nil || resp.JSON200 == nil {
-			debug.Log("Failed to fetch new smart_scene %s: %v", update.ID, err)
+			slog.Debug("failed to fetch new smart scene", "sceneID", update.ID, "error", err)
 			return false
 		}
 		for _, scene := range resp.JSON200.Data {
 			if scene.Id != "" {
 				b.state.AddSmartScene(scene.Id, scene)
-				debug.Log("Added new smart_scene %s to cache", scene.Id)
+				slog.Debug("added new smart scene to cache", "sceneID", scene.Id)
 				return true
 			}
 		}
@@ -468,13 +468,13 @@ func (b *Bridge) applyResourceAdd(update ResourceUpdate) bool {
 	case "grouped_light":
 		resp, err := client.GetGroupedLightByIdWithResponse(ctx, toResourceId(update.ID))
 		if err != nil || resp.JSON200 == nil {
-			debug.Log("Failed to fetch new grouped_light %s: %v", update.ID, err)
+			slog.Debug("failed to fetch new grouped light", "glID", update.ID, "error", err)
 			return false
 		}
 		for _, gl := range resp.JSON200.Data {
 			if gl.Id != "" {
 				b.state.AddGroupedLight(gl.Id, gl)
-				debug.Log("Added new grouped_light %s to cache", gl.Id)
+				slog.Debug("added new grouped light to cache", "glID", gl.Id)
 				return true
 			}
 		}
@@ -483,13 +483,13 @@ func (b *Bridge) applyResourceAdd(update ResourceUpdate) bool {
 	case "light":
 		resp, err := client.GetLightByIdWithResponse(ctx, toResourceId(update.ID))
 		if err != nil || resp.JSON200 == nil {
-			debug.Log("Failed to fetch new light %s: %v", update.ID, err)
+			slog.Debug("failed to fetch new light", "lightID", update.ID, "error", err)
 			return false
 		}
 		for _, light := range resp.JSON200.Data {
 			if light.Id != "" {
 				b.state.AddLight(light.Id, light)
-				debug.Log("Added new light %s to cache", light.Id)
+				slog.Debug("added new light to cache", "lightID", light.Id)
 				return true
 			}
 		}
@@ -498,13 +498,13 @@ func (b *Bridge) applyResourceAdd(update ResourceUpdate) bool {
 	case "device":
 		resp, err := client.GetDeviceByIdWithResponse(ctx, toResourceId(update.ID))
 		if err != nil || resp.JSON200 == nil {
-			debug.Log("Failed to fetch new device %s: %v", update.ID, err)
+			slog.Debug("failed to fetch new device", "deviceID", update.ID, "error", err)
 			return false
 		}
 		for _, device := range resp.JSON200.Data {
 			if device.Id != "" {
 				b.state.AddDevice(device.Id, device)
-				debug.Log("Added new device %s to cache", device.Id)
+				slog.Debug("added new device to cache", "deviceID", device.Id)
 				return true
 			}
 		}

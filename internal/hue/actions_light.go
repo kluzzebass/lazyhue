@@ -7,9 +7,9 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"time"
 
-	"github.com/kluzzebass/lazyhue/internal/debug"
 	"github.com/kluzzebass/lazyhue/internal/hueclient"
 )
 
@@ -472,7 +472,7 @@ func (b *Bridge) SetLightGradientMode(lightID string, mode hueclient.LightGetGra
 		return err
 	}
 
-	debug.Log("Gradient mode request for %s: %s", lightID, string(bodyBytes))
+	slog.Debug("gradient mode request", "lightID", lightID, "body", string(bodyBytes))
 
 	resp, err := client.UpdateLightWithBody(context.Background(), toResourceId(lightID), "application/json", bytes.NewReader(bodyBytes))
 	if err != nil {
@@ -483,7 +483,7 @@ func (b *Bridge) SetLightGradientMode(lightID string, mode hueclient.LightGetGra
 
 	if resp.StatusCode >= 400 {
 		respBody, _ := io.ReadAll(resp.Body)
-		debug.Log("Gradient mode error for %s: %s", lightID, string(respBody))
+		slog.Debug("gradient mode error", "lightID", lightID, "response", string(respBody))
 		errMsg := fmt.Sprintf("%s: gradient mode failed: HTTP %d", lightName, resp.StatusCode)
 		b.logError(errMsg)
 		return errors.New(errMsg)
@@ -561,7 +561,7 @@ func (b *Bridge) SetLightGradientPoints(lightID string, points []hueclient.Actio
 				return
 			}
 
-			debug.Log("Gradient points request for %s: %s", lightID, string(bodyBytes))
+			slog.Debug("gradient points request", "lightID", lightID, "body", string(bodyBytes))
 
 			resp, err := client.UpdateLightWithBody(context.Background(), toResourceId(lightID), "application/json", bytes.NewReader(bodyBytes))
 			if err != nil {
@@ -570,7 +570,7 @@ func (b *Bridge) SetLightGradientPoints(lightID string, points []hueclient.Actio
 				defer resp.Body.Close()
 				if resp.StatusCode >= 400 {
 					respBody, _ := io.ReadAll(resp.Body)
-					debug.Log("Gradient points error for %s: %s", lightID, string(respBody))
+					slog.Debug("gradient points error", "lightID", lightID, "response", string(respBody))
 					b.logError(fmt.Sprintf("%s: gradient points failed: HTTP %d", lightName, resp.StatusCode))
 				}
 			}
