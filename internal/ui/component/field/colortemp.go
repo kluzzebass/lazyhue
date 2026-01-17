@@ -53,10 +53,7 @@ func (c *ColorTempSliderComponent) renderColorTempBar(value, min, max, width int
 		if c.Inactive {
 			// Calculate luminance (perceived brightness)
 			lum := (299*r + 587*g + 114*b) / 1000
-			// Blend 75% toward gray
-			r = r + (lum-r)*3/4
-			g = g + (lum-g)*3/4
-			b = b + (lum-b)*3/4
+			r, g, b = lum, lum, lum
 		}
 
 		char := "─"

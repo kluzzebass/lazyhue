@@ -318,10 +318,7 @@ func (w *ColorWheel) Render() string {
 				// Calculate luminance (perceived brightness)
 				r, g, b := int(cr), int(cg), int(cb)
 				lum := (299*r + 587*g + 114*b) / 1000
-				// Blend 75% toward gray
-				cr = uint8(r + (lum-r)*3/4)
-				cg = uint8(g + (lum-g)*3/4)
-				cb = uint8(b + (lum-b)*3/4)
+				cr, cg, cb = uint8(lum), uint8(lum), uint8(lum)
 			}
 
 			blockColor := fmt.Sprintf("#%02X%02X%02X", cr, cg, cb)
