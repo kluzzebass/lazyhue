@@ -83,10 +83,12 @@ func (b *Bridge) Connect(apiKey string) error {
 
 	b.Status = StatusConnecting
 
-	// Create new generated client
+	// Create new generated client with logging transport
 	httpClient := &http.Client{
-		Transport: &http.Transport{
-			TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+		Transport: &LoggingTransport{
+			Transport: &http.Transport{
+				TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+			},
 		},
 	}
 	client, err := hueclient.NewClientWithResponses(
@@ -282,6 +284,7 @@ func (b *Bridge) applyResourceUpdate(update ResourceUpdate) bool {
 		return false
 
 	case "scene":
+		changed := false
 		if len(update.Status) > 0 {
 			// Try to parse status as an object with "active" field
 			var statusObj struct {
@@ -289,13 +292,32 @@ func (b *Bridge) applyResourceUpdate(update ResourceUpdate) bool {
 			}
 			if err := json.Unmarshal(update.Status, &statusObj); err == nil && statusObj.Active != "" {
 				slog.Debug("scene status update", "sceneID", update.ID, "status", statusObj.Active)
-				return b.state.ApplySceneStatus(update.ID, statusObj.Active)
+				if b.state.ApplySceneStatus(update.ID, statusObj.Active) {
+					changed = true
+				}
 			}
 		}
 		if update.Metadata != nil && update.Metadata.Name != nil {
-			return b.state.ApplySceneMetadata(update.ID, update.Metadata.Name)
+			if b.state.ApplySceneMetadata(update.ID, update.Metadata.Name) {
+				changed = true
+			}
 		}
-		return false
+		// If we didn't handle the update incrementally, refetch the full scene
+		// This handles action updates and other changes we can't parse incrementally
+		if !changed && b.client != nil {
+			ctx := context.Background()
+			resp, err := b.client.GetSceneByIdWithResponse(ctx, toResourceId(update.ID))
+			if err == nil && resp.JSON200 != nil {
+				for _, scene := range resp.JSON200.Data {
+					if scene.Id == update.ID {
+						b.state.AddScene(scene.Id, scene)
+						slog.Debug("refetched scene after update", "sceneID", update.ID)
+						return true
+					}
+				}
+			}
+		}
+		return changed
 
 	case "device":
 		if update.Metadata != nil && update.Metadata.Name != nil {

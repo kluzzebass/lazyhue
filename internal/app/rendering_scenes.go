@@ -2,6 +2,7 @@ package app
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/charmbracelet/lipgloss/v2"
@@ -123,7 +124,24 @@ func (m *Model) buildSceneGridRows(scene hueclient.SceneGet, state *hue.BridgeSt
 			Section: actionsHeader,
 		})
 
-		for _, action := range scene.Actions {
+		// Sort actions by light name
+		sortedActions := make([]hueclient.ActionGet, len(scene.Actions))
+		copy(sortedActions, scene.Actions)
+		sort.Slice(sortedActions, func(i, j int) bool {
+			nameI := sortedActions[i].Target.Rid
+			nameJ := sortedActions[j].Target.Rid
+			if state != nil {
+				if l, ok := state.GetLight(sortedActions[i].Target.Rid); ok {
+					nameI = state.GetLightName(l)
+				}
+				if l, ok := state.GetLight(sortedActions[j].Target.Rid); ok {
+					nameJ = state.GetLightName(l)
+				}
+			}
+			return nameI < nameJ
+		})
+
+		for i, action := range sortedActions {
 			lightID := action.Target.Rid
 			if lightID == "" {
 				continue
@@ -139,28 +157,41 @@ func (m *Model) buildSceneGridRows(scene hueclient.SceneGet, state *hue.BridgeSt
 				}
 			}
 
-			// Light name as a sub-header
-			lightNameStyle := lipgloss.NewStyle().Foreground(m.styles.Theme.EntityLight).Bold(true)
-			rows = append(rows, gridlayout.NewStyledInfoRow("", lightNameStyle.Render(targetName), infoLabelWidth, lipgloss.NewStyle()))
-
-			// On/Off toggle
-			if action.Action.On != nil {
-				toggle := field.NewToggleComponent(
-					FieldIDSceneActionOn(sceneID, lightID), "Power", action.Action.On.On,
-					&m.styles, m.zones,
-				)
-				rows = append(rows, gridlayout.GridRow{
-					Type: gridlayout.RowTypeNormal,
-					Cells: []gridlayout.GridCell{
-						{Component: gridlayout.NewLabelWithWidth("Power", infoLabelWidth)},
-						{Component: toggle},
-					},
-				})
+			// Add spacing before each light (except the first)
+			if i > 0 {
+				rows = append(rows, gridlayout.NewEmptyRow())
 			}
 
-			// Brightness slider
-			if action.Action.Dimming != nil {
-				brightness := int(action.Action.Dimming.Brightness)
+			// Light name as a sub-header
+			lightNameStyle := lipgloss.NewStyle().Foreground(m.styles.Theme.EntityLight).Bold(true)
+			rows = append(rows, gridlayout.NewStyledInfoRow("Light", lightNameStyle.Render(targetName), infoLabelWidth, lipgloss.NewStyle()))
+
+			// All controls based on light capabilities for consistent ordering
+			// (matches light details panel: Power → Brightness → Color Temp → Color)
+
+			// On/Off toggle - all lights support this
+			onValue := true
+			if action.Action.On != nil {
+				onValue = action.Action.On.On
+			}
+			toggle := field.NewToggleComponent(
+				FieldIDSceneActionOn(sceneID, lightID), "Power", onValue,
+				&m.styles, m.zones,
+			)
+			rows = append(rows, gridlayout.GridRow{
+				Type: gridlayout.RowTypeNormal,
+				Cells: []gridlayout.GridCell{
+					{Component: gridlayout.NewLabelWithWidth("Power", infoLabelWidth)},
+					{Component: toggle},
+				},
+			})
+
+			// Brightness slider - show if light supports dimming
+			if light != nil && light.Dimming != nil {
+				brightness := 100
+				if action.Action.Dimming != nil {
+					brightness = int(action.Action.Dimming.Brightness)
+				}
 				slider := field.NewBrightnessSliderComponent(
 					FieldIDSceneActionBrightness(sceneID, lightID), "Brightness", brightness,
 					&m.styles, m.zones,
@@ -174,30 +205,14 @@ func (m *Model) buildSceneGridRows(scene hueclient.SceneGet, state *hue.BridgeSt
 				})
 			}
 
-			// Color (XY) - use color wheel
-			if action.Action.Color != nil {
-				x := float64(action.Action.Color.Xy.X)
-				y := float64(action.Action.Color.Xy.Y)
-				colorWheel := field.NewColorWheelComponent(
-					FieldIDSceneActionColor(sceneID, lightID), "Color", x, y,
-					&m.styles, m.zones,
-				)
-				rows = append(rows, gridlayout.GridRow{
-					Type: gridlayout.RowTypeNormal,
-					Cells: []gridlayout.GridCell{
-						{Component: gridlayout.NewLabelWithWidth("Color", infoLabelWidth)},
-						{Component: colorWheel},
-					},
-				})
-			} else if action.Action.ColorTemperature != nil && action.Action.ColorTemperature.Mirek != 0 {
-				// Color temperature slider
-				mirek := action.Action.ColorTemperature.Mirek
-				// Get mirek range from light if available, otherwise use defaults
-				minMirek := 153
-				maxMirek := 500
-				if light != nil && light.ColorTemperature != nil {
-					minMirek = light.ColorTemperature.MirekSchema.MirekMinimum
-					maxMirek = light.ColorTemperature.MirekSchema.MirekMaximum
+			// Color temperature slider - show if light supports color temp
+			if light != nil && light.ColorTemperature != nil {
+				minMirek := light.ColorTemperature.MirekSchema.MirekMinimum
+				maxMirek := light.ColorTemperature.MirekSchema.MirekMaximum
+				// Use action color temp if set, otherwise default to middle of range
+				mirek := (minMirek + maxMirek) / 2
+				if action.Action.ColorTemperature != nil && action.Action.ColorTemperature.Mirek != 0 {
+					mirek = action.Action.ColorTemperature.Mirek
 				}
 				slider := field.NewColorTempSliderComponent(
 					FieldIDSceneActionColorTemp(sceneID, lightID), "Color Temp", mirek, minMirek, maxMirek,
@@ -208,6 +223,28 @@ func (m *Model) buildSceneGridRows(scene hueclient.SceneGet, state *hue.BridgeSt
 					Cells: []gridlayout.GridCell{
 						{Component: gridlayout.NewLabelWithWidth("Color Temp", infoLabelWidth)},
 						{Component: slider},
+					},
+				})
+			}
+
+			// Color (XY) - show if light supports color
+			if light != nil && light.Color != nil {
+				// Use action color if set, otherwise default to white-ish
+				x := 0.3127
+				y := 0.3290
+				if action.Action.Color != nil {
+					x = float64(action.Action.Color.Xy.X)
+					y = float64(action.Action.Color.Xy.Y)
+				}
+				colorWheel := field.NewColorWheelComponent(
+					FieldIDSceneActionColor(sceneID, lightID), "Color", x, y,
+					&m.styles, m.zones,
+				)
+				rows = append(rows, gridlayout.GridRow{
+					Type: gridlayout.RowTypeNormal,
+					Cells: []gridlayout.GridCell{
+						{Component: gridlayout.NewLabelWithWidth("Color", infoLabelWidth)},
+						{Component: colorWheel},
 					},
 				})
 			}

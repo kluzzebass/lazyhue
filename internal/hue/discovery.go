@@ -103,8 +103,10 @@ func fetchBridgeConfig(ipAddress string) (*bridgeConfig, error) {
 	// Hue bridges use self-signed certs
 	client := &http.Client{
 		Timeout: 5 * time.Second,
-		Transport: &http.Transport{
-			TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+		Transport: &LoggingTransport{
+			Transport: &http.Transport{
+				TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+			},
 		},
 	}
 

@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log/slog"
 
 	"github.com/kluzzebass/lazyhue/internal/hueclient"
 )
@@ -371,20 +370,68 @@ func (b *Bridge) CreateSceneFromCurrentState(groupID string, isZone bool, sceneN
 	return err
 }
 
-// findSceneActionTarget finds the target for a light in a scene's actions.
-// Returns the target Rtype if found, or empty string if not found.
-func (b *Bridge) findSceneActionTarget(sceneID, lightID string) (hueclient.ResourceType, bool) {
+// sceneActionModifier is a function that modifies a scene action in place.
+type sceneActionModifier func(action *sceneActionUpdate)
+
+// buildSceneActionsWithModification builds a complete actions list from an existing scene,
+// applying a modification to the action with the specified target lightID.
+// This is needed because the Hue API replaces ALL actions when you send an update,
+// so we must include all existing actions with the modification applied.
+func (b *Bridge) buildSceneActionsWithModification(sceneID, lightID string, modifier sceneActionModifier) ([]sceneActionUpdate, error) {
 	scene, ok := b.state.GetScene(sceneID)
 	if !ok {
-		return "", false
+		return nil, fmt.Errorf("scene %s not found", sceneID)
 	}
 
-	for _, action := range scene.Actions {
-		if action.Target.Rid == lightID {
-			return action.Target.Rtype, true
+	var actions []sceneActionUpdate
+	found := false
+
+	for _, existingAction := range scene.Actions {
+		// Convert existing action to update format
+		action := sceneActionUpdate{
+			Target: sceneTarget{
+				Rid:   existingAction.Target.Rid,
+				Rtype: existingAction.Target.Rtype,
+			},
+			Action: sceneActionDetailUpdate{},
 		}
+
+		// Copy existing values
+		if existingAction.Action.On != nil {
+			on := existingAction.Action.On.On
+			action.Action.On = &sceneOnUpdate{On: &on}
+		}
+		if existingAction.Action.Dimming != nil {
+			bri := existingAction.Action.Dimming.Brightness
+			action.Action.Dimming = &sceneDimmingUpdate{Brightness: &bri}
+		}
+		if existingAction.Action.Color != nil {
+			action.Action.Color = &sceneColorUpdate{
+				Xy: &sceneXYUpdate{
+					X: existingAction.Action.Color.Xy.X,
+					Y: existingAction.Action.Color.Xy.Y,
+				},
+			}
+		}
+		if existingAction.Action.ColorTemperature != nil && existingAction.Action.ColorTemperature.Mirek != 0 {
+			mirek := existingAction.Action.ColorTemperature.Mirek
+			action.Action.ColorTemperature = &sceneColorTemperatureUpdate{Mirek: &mirek}
+		}
+
+		// Apply modification if this is the target light
+		if existingAction.Target.Rid == lightID {
+			modifier(&action)
+			found = true
+		}
+
+		actions = append(actions, action)
 	}
-	return "", false
+
+	if !found {
+		return nil, fmt.Errorf("light %s not found in scene %s actions", lightID, sceneID)
+	}
+
+	return actions, nil
 }
 
 // UpdateSceneActionOn updates the on/off state for a light within a scene.
@@ -406,40 +453,30 @@ func (b *Bridge) UpdateSceneActionOn(sceneID, lightID string, on bool) error {
 		lightName = b.state.GetLightName(light)
 	}
 
-	// Get the existing target rtype from the scene
-	targetRtype, found := b.findSceneActionTarget(sceneID, lightID)
-	if !found {
-		return fmt.Errorf("light %s not found in scene %s actions", lightID, sceneID)
-	}
-
-	slog.Debug("scene update", "sceneID", sceneID, "lightID", lightID, "targetRtype", targetRtype)
-
 	state := "off"
 	if on {
 		state = "on"
 	}
 	b.logRequest(fmt.Sprintf("Scene \"%s\": setting %s to %s", sceneName, lightName, state))
 
+	// Build complete actions list with modification
+	actions, err := b.buildSceneActionsWithModification(sceneID, lightID, func(action *sceneActionUpdate) {
+		action.Action.On = &sceneOnUpdate{On: &on}
+	})
+	if err != nil {
+		return err
+	}
+
 	body := struct {
 		Actions []sceneActionUpdate `json:"actions"`
 	}{
-		Actions: []sceneActionUpdate{{
-			Target: sceneTarget{
-				Rid:   lightID,
-				Rtype: targetRtype,
-			},
-			Action: sceneActionDetailUpdate{
-				On: &sceneOnUpdate{On: &on},
-			},
-		}},
+		Actions: actions,
 	}
 
 	jsonBody, err := json.Marshal(body)
 	if err != nil {
 		return fmt.Errorf("failed to marshal scene update: %w", err)
 	}
-
-	slog.Debug("scene update request", "body", string(jsonBody))
 
 	resp, err := client.UpdateSceneWithBody(context.Background(), toResourceId(sceneID), "application/json", bytes.NewReader(jsonBody))
 	if err != nil {
@@ -449,7 +486,6 @@ func (b *Bridge) UpdateSceneActionOn(sceneID, lightID string, on bool) error {
 
 	if resp.StatusCode >= 400 {
 		respBody, _ := io.ReadAll(resp.Body)
-		slog.Debug("scene update error", "response", string(respBody))
 		return fmt.Errorf("scene update failed: HTTP %d: %s", resp.StatusCode, string(respBody))
 	}
 
@@ -475,26 +511,20 @@ func (b *Bridge) UpdateSceneActionBrightness(sceneID, lightID string, brightness
 		lightName = b.state.GetLightName(light)
 	}
 
-	// Get the existing target rtype from the scene
-	targetRtype, found := b.findSceneActionTarget(sceneID, lightID)
-	if !found {
-		return fmt.Errorf("light %s not found in scene %s actions", lightID, sceneID)
-	}
-
 	b.logRequest(fmt.Sprintf("Scene \"%s\": setting %s brightness to %.0f%%", sceneName, lightName, brightness))
+
+	// Build complete actions list with modification
+	actions, err := b.buildSceneActionsWithModification(sceneID, lightID, func(action *sceneActionUpdate) {
+		action.Action.Dimming = &sceneDimmingUpdate{Brightness: &brightness}
+	})
+	if err != nil {
+		return err
+	}
 
 	body := struct {
 		Actions []sceneActionUpdate `json:"actions"`
 	}{
-		Actions: []sceneActionUpdate{{
-			Target: sceneTarget{
-				Rid:   lightID,
-				Rtype: targetRtype,
-			},
-			Action: sceneActionDetailUpdate{
-				Dimming: &sceneDimmingUpdate{Brightness: &brightness},
-			},
-		}},
+		Actions: actions,
 	}
 
 	jsonBody, err := json.Marshal(body)
@@ -535,26 +565,20 @@ func (b *Bridge) UpdateSceneActionColor(sceneID, lightID string, x, y float32) e
 		lightName = b.state.GetLightName(light)
 	}
 
-	// Get the existing target rtype from the scene
-	targetRtype, found := b.findSceneActionTarget(sceneID, lightID)
-	if !found {
-		return fmt.Errorf("light %s not found in scene %s actions", lightID, sceneID)
-	}
-
 	b.logRequest(fmt.Sprintf("Scene \"%s\": setting %s color to (%.3f, %.3f)", sceneName, lightName, x, y))
+
+	// Build complete actions list with modification
+	actions, err := b.buildSceneActionsWithModification(sceneID, lightID, func(action *sceneActionUpdate) {
+		action.Action.Color = &sceneColorUpdate{Xy: &sceneXYUpdate{X: x, Y: y}}
+	})
+	if err != nil {
+		return err
+	}
 
 	body := struct {
 		Actions []sceneActionUpdate `json:"actions"`
 	}{
-		Actions: []sceneActionUpdate{{
-			Target: sceneTarget{
-				Rid:   lightID,
-				Rtype: targetRtype,
-			},
-			Action: sceneActionDetailUpdate{
-				Color: &sceneColorUpdate{Xy: &sceneXYUpdate{X: x, Y: y}},
-			},
-		}},
+		Actions: actions,
 	}
 
 	jsonBody, err := json.Marshal(body)
@@ -595,28 +619,22 @@ func (b *Bridge) UpdateSceneActionColorTemp(sceneID, lightID string, mirek int) 
 		lightName = b.state.GetLightName(light)
 	}
 
-	// Get the existing target rtype from the scene
-	targetRtype, found := b.findSceneActionTarget(sceneID, lightID)
-	if !found {
-		return fmt.Errorf("light %s not found in scene %s actions", lightID, sceneID)
-	}
-
 	// Convert mirek to Kelvin for display (K = 1,000,000 / mirek)
 	kelvin := 1000000 / mirek
 	b.logRequest(fmt.Sprintf("Scene \"%s\": setting %s color temp to %dK", sceneName, lightName, kelvin))
 
+	// Build complete actions list with modification
+	actions, err := b.buildSceneActionsWithModification(sceneID, lightID, func(action *sceneActionUpdate) {
+		action.Action.ColorTemperature = &sceneColorTemperatureUpdate{Mirek: &mirek}
+	})
+	if err != nil {
+		return err
+	}
+
 	body := struct {
 		Actions []sceneActionUpdate `json:"actions"`
 	}{
-		Actions: []sceneActionUpdate{{
-			Target: sceneTarget{
-				Rid:   lightID,
-				Rtype: targetRtype,
-			},
-			Action: sceneActionDetailUpdate{
-				ColorTemperature: &sceneColorTemperatureUpdate{Mirek: &mirek},
-			},
-		}},
+		Actions: actions,
 	}
 
 	jsonBody, err := json.Marshal(body)

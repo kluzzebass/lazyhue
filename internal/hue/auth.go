@@ -63,8 +63,10 @@ func (a *Authenticator) TryAuthenticate() AuthResult {
 	// Create HTTP client with TLS skip (bridge uses self-signed cert)
 	httpClient := &http.Client{
 		Timeout: 10 * time.Second,
-		Transport: &http.Transport{
-			TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+		Transport: &LoggingTransport{
+			Transport: &http.Transport{
+				TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+			},
 		},
 	}
 

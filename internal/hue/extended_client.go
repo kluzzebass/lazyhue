@@ -20,8 +20,10 @@ type ExtendedClient struct {
 // NewExtendedClient creates a client for extended API access.
 func NewExtendedClient(bridgeIP, apiKey string) (*ExtendedClient, error) {
 	client := &http.Client{
-		Transport: &http.Transport{
-			TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+		Transport: &LoggingTransport{
+			Transport: &http.Transport{
+				TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+			},
 		},
 	}
 
