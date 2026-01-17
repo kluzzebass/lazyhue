@@ -51,11 +51,12 @@ func (c *ColorTempSliderComponent) renderColorTempBar(value, min, max, width int
 
 		// Desaturate if inactive (not the current color mode)
 		if c.Inactive {
-			gray := (r + g + b) / 3
-			// Blend 75% toward gray for a muted look
-			r = (r + gray*3) / 4
-			g = (g + gray*3) / 4
-			b = (b + gray*3) / 4
+			// Calculate luminance (perceived brightness)
+			lum := (299*r + 587*g + 114*b) / 1000
+			// Blend 75% toward gray
+			r = r + (lum-r)*3/4
+			g = g + (lum-g)*3/4
+			b = b + (lum-b)*3/4
 		}
 
 		char := "─"

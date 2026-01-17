@@ -311,12 +311,18 @@ func (w *ColorWheel) Render() string {
 				blockSat = 100
 			}
 
-			// Reduce saturation if inactive (grayscale mode)
-			sat := blockSat
+			cr, cg, cb := ui.HsvToRGB(blockHue, blockSat, 100)
+
+			// Desaturate if inactive
 			if w.Grayscale {
-				sat = blockSat / 4 // 25% saturation for muted look
+				// Calculate luminance (perceived brightness)
+				r, g, b := int(cr), int(cg), int(cb)
+				lum := (299*r + 587*g + 114*b) / 1000
+				// Blend 75% toward gray
+				cr = uint8(r + (lum-r)*3/4)
+				cg = uint8(g + (lum-g)*3/4)
+				cb = uint8(b + (lum-b)*3/4)
 			}
-			cr, cg, cb := ui.HsvToRGB(blockHue, sat, 100)
 
 			blockColor := fmt.Sprintf("#%02X%02X%02X", cr, cg, cb)
 
