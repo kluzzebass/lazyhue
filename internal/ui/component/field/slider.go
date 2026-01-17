@@ -28,6 +28,7 @@ type SliderComponent struct {
 	FormatValue func(value, min, max int) string
 	Inverted    bool // If true, left=max, right=min (for color temp)
 	Inactive    bool // If true, render in grayscale (not the active color mode)
+	Brightness  int  // Brightness level (0-100) for dimming the bar
 }
 
 // NewSliderComponent creates a new slider component.
@@ -39,6 +40,7 @@ func NewSliderComponent(id, label string, value, min, max, step int, styles *ui.
 		Max:            max,
 		Step:           step,
 		DragZoneStartX: -1,
+		Brightness:     100, // Full brightness by default
 	}
 }
 

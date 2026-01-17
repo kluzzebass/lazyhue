@@ -598,14 +598,18 @@ func (b *Bridge) UpdateSceneActionBrightness(sceneID, lightID string, brightness
 
 // UpdateSceneActionColor updates the color (XY) for a light within a scene.
 // Rapid calls are debounced - changes are accumulated and sent in one API call.
-func (b *Bridge) UpdateSceneActionColor(sceneID, lightID string, x, y float32) error {
+// Returns (error, modeSwitched) - modeSwitched is true if this switched from color temp to color mode.
+func (b *Bridge) UpdateSceneActionColor(sceneID, lightID string, x, y float32) (error, bool) {
 	b.mu.RLock()
 	client := b.client
 	b.mu.RUnlock()
 
 	if client == nil {
-		return ErrAuthFailed
+		return ErrAuthFailed, false
 	}
+
+	// Optimistic update: apply to local state immediately
+	_, modeSwitched := b.state.ApplySceneActionColor(sceneID, lightID, x, y)
 
 	xCopy, yCopy := x, y
 	b.scheduleSceneUpdate(sceneID, lightID, func(p *pendingSceneAction) {
@@ -614,19 +618,23 @@ func (b *Bridge) UpdateSceneActionColor(sceneID, lightID string, x, y float32) e
 		p.clearColorTemp = true // Switch to color mode
 	})
 
-	return nil
+	return nil, modeSwitched
 }
 
 // UpdateSceneActionColorTemp updates the color temperature for a light within a scene.
 // Rapid calls are debounced - changes are accumulated and sent in one API call.
-func (b *Bridge) UpdateSceneActionColorTemp(sceneID, lightID string, mirek int) error {
+// Returns (error, modeSwitched) - modeSwitched is true if this switched from color to color temp mode.
+func (b *Bridge) UpdateSceneActionColorTemp(sceneID, lightID string, mirek int) (error, bool) {
 	b.mu.RLock()
 	client := b.client
 	b.mu.RUnlock()
 
 	if client == nil {
-		return ErrAuthFailed
+		return ErrAuthFailed, false
 	}
+
+	// Optimistic update: apply to local state immediately
+	_, modeSwitched := b.state.ApplySceneActionColorTemp(sceneID, lightID, mirek)
 
 	mirekCopy := mirek
 	b.scheduleSceneUpdate(sceneID, lightID, func(p *pendingSceneAction) {
@@ -634,5 +642,5 @@ func (b *Bridge) UpdateSceneActionColorTemp(sceneID, lightID string, mirek int) 
 		p.clearColor = true // Switch to color temp mode
 	})
 
-	return nil
+	return nil, modeSwitched
 }

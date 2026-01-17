@@ -1604,6 +1604,62 @@ func (s *BridgeState) ApplySceneStatus(id string, status string) bool {
 	return true
 }
 
+// ApplySceneActionColor updates a scene action to use color mode (clears color temp).
+// Returns (found, modeSwitched) - modeSwitched is true if this switched from color temp to color mode.
+func (s *BridgeState) ApplySceneActionColor(sceneID, lightID string, x, y float32) (bool, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	scene, ok := s.Scenes[sceneID]
+	if !ok {
+		return false, false
+	}
+
+	for i, action := range scene.Actions {
+		if action.Target.Rid == lightID {
+			// Check if we're switching modes (was using color temp)
+			modeSwitched := action.Action.ColorTemperature != nil
+			// Set color
+			scene.Actions[i].Action.Color = &hueclient.ActionGetActionColor{
+				Xy: hueclient.XY{X: x, Y: y},
+			}
+			// Clear color temperature
+			scene.Actions[i].Action.ColorTemperature = nil
+			s.Scenes[sceneID] = scene
+			return true, modeSwitched
+		}
+	}
+	return false, false
+}
+
+// ApplySceneActionColorTemp updates a scene action to use color temp mode (clears color).
+// Returns (found, modeSwitched) - modeSwitched is true if this switched from color to color temp mode.
+func (s *BridgeState) ApplySceneActionColorTemp(sceneID, lightID string, mirek int) (bool, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	scene, ok := s.Scenes[sceneID]
+	if !ok {
+		return false, false
+	}
+
+	for i, action := range scene.Actions {
+		if action.Target.Rid == lightID {
+			// Check if we're switching modes (was using color)
+			modeSwitched := action.Action.Color != nil
+			// Set color temperature
+			scene.Actions[i].Action.ColorTemperature = &hueclient.ActionGetActionColorTemperature{
+				Mirek: mirek,
+			}
+			// Clear color
+			scene.Actions[i].Action.Color = nil
+			s.Scenes[sceneID] = scene
+			return true, modeSwitched
+		}
+	}
+	return false, false
+}
+
 // GetTemperature returns a temperature sensor by ID.
 func (s *BridgeState) GetTemperature(id string) (hueclient.TemperatureGet, bool) {
 	return getFromMap(s, s.Temperatures, id)

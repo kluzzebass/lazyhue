@@ -186,16 +186,36 @@ func (m *Model) buildSceneGridRows(scene hueclient.SceneGet, state *hue.BridgeSt
 				},
 			})
 
+			// Get brightness for this action (used for dimming color controls)
+			brightness := 100
+			if action.Action.Dimming != nil {
+				brightness = int(action.Action.Dimming.Brightness)
+			}
+
+			// Determine active color mode for this action
+			// Color temp is active if it's set in the action, color is active otherwise
+			colorTempActive := action.Action.ColorTemperature != nil && action.Action.ColorTemperature.Mirek != 0
+
+			// Get color values for brightness slider display
+			var colorX, colorY float64
+			var colorTempMirek int
+			if colorTempActive {
+				colorTempMirek = action.Action.ColorTemperature.Mirek
+			} else if action.Action.Color != nil {
+				colorX = float64(action.Action.Color.Xy.X)
+				colorY = float64(action.Action.Color.Xy.Y)
+			}
+
 			// Brightness slider - show if light supports dimming
 			if light != nil && light.Dimming != nil {
-				brightness := 100
-				if action.Action.Dimming != nil {
-					brightness = int(action.Action.Dimming.Brightness)
-				}
 				slider := field.NewBrightnessSliderComponent(
 					FieldIDSceneActionBrightness(sceneID, lightID), "Brightness", brightness,
 					&m.styles, m.zones,
 				)
+				// Set color for the brightness bar
+				slider.ColorX = colorX
+				slider.ColorY = colorY
+				slider.ColorTempMirek = colorTempMirek
 				rows = append(rows, gridlayout.GridRow{
 					Type: gridlayout.RowTypeNormal,
 					Cells: []gridlayout.GridCell{
@@ -204,10 +224,6 @@ func (m *Model) buildSceneGridRows(scene hueclient.SceneGet, state *hue.BridgeSt
 					},
 				})
 			}
-
-			// Determine active color mode for this action
-			// Color temp is active if it's set in the action, color is active otherwise
-			colorTempActive := action.Action.ColorTemperature != nil && action.Action.ColorTemperature.Mirek != 0
 
 			// Color temperature slider - show if light supports color temp
 			if light != nil && light.ColorTemperature != nil {
@@ -224,6 +240,8 @@ func (m *Model) buildSceneGridRows(scene hueclient.SceneGet, state *hue.BridgeSt
 				)
 				// Inactive (grayscale) when color wheel mode is active
 				slider.Inactive = !colorTempActive
+				// Dim based on brightness
+				slider.Brightness = brightness
 				rows = append(rows, gridlayout.GridRow{
 					Type: gridlayout.RowTypeNormal,
 					Cells: []gridlayout.GridCell{
@@ -248,6 +266,8 @@ func (m *Model) buildSceneGridRows(scene hueclient.SceneGet, state *hue.BridgeSt
 				)
 				// Inactive (grayscale) when color temp mode is active
 				colorWheel.Inactive = colorTempActive
+				// Dim based on brightness
+				colorWheel.Brightness = brightness
 				rows = append(rows, gridlayout.GridRow{
 					Type: gridlayout.RowTypeNormal,
 					Cells: []gridlayout.GridCell{

@@ -65,6 +65,94 @@ func (m *Model) updateLogContent() {
 	}
 }
 
+// updateSceneColorModeFlags updates the Inactive flags on scene color controls
+// without rebuilding the entire UI, preserving drag state.
+// colorActive: true = color wheel is active, false = color temp is active
+func (m *Model) updateSceneColorModeFlags(sceneID, lightID string, colorActive bool) {
+	// Update color wheel: inactive when color temp is active
+	colorWheelID := FieldIDSceneActionColor(sceneID, lightID)
+	var colorX, colorY float64
+	if comp := m.lightGrid.GetComponentByID(colorWheelID); comp != nil {
+		if cw, ok := comp.(*field.ColorWheelComponent); ok {
+			cw.Inactive = !colorActive
+			colorX = cw.ColorX
+			colorY = cw.ColorY
+		}
+	}
+
+	// Update color temp slider: inactive when color is active
+	colorTempID := FieldIDSceneActionColorTemp(sceneID, lightID)
+	var colorTempMirek int
+	if comp := m.lightGrid.GetComponentByID(colorTempID); comp != nil {
+		if ct, ok := comp.(*field.ColorTempSliderComponent); ok {
+			ct.Inactive = colorActive
+			colorTempMirek = ct.Value
+		}
+	}
+
+	// Update brightness slider color to match the new active mode
+	brightnessID := FieldIDSceneActionBrightness(sceneID, lightID)
+	if comp := m.lightGrid.GetComponentByID(brightnessID); comp != nil {
+		if bs, ok := comp.(*field.BrightnessSliderComponent); ok {
+			if colorActive {
+				bs.ColorX = colorX
+				bs.ColorY = colorY
+				bs.ColorTempMirek = 0
+			} else {
+				bs.ColorX = 0
+				bs.ColorY = 0
+				bs.ColorTempMirek = colorTempMirek
+			}
+		}
+	}
+}
+
+// updateSceneBrightness updates the brightness dimming on scene color controls
+// without rebuilding the entire UI, allowing real-time dimming during brightness drag.
+func (m *Model) updateSceneBrightness(sceneID, lightID string, brightness int) {
+	// Update color wheel brightness
+	colorWheelID := FieldIDSceneActionColor(sceneID, lightID)
+	if comp := m.lightGrid.GetComponentByID(colorWheelID); comp != nil {
+		if cw, ok := comp.(*field.ColorWheelComponent); ok {
+			cw.Brightness = brightness
+		}
+	}
+
+	// Update color temp slider brightness
+	colorTempID := FieldIDSceneActionColorTemp(sceneID, lightID)
+	if comp := m.lightGrid.GetComponentByID(colorTempID); comp != nil {
+		if ct, ok := comp.(*field.ColorTempSliderComponent); ok {
+			ct.Brightness = brightness
+		}
+	}
+}
+
+// updateSceneBrightnessColor updates the brightness slider's color display
+// when the color value changes (during drag operations).
+func (m *Model) updateSceneBrightnessColor(sceneID, lightID string, colorX, colorY float64) {
+	brightnessID := FieldIDSceneActionBrightness(sceneID, lightID)
+	if comp := m.lightGrid.GetComponentByID(brightnessID); comp != nil {
+		if bs, ok := comp.(*field.BrightnessSliderComponent); ok {
+			bs.ColorX = colorX
+			bs.ColorY = colorY
+			bs.ColorTempMirek = 0
+		}
+	}
+}
+
+// updateSceneBrightnessColorTemp updates the brightness slider's color temp display
+// when the color temp value changes (during drag operations).
+func (m *Model) updateSceneBrightnessColorTemp(sceneID, lightID string, mirek int) {
+	brightnessID := FieldIDSceneActionBrightness(sceneID, lightID)
+	if comp := m.lightGrid.GetComponentByID(brightnessID); comp != nil {
+		if bs, ok := comp.(*field.BrightnessSliderComponent); ok {
+			bs.ColorX = 0
+			bs.ColorY = 0
+			bs.ColorTempMirek = mirek
+		}
+	}
+}
+
 // updateDetailContent updates the detail viewport content based on the selected node.
 func (m *Model) updateDetailContent() {
 	// If showing help, display help content
@@ -210,13 +298,9 @@ func (m *Model) updateDetailContent() {
 		m.selectedLightID = ""
 		var scene hueclient.SceneGet
 		var ok bool
-		if node.Item.RawPtr != nil {
-			if s, typeOk := node.Item.RawPtr.(hueclient.SceneGet); typeOk {
-				scene = s
-				ok = true
-			}
-		}
-		if !ok && state != nil {
+		// Always get fresh scene data from state (not RawPtr cache) because
+		// optimistic updates modify the state directly for immediate UI feedback
+		if state != nil {
 			scene, ok = state.GetScene(node.Item.ID)
 		}
 		if ok {
@@ -1057,6 +1141,8 @@ func (m *Model) handleNewFieldChange(msg field.FieldChangedMsg) {
 					m.status = fmt.Sprintf("Error: %v", err)
 				} else {
 					m.status = "Scene updated"
+					// Update brightness dimming on color controls in real-time
+					m.updateSceneBrightness(sceneID, lightID, v.Value)
 				}
 				return
 			}
@@ -1070,11 +1156,18 @@ func (m *Model) handleNewFieldChange(msg field.FieldChangedMsg) {
 			lightID := parts[1]
 			if v, ok := msg.Value.(field.ColorValue); ok {
 				m.status = "Setting scene color..."
-				err = bridge.UpdateSceneActionColor(sceneID, lightID, float32(v.X), float32(v.Y))
+				err, modeSwitched := bridge.UpdateSceneActionColor(sceneID, lightID, float32(v.X), float32(v.Y))
 				if err != nil {
 					m.status = fmt.Sprintf("Error: %v", err)
 				} else {
 					m.status = "Scene updated"
+					// Update Inactive flags directly instead of rebuilding UI
+					// This preserves the component state during drag operations
+					if modeSwitched {
+						m.updateSceneColorModeFlags(sceneID, lightID, true)
+					}
+					// Update brightness slider color in real-time
+					m.updateSceneBrightnessColor(sceneID, lightID, v.X, v.Y)
 				}
 				return
 			}
@@ -1090,11 +1183,18 @@ func (m *Model) handleNewFieldChange(msg field.FieldChangedMsg) {
 				// Convert Kelvin from display to mirek for API
 				kelvin := 1000000 / v.Value
 				m.status = fmt.Sprintf("Setting scene color temp to %dK...", kelvin)
-				err = bridge.UpdateSceneActionColorTemp(sceneID, lightID, v.Value)
+				err, modeSwitched := bridge.UpdateSceneActionColorTemp(sceneID, lightID, v.Value)
 				if err != nil {
 					m.status = fmt.Sprintf("Error: %v", err)
 				} else {
 					m.status = "Scene updated"
+					// Update Inactive flags directly instead of rebuilding UI
+					// This preserves the component state during drag operations
+					if modeSwitched {
+						m.updateSceneColorModeFlags(sceneID, lightID, false)
+					}
+					// Update brightness slider color temp in real-time
+					m.updateSceneBrightnessColorTemp(sceneID, lightID, v.Value)
 				}
 				return
 			}

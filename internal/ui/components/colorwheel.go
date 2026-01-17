@@ -34,6 +34,10 @@ type ColorWheel struct {
 
 	// Grayscale renders the wheel in grayscale (for inactive state)
 	Grayscale bool
+
+	// Brightness dims the wheel colors (0-100, default 100)
+	// At 100% brightness, colors are full. At 0%, colors are at 50% luminance.
+	Brightness int
 }
 
 // NewColorWheel creates a new color wheel with standard dimensions.
@@ -319,6 +323,14 @@ func (w *ColorWheel) Render() string {
 				r, g, b := int(cr), int(cg), int(cb)
 				lum := (299*r + 587*g + 114*b) / 1000
 				cr, cg, cb = uint8(lum), uint8(lum), uint8(lum)
+			}
+
+			// Apply brightness dimming (0% brightness → 50% luminance, 100% → 100%)
+			if w.Brightness < 100 && w.Brightness >= 0 {
+				factor := 0.5 + float64(w.Brightness)/200.0 // 0→0.5, 100→1.0
+				cr = uint8(float64(cr) * factor)
+				cg = uint8(float64(cg) * factor)
+				cb = uint8(float64(cb) * factor)
 			}
 
 			blockColor := fmt.Sprintf("#%02X%02X%02X", cr, cg, cb)

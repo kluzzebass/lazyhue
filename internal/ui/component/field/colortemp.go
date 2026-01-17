@@ -56,6 +56,14 @@ func (c *ColorTempSliderComponent) renderColorTempBar(value, min, max, width int
 			r, g, b = lum, lum, lum
 		}
 
+		// Apply brightness dimming (0% brightness → 50% luminance, 100% → 100%)
+		if c.Brightness < 100 && c.Brightness >= 0 {
+			factor := 0.5 + float64(c.Brightness)/200.0 // 0→0.5, 100→1.0
+			r = int(float64(r) * factor)
+			g = int(float64(g) * factor)
+			b = int(float64(b) * factor)
+		}
+
 		char := "─"
 		if j == pos {
 			char = "●"

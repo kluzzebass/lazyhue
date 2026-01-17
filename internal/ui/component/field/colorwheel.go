@@ -37,6 +37,9 @@ type ColorWheelComponent struct {
 
 	// Inactive renders the wheel in grayscale (not the active color mode)
 	Inactive bool
+
+	// Brightness dims the wheel based on light brightness (0-100)
+	Brightness int
 }
 
 // NewColorWheelComponent creates a new color wheel component.
@@ -45,10 +48,11 @@ func NewColorWheelComponent(id, label string, colorX, colorY float64, styles *ui
 	wheel.SetColor(colorX, colorY)
 
 	return &ColorWheelComponent{
-		BaseField: NewBaseField(id, label, styles, zones),
-		ColorX:    colorX,
-		ColorY:    colorY,
-		Wheel:     wheel,
+		BaseField:  NewBaseField(id, label, styles, zones),
+		ColorX:     colorX,
+		ColorY:     colorY,
+		Wheel:      wheel,
+		Brightness: 100, // Full brightness by default
 	}
 }
 
@@ -357,6 +361,8 @@ func (c *ColorWheelComponent) renderWheelControl() string {
 
 	// Set grayscale mode based on inactive state
 	c.Wheel.Grayscale = c.Inactive
+	// Set brightness for dimming effect
+	c.Wheel.Brightness = c.Brightness
 
 	wheelLines := strings.Split(c.Wheel.Render(), "\n")
 	for row, line := range wheelLines {
