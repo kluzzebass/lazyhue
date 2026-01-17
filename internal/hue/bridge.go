@@ -62,17 +62,36 @@ type Bridge struct {
 	colorTempDebounce  map[string]*time.Timer // lightID -> timer
 	colorDebounce      map[string]*time.Timer // lightID -> timer
 	debounceMu         sync.Mutex             // Protects debounce timers
+
+	// Scene action debouncing - accumulates changes before sending
+	sceneDebounce map[string]*sceneDebounceEntry // "sceneID:lightID" -> entry
+}
+
+// sceneDebounceEntry holds a debounce timer and pending modifications for a scene action.
+type sceneDebounceEntry struct {
+	timer   *time.Timer
+	pending *pendingSceneAction
+}
+
+// pendingSceneAction holds accumulated modifications for a scene action.
+type pendingSceneAction struct {
+	on         *bool
+	brightness *float32
+	colorX     *float32
+	colorY     *float32
+	colorTemp  *int
 }
 
 // NewBridge creates a new bridge connection.
 func NewBridge(info BridgeInfo) *Bridge {
 	return &Bridge{
-		Info:              info,
-		Status:            StatusDisconnected,
-		state:             NewBridgeState(),
+		Info:               info,
+		Status:             StatusDisconnected,
+		state:              NewBridgeState(),
 		brightnessDebounce: make(map[string]*time.Timer),
 		colorTempDebounce:  make(map[string]*time.Timer),
 		colorDebounce:      make(map[string]*time.Timer),
+		sceneDebounce:      make(map[string]*sceneDebounceEntry),
 	}
 }
 

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"time"
 
 	"github.com/kluzzebass/lazyhue/internal/hueclient"
 )
@@ -370,14 +371,9 @@ func (b *Bridge) CreateSceneFromCurrentState(groupID string, isZone bool, sceneN
 	return err
 }
 
-// sceneActionModifier is a function that modifies a scene action in place.
-type sceneActionModifier func(action *sceneActionUpdate)
-
-// buildSceneActionsWithModification builds a complete actions list from an existing scene,
-// applying a modification to the action with the specified target lightID.
-// This is needed because the Hue API replaces ALL actions when you send an update,
-// so we must include all existing actions with the modification applied.
-func (b *Bridge) buildSceneActionsWithModification(sceneID, lightID string, modifier sceneActionModifier) ([]sceneActionUpdate, error) {
+// buildSceneActionsWithPending builds a complete actions list from an existing scene,
+// applying all pending modifications for the specified light.
+func (b *Bridge) buildSceneActionsWithPending(sceneID, lightID string, pending *pendingSceneAction) ([]sceneActionUpdate, error) {
 	scene, ok := b.state.GetScene(sceneID)
 	if !ok {
 		return nil, fmt.Errorf("scene %s not found", sceneID)
@@ -418,9 +414,20 @@ func (b *Bridge) buildSceneActionsWithModification(sceneID, lightID string, modi
 			action.Action.ColorTemperature = &sceneColorTemperatureUpdate{Mirek: &mirek}
 		}
 
-		// Apply modification if this is the target light
+		// Apply pending modifications if this is the target light
 		if existingAction.Target.Rid == lightID {
-			modifier(&action)
+			if pending.on != nil {
+				action.Action.On = &sceneOnUpdate{On: pending.on}
+			}
+			if pending.brightness != nil {
+				action.Action.Dimming = &sceneDimmingUpdate{Brightness: pending.brightness}
+			}
+			if pending.colorX != nil && pending.colorY != nil {
+				action.Action.Color = &sceneColorUpdate{Xy: &sceneXYUpdate{X: *pending.colorX, Y: *pending.colorY}}
+			}
+			if pending.colorTemp != nil {
+				action.Action.ColorTemperature = &sceneColorTemperatureUpdate{Mirek: pending.colorTemp}
+			}
 			found = true
 		}
 
@@ -434,7 +441,118 @@ func (b *Bridge) buildSceneActionsWithModification(sceneID, lightID string, modi
 	return actions, nil
 }
 
+// sendDebouncedSceneUpdate sends the accumulated scene action changes.
+func (b *Bridge) sendDebouncedSceneUpdate(sceneID, lightID string, pending *pendingSceneAction) {
+	b.mu.RLock()
+	client := b.client
+	b.mu.RUnlock()
+
+	if client == nil {
+		return
+	}
+
+	sceneName := "Unknown"
+	lightName := "Unknown"
+	if scene, ok := b.state.GetScene(sceneID); ok {
+		sceneName = b.state.GetSceneName(scene)
+	}
+	if light, ok := b.state.GetLight(lightID); ok {
+		lightName = b.state.GetLightName(light)
+	}
+
+	// Build description of what changed
+	var changes []string
+	if pending.on != nil {
+		if *pending.on {
+			changes = append(changes, "on")
+		} else {
+			changes = append(changes, "off")
+		}
+	}
+	if pending.brightness != nil {
+		changes = append(changes, fmt.Sprintf("brightness %.0f%%", *pending.brightness))
+	}
+	if pending.colorX != nil && pending.colorY != nil {
+		changes = append(changes, fmt.Sprintf("color (%.3f, %.3f)", *pending.colorX, *pending.colorY))
+	}
+	if pending.colorTemp != nil {
+		kelvin := 1000000 / *pending.colorTemp
+		changes = append(changes, fmt.Sprintf("color temp %dK", kelvin))
+	}
+	if len(changes) > 0 {
+		b.logRequest(fmt.Sprintf("Scene \"%s\": %s → %s", sceneName, lightName, changes[0]))
+	}
+
+	// Build complete actions list with pending modifications
+	actions, err := b.buildSceneActionsWithPending(sceneID, lightID, pending)
+	if err != nil {
+		b.logError(fmt.Sprintf("Scene update failed: %v", err))
+		return
+	}
+
+	body := struct {
+		Actions []sceneActionUpdate `json:"actions"`
+	}{
+		Actions: actions,
+	}
+
+	jsonBody, err := json.Marshal(body)
+	if err != nil {
+		b.logError(fmt.Sprintf("Scene update marshal failed: %v", err))
+		return
+	}
+
+	resp, err := client.UpdateSceneWithBody(context.Background(), toResourceId(sceneID), "application/json", bytes.NewReader(jsonBody))
+	if err != nil {
+		b.logError(fmt.Sprintf("Scene update failed: %v", err))
+		return
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 400 {
+		respBody, _ := io.ReadAll(resp.Body)
+		b.logError(fmt.Sprintf("Scene update failed: HTTP %d: %s", resp.StatusCode, string(respBody)))
+	}
+}
+
+// scheduleSceneUpdate schedules a debounced scene action update.
+// Multiple rapid changes to the same scene/light are accumulated and sent in one API call.
+func (b *Bridge) scheduleSceneUpdate(sceneID, lightID string, update func(p *pendingSceneAction)) {
+	key := sceneID + ":" + lightID
+
+	b.debounceMu.Lock()
+	defer b.debounceMu.Unlock()
+
+	entry, exists := b.sceneDebounce[key]
+	if exists {
+		// Stop existing timer and accumulate the change
+		entry.timer.Stop()
+	} else {
+		// Create new entry with pending action
+		entry = &sceneDebounceEntry{
+			pending: &pendingSceneAction{},
+		}
+		b.sceneDebounce[key] = entry
+	}
+
+	// Apply the update to pending
+	update(entry.pending)
+
+	// Schedule the API call
+	entry.timer = time.AfterFunc(50*time.Millisecond, func() {
+		// Copy pending data before cleanup
+		b.debounceMu.Lock()
+		pendingCopy := *entry.pending
+		delete(b.sceneDebounce, key)
+		b.debounceMu.Unlock()
+
+		// Send the update
+		b.sendDebouncedSceneUpdate(sceneID, lightID, &pendingCopy)
+	})
+}
+
 // UpdateSceneActionOn updates the on/off state for a light within a scene.
+// Rapid calls are debounced - changes are accumulated and sent in one API call.
 func (b *Bridge) UpdateSceneActionOn(sceneID, lightID string, on bool) error {
 	b.mu.RLock()
 	client := b.client
@@ -444,55 +562,16 @@ func (b *Bridge) UpdateSceneActionOn(sceneID, lightID string, on bool) error {
 		return ErrAuthFailed
 	}
 
-	sceneName := "Unknown"
-	lightName := "Unknown"
-	if scene, ok := b.state.GetScene(sceneID); ok {
-		sceneName = b.state.GetSceneName(scene)
-	}
-	if light, ok := b.state.GetLight(lightID); ok {
-		lightName = b.state.GetLightName(light)
-	}
-
-	state := "off"
-	if on {
-		state = "on"
-	}
-	b.logRequest(fmt.Sprintf("Scene \"%s\": setting %s to %s", sceneName, lightName, state))
-
-	// Build complete actions list with modification
-	actions, err := b.buildSceneActionsWithModification(sceneID, lightID, func(action *sceneActionUpdate) {
-		action.Action.On = &sceneOnUpdate{On: &on}
+	onCopy := on
+	b.scheduleSceneUpdate(sceneID, lightID, func(p *pendingSceneAction) {
+		p.on = &onCopy
 	})
-	if err != nil {
-		return err
-	}
-
-	body := struct {
-		Actions []sceneActionUpdate `json:"actions"`
-	}{
-		Actions: actions,
-	}
-
-	jsonBody, err := json.Marshal(body)
-	if err != nil {
-		return fmt.Errorf("failed to marshal scene update: %w", err)
-	}
-
-	resp, err := client.UpdateSceneWithBody(context.Background(), toResourceId(sceneID), "application/json", bytes.NewReader(jsonBody))
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode >= 400 {
-		respBody, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("scene update failed: HTTP %d: %s", resp.StatusCode, string(respBody))
-	}
 
 	return nil
 }
 
 // UpdateSceneActionBrightness updates the brightness for a light within a scene.
+// Rapid calls are debounced - changes are accumulated and sent in one API call.
 func (b *Bridge) UpdateSceneActionBrightness(sceneID, lightID string, brightness float32) error {
 	b.mu.RLock()
 	client := b.client
@@ -502,51 +581,16 @@ func (b *Bridge) UpdateSceneActionBrightness(sceneID, lightID string, brightness
 		return ErrAuthFailed
 	}
 
-	sceneName := "Unknown"
-	lightName := "Unknown"
-	if scene, ok := b.state.GetScene(sceneID); ok {
-		sceneName = b.state.GetSceneName(scene)
-	}
-	if light, ok := b.state.GetLight(lightID); ok {
-		lightName = b.state.GetLightName(light)
-	}
-
-	b.logRequest(fmt.Sprintf("Scene \"%s\": setting %s brightness to %.0f%%", sceneName, lightName, brightness))
-
-	// Build complete actions list with modification
-	actions, err := b.buildSceneActionsWithModification(sceneID, lightID, func(action *sceneActionUpdate) {
-		action.Action.Dimming = &sceneDimmingUpdate{Brightness: &brightness}
+	briCopy := brightness
+	b.scheduleSceneUpdate(sceneID, lightID, func(p *pendingSceneAction) {
+		p.brightness = &briCopy
 	})
-	if err != nil {
-		return err
-	}
-
-	body := struct {
-		Actions []sceneActionUpdate `json:"actions"`
-	}{
-		Actions: actions,
-	}
-
-	jsonBody, err := json.Marshal(body)
-	if err != nil {
-		return fmt.Errorf("failed to marshal scene update: %w", err)
-	}
-
-	resp, err := client.UpdateSceneWithBody(context.Background(), toResourceId(sceneID), "application/json", bytes.NewReader(jsonBody))
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode >= 400 {
-		respBody, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("scene update failed: HTTP %d: %s", resp.StatusCode, string(respBody))
-	}
 
 	return nil
 }
 
 // UpdateSceneActionColor updates the color (XY) for a light within a scene.
+// Rapid calls are debounced - changes are accumulated and sent in one API call.
 func (b *Bridge) UpdateSceneActionColor(sceneID, lightID string, x, y float32) error {
 	b.mu.RLock()
 	client := b.client
@@ -556,51 +600,17 @@ func (b *Bridge) UpdateSceneActionColor(sceneID, lightID string, x, y float32) e
 		return ErrAuthFailed
 	}
 
-	sceneName := "Unknown"
-	lightName := "Unknown"
-	if scene, ok := b.state.GetScene(sceneID); ok {
-		sceneName = b.state.GetSceneName(scene)
-	}
-	if light, ok := b.state.GetLight(lightID); ok {
-		lightName = b.state.GetLightName(light)
-	}
-
-	b.logRequest(fmt.Sprintf("Scene \"%s\": setting %s color to (%.3f, %.3f)", sceneName, lightName, x, y))
-
-	// Build complete actions list with modification
-	actions, err := b.buildSceneActionsWithModification(sceneID, lightID, func(action *sceneActionUpdate) {
-		action.Action.Color = &sceneColorUpdate{Xy: &sceneXYUpdate{X: x, Y: y}}
+	xCopy, yCopy := x, y
+	b.scheduleSceneUpdate(sceneID, lightID, func(p *pendingSceneAction) {
+		p.colorX = &xCopy
+		p.colorY = &yCopy
 	})
-	if err != nil {
-		return err
-	}
-
-	body := struct {
-		Actions []sceneActionUpdate `json:"actions"`
-	}{
-		Actions: actions,
-	}
-
-	jsonBody, err := json.Marshal(body)
-	if err != nil {
-		return fmt.Errorf("failed to marshal scene update: %w", err)
-	}
-
-	resp, err := client.UpdateSceneWithBody(context.Background(), toResourceId(sceneID), "application/json", bytes.NewReader(jsonBody))
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode >= 400 {
-		respBody, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("scene update failed: HTTP %d: %s", resp.StatusCode, string(respBody))
-	}
 
 	return nil
 }
 
 // UpdateSceneActionColorTemp updates the color temperature for a light within a scene.
+// Rapid calls are debounced - changes are accumulated and sent in one API call.
 func (b *Bridge) UpdateSceneActionColorTemp(sceneID, lightID string, mirek int) error {
 	b.mu.RLock()
 	client := b.client
@@ -610,48 +620,10 @@ func (b *Bridge) UpdateSceneActionColorTemp(sceneID, lightID string, mirek int) 
 		return ErrAuthFailed
 	}
 
-	sceneName := "Unknown"
-	lightName := "Unknown"
-	if scene, ok := b.state.GetScene(sceneID); ok {
-		sceneName = b.state.GetSceneName(scene)
-	}
-	if light, ok := b.state.GetLight(lightID); ok {
-		lightName = b.state.GetLightName(light)
-	}
-
-	// Convert mirek to Kelvin for display (K = 1,000,000 / mirek)
-	kelvin := 1000000 / mirek
-	b.logRequest(fmt.Sprintf("Scene \"%s\": setting %s color temp to %dK", sceneName, lightName, kelvin))
-
-	// Build complete actions list with modification
-	actions, err := b.buildSceneActionsWithModification(sceneID, lightID, func(action *sceneActionUpdate) {
-		action.Action.ColorTemperature = &sceneColorTemperatureUpdate{Mirek: &mirek}
+	mirekCopy := mirek
+	b.scheduleSceneUpdate(sceneID, lightID, func(p *pendingSceneAction) {
+		p.colorTemp = &mirekCopy
 	})
-	if err != nil {
-		return err
-	}
-
-	body := struct {
-		Actions []sceneActionUpdate `json:"actions"`
-	}{
-		Actions: actions,
-	}
-
-	jsonBody, err := json.Marshal(body)
-	if err != nil {
-		return fmt.Errorf("failed to marshal scene update: %w", err)
-	}
-
-	resp, err := client.UpdateSceneWithBody(context.Background(), toResourceId(sceneID), "application/json", bytes.NewReader(jsonBody))
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode >= 400 {
-		respBody, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("scene update failed: HTTP %d: %s", resp.StatusCode, string(respBody))
-	}
 
 	return nil
 }
