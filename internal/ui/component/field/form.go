@@ -454,6 +454,8 @@ func getFieldZoneID(c component.Component) string {
 		return v.ZoneID()
 	case *RGBComponent:
 		return v.ZoneID()
+	case *HSVComponent:
+		return v.ZoneID()
 	}
 	return ""
 }
@@ -479,6 +481,8 @@ func isFieldEditing(c component.Component) bool {
 	case *HSLComponent:
 		return v.Editing
 	case *RGBComponent:
+		return v.Editing
+	case *HSVComponent:
 		return v.Editing
 	}
 	return false

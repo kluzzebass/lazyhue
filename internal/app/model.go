@@ -14,6 +14,7 @@ import (
 	"github.com/kluzzebass/lazyhue/internal/hue"
 	"github.com/kluzzebass/lazyhue/internal/ui"
 	"github.com/kluzzebass/lazyhue/internal/ui/component"
+	"github.com/kluzzebass/lazyhue/internal/ui/component/field"
 	gridlayout "github.com/kluzzebass/lazyhue/internal/ui/component/layout"
 	"github.com/kluzzebass/lazyhue/internal/ui/layout"
 	"github.com/kluzzebass/lazyhue/internal/ui/panels"
@@ -122,6 +123,10 @@ type Model struct {
 	// Help display
 	showHelp     bool // Whether help is displayed in detail panel
 	showActivity bool // Whether activity log panel is visible
+	showTestPage bool // Whether test page is displayed in detail panel
+
+	// Test page component (for development)
+	testLightControl *field.LightControlComponent
 
 	// State restoration
 	stateRestored      bool   // Whether UI state has been restored from disk

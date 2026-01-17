@@ -156,6 +156,12 @@ func (m *Model) updateSceneBrightnessColorTemp(sceneID, lightID string, mirek in
 
 // updateDetailContent updates the detail viewport content based on the selected node.
 func (m *Model) updateDetailContent() {
+	// If showing test page, display component test content
+	if m.showTestPage {
+		m.detailViewport.SetContent(m.buildTestPageContent())
+		return
+	}
+
 	// If showing help, display help content
 	if m.showHelp {
 		m.detailViewport.SetContent(m.buildHelpContent())
@@ -1325,6 +1331,92 @@ func (m *Model) handleNewFieldChange(msg field.FieldChangedMsg) {
 			m.status = fmt.Sprintf("Gradient points: %d", len(points))
 			err = bridge.SetLightGradientPoints(gradientLightID, points)
 		}
+	} else if strings.HasPrefix(msg.FieldID, FieldPrefixLightControl) {
+		// Unified light control component - format: lc:{lightID}:{fieldType}
+		suffix := strings.TrimPrefix(msg.FieldID, FieldPrefixLightControl)
+		parts := strings.SplitN(suffix, ":", 2)
+		if len(parts) == 2 {
+			lcLightID := parts[0]
+			lcFieldType := parts[1]
+
+			switch lcFieldType {
+			case "on":
+				if v, ok := msg.Value.(field.ToggleValue); ok {
+					err = bridge.SetLightOn(lcLightID, v.On)
+				}
+			case "identify":
+				if _, ok := msg.Value.(field.ButtonValue); ok {
+					// Get the device ID for the light
+					state := bridge.GetState()
+					if state != nil {
+						if light, ok := state.GetLight(lcLightID); ok {
+							if light.Owner.Rid != "" {
+								err = bridge.IdentifyDevice(light.Owner.Rid)
+								m.status = fmt.Sprintf("Identifying light...")
+							}
+						}
+					}
+				}
+			case "brightness":
+				if v, ok := msg.Value.(field.SliderValue); ok {
+					err = bridge.SetLightBrightness(lcLightID, float64(v.Value))
+				}
+			case "colortemp":
+				if v, ok := msg.Value.(field.SliderValue); ok {
+					err = bridge.SetLightColorTemperature(lcLightID, v.Value)
+				}
+			case "color":
+				if v, ok := msg.Value.(field.ColorValue); ok {
+					err = bridge.SetLightColor(lcLightID, v.X, v.Y)
+				}
+			case "color-rgb":
+				if v, ok := msg.Value.(field.RGBValue); ok {
+					// Convert RGB to XY
+					x, y := ui.RGBIntToXY(v.Red, v.Green, v.Blue)
+					err = bridge.SetLightColor(lcLightID, x, y)
+				}
+			case "color-hsl":
+				if v, ok := msg.Value.(field.HSLValue); ok {
+					// Convert HSL to XY
+					x, y := ui.HSLToXY(v.Hue, v.Saturation, v.Lightness)
+					err = bridge.SetLightColor(lcLightID, x, y)
+				}
+			case "effect":
+				if v, ok := msg.Value.(field.SelectValue); ok {
+					state := bridge.GetState()
+					if state != nil {
+						if light, ok := state.GetLight(lcLightID); ok {
+							if light.Effects != nil && len(light.Effects.EffectValues) > 0 {
+								effects := light.Effects.EffectValues
+								if v.Index >= 0 && v.Index < len(effects) {
+									effect := hueclient.Effect(effects[v.Index])
+									err = bridge.SetLightEffect(lcLightID, effect)
+								}
+							}
+						}
+					}
+				}
+			case "gradient-mode":
+				if v, ok := msg.Value.(field.SelectValue); ok {
+					state := bridge.GetState()
+					if state != nil {
+						if light, ok := state.GetLight(lcLightID); ok {
+							if light.Gradient != nil && len(light.Gradient.ModeValues) > 0 {
+								modes := light.Gradient.ModeValues
+								if v.Index >= 0 && v.Index < len(modes) {
+									err = bridge.SetLightGradientMode(lcLightID, hueclient.LightGetGradientMode(modes[v.Index]))
+								}
+							}
+						}
+					}
+				}
+			case "gradient-points":
+				if v, ok := msg.Value.(field.GradientValue); ok {
+					points := convertToAPIPoints(v.Points)
+					err = bridge.SetLightGradientPoints(lcLightID, points)
+				}
+			}
+		}
 	} else {
 		// Handle regular fields
 		switch msg.FieldID {
@@ -1370,4 +1462,57 @@ func (m *Model) handleNewFieldChange(msg field.FieldChangedMsg) {
 		// Rebuild tree to update indicators
 		m.rebuildTreeForActiveTab()
 	}
+}
+
+// initTestLightControl creates the test light control component with mock data.
+func (m *Model) initTestLightControl() {
+	testState := field.LightControlState{
+		On:         true,
+		Brightness: 75,
+		ColorTemp:  350,
+		MinMirek:   153,
+		MaxMirek:   500,
+		ColorX:     0.45,
+		ColorY:     0.41,
+		MirekValid: false, // Color mode active
+		EffectIndex: 0,
+		Effects:    []string{"no_effect", "candle", "fire", "sparkle", "glisten", "prism"},
+		GradientPoints: []field.GradientPoint{
+			{X: 0.65, Y: 0.35},
+			{X: 0.25, Y: 0.35},
+		},
+		GradientMode:      0,
+		GradientModes:     []string{"interpolated_palette", "interpolated_palette_mirrored", "random_pixelated"},
+		MaxGradientPoints: 5,
+		HasDimming:   true,
+		HasColor:     true,
+		HasColorTemp: true,
+		HasEffects:   true,
+		HasGradient:  true,
+	}
+
+	m.testLightControl = field.NewLightControlComponent("test-light", "test-bridge", "Test Light", &m.styles, m.zones)
+	m.testLightControl.SetState(testState)
+	m.testLightControl.Focus()
+}
+
+// buildTestPageContent builds test page content for component development.
+func (m *Model) buildTestPageContent() string {
+	var sb strings.Builder
+
+	sb.WriteString(m.styles.Title.Render("Component Test Page"))
+	sb.WriteString("\n\n")
+	sb.WriteString(m.styles.Dimmed.Render("Press 't' to close this test page"))
+	sb.WriteString("\n\n")
+
+	// Render the stored component
+	if m.testLightControl != nil {
+		sb.WriteString(m.testLightControl.ViewControl())
+	} else {
+		sb.WriteString("(Component not initialized)")
+	}
+	sb.WriteString("\n\n")
+	sb.WriteString(m.styles.Dimmed.Render("Navigate with j/k, adjust with h/l or arrows"))
+
+	return sb.String()
 }

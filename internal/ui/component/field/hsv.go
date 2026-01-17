@@ -11,21 +11,21 @@ import (
 	zone "github.com/lrstanley/bubblezone/v2"
 )
 
-// HSLComponent is an HSL color picker with 3 sliders.
-type HSLComponent struct {
+// HSVComponent is an HSV color picker with 3 sliders.
+type HSVComponent struct {
 	*BaseField
 
-	// Current HSL values
+	// Current HSV values
 	Hue        int // 0-360
 	Saturation int // 0-100
-	Lightness  int // 0-100
+	Value      int // 0-100
 
 	// Original values for cancel
 	OriginalHue        int
 	OriginalSaturation int
-	OriginalLightness  int
+	OriginalValue      int
 
-	// Which slider is focused when editing (0=H, 1=S, 2=L)
+	// Which slider is focused when editing (0=H, 1=S, 2=V)
 	SliderFocus int
 
 	// Slider bar width
@@ -42,33 +42,33 @@ type HSLComponent struct {
 	DragZoneInfo *zone.ZoneInfo
 }
 
-// NewHSLComponent creates a new HSL color picker component.
-func NewHSLComponent(id, label string, hue, saturation, lightness int, styles *ui.Styles, zones *zone.Manager) *HSLComponent {
-	return &HSLComponent{
+// NewHSVComponent creates a new HSV color picker component.
+func NewHSVComponent(id, label string, hue, saturation, value int, styles *ui.Styles, zones *zone.Manager) *HSVComponent {
+	return &HSVComponent{
 		BaseField:   NewBaseField(id, label, styles, zones),
 		Hue:         hue,
 		Saturation:  saturation,
-		Lightness:   lightness,
+		Value:       value,
 		sliderWidth: 20,
 		ShowSwatch:  true,
 	}
 }
 
-// SetHSL sets the HSL values.
-func (h *HSLComponent) SetHSL(hue, saturation, lightness int) {
+// SetHSV sets the HSV values.
+func (h *HSVComponent) SetHSV(hue, saturation, value int) {
 	h.Hue = hue
 	h.Saturation = saturation
-	h.Lightness = lightness
+	h.Value = value
 }
 
-// Update handles events for the HSL picker.
-func (h *HSLComponent) Update(msg tea.Msg) (component.Component, tea.Cmd) {
+// Update handles events for the HSV picker.
+func (h *HSVComponent) Update(msg tea.Msg) (component.Component, tea.Cmd) {
 	// Events are handled via RouteEvent
 	return h, nil
 }
 
 // RouteEvent routes events to this component.
-func (h *HSLComponent) RouteEvent(msg tea.Msg) (bool, tea.Cmd) {
+func (h *HSVComponent) RouteEvent(msg tea.Msg) (bool, tea.Cmd) {
 	if h.ReadOnly || h.Inactive {
 		return false, nil
 	}
@@ -120,7 +120,7 @@ func (h *HSLComponent) RouteEvent(msg tea.Msg) (bool, tea.Cmd) {
 
 	case tea.MouseClickMsg:
 		if msg.Button == tea.MouseLeft {
-			for row := 0; row < 3; row++ {
+			for row := range 3 {
 				rowZoneID := fmt.Sprintf("%s-row-%d", h.ZoneID(), row)
 				if h.Zones != nil {
 					if z := h.Zones.Get(rowZoneID); z != nil && z.InBounds(msg) {
@@ -151,7 +151,7 @@ func (h *HSLComponent) RouteEvent(msg tea.Msg) (bool, tea.Cmd) {
 	return false, nil
 }
 
-func (h *HSLComponent) updateFromMouseX(mouseX int) {
+func (h *HSVComponent) updateFromMouseX(mouseX int) {
 	if h.DragZoneInfo == nil {
 		return
 	}
@@ -169,34 +169,34 @@ func (h *HSLComponent) updateFromMouseX(mouseX int) {
 		h.Hue = clickPos * 360 / (h.sliderWidth - 1)
 	case 1: // Saturation (0-100)
 		h.Saturation = clickPos * 100 / (h.sliderWidth - 1)
-	case 2: // Lightness (0-100)
-		h.Lightness = clickPos * 100 / (h.sliderWidth - 1)
+	case 2: // Value (0-100)
+		h.Value = clickPos * 100 / (h.sliderWidth - 1)
 	}
 }
 
-func (h *HSLComponent) saveOriginal() {
+func (h *HSVComponent) saveOriginal() {
 	h.Editing = true
 	h.OriginalHue = h.Hue
 	h.OriginalSaturation = h.Saturation
-	h.OriginalLightness = h.Lightness
+	h.OriginalValue = h.Value
 }
 
-func (h *HSLComponent) restoreOriginal() {
+func (h *HSVComponent) restoreOriginal() {
 	h.Hue = h.OriginalHue
 	h.Saturation = h.OriginalSaturation
-	h.Lightness = h.OriginalLightness
+	h.Value = h.OriginalValue
 }
 
-func (h *HSLComponent) emitChange() tea.Cmd {
+func (h *HSVComponent) emitChange() tea.Cmd {
 	return func() tea.Msg {
 		return FieldChangedMsg{
 			FieldID: h.ID,
-			Value:   HSLValue{Hue: h.Hue, Saturation: h.Saturation, Lightness: h.Lightness},
+			Value:   HSVValue{Hue: h.Hue, Saturation: h.Saturation, Value: h.Value},
 		}
 	}
 }
 
-func (h *HSLComponent) adjustSlider(direction int) {
+func (h *HSVComponent) adjustSlider(direction int) {
 	step := 5
 	switch h.SliderFocus {
 	case 0: // Hue
@@ -204,12 +204,12 @@ func (h *HSLComponent) adjustSlider(direction int) {
 		h.Hue = clamp(h.Hue+direction*step, 0, 360)
 	case 1: // Saturation
 		h.Saturation = clamp(h.Saturation+direction*step, 0, 100)
-	case 2: // Lightness
-		h.Lightness = clamp(h.Lightness+direction*step, 0, 100)
+	case 2: // Value
+		h.Value = clamp(h.Value+direction*step, 0, 100)
 	}
 }
 
-func (h *HSLComponent) handleSliderClick(msg tea.MouseClickMsg, row int, z *zone.ZoneInfo) (component.Component, tea.Cmd) {
+func (h *HSVComponent) handleSliderClick(msg tea.MouseClickMsg, row int, z *zone.ZoneInfo) (component.Component, tea.Cmd) {
 	if !h.Editing {
 		h.saveOriginal()
 	}
@@ -233,8 +233,8 @@ func (h *HSLComponent) handleSliderClick(msg tea.MouseClickMsg, row int, z *zone
 		h.Hue = clickPos * 360 / (h.sliderWidth - 1)
 	case 1: // Saturation (0-100)
 		h.Saturation = clickPos * 100 / (h.sliderWidth - 1)
-	case 2: // Lightness (0-100)
-		h.Lightness = clickPos * 100 / (h.sliderWidth - 1)
+	case 2: // Value (0-100)
+		h.Value = clickPos * 100 / (h.sliderWidth - 1)
 	}
 
 	// Start drag mode
@@ -248,16 +248,16 @@ func (h *HSLComponent) handleSliderClick(msg tea.MouseClickMsg, row int, z *zone
 }
 
 // FieldHeight returns the number of rows this component takes up.
-func (h *HSLComponent) FieldHeight() int {
-	return 3 // Always 3 rows for H, S, L sliders
+func (h *HSVComponent) FieldHeight() int {
+	return 3 // Always 3 rows for H, S, V sliders
 }
 
 // ViewControl renders only the control portion (no label).
 // Returns 3 lines separated by newlines.
-func (h *HSLComponent) ViewControl() string {
+func (h *HSVComponent) ViewControl() string {
 	var out strings.Builder
 
-	for row := 0; row < 3; row++ {
+	for row := range 3 {
 		if row > 0 {
 			out.WriteString("\n")
 		}
@@ -281,8 +281,8 @@ func (h *HSLComponent) ViewControl() string {
 	return out.String()
 }
 
-// View renders the HSL picker (label + control for backwards compatibility).
-func (h *HSLComponent) View() string {
+// View renders the HSV picker (label + control for backwards compatibility).
+func (h *HSVComponent) View() string {
 	labelStr := h.Label
 	if h.MaxLabelWidth > 0 {
 		labelStr = fmt.Sprintf("%-*s", h.MaxLabelWidth, h.Label)
@@ -312,14 +312,14 @@ func (h *HSLComponent) View() string {
 	return out.String()
 }
 
-func (h *HSLComponent) renderSliderRow(row int) string {
-	rowLabels := []string{"H", "S", "L"}
-	rowValues := []int{h.Hue, h.Saturation, h.Lightness}
+func (h *HSVComponent) renderSliderRow(row int) string {
+	rowLabels := []string{"H", "S", "V"}
+	rowValues := []int{h.Hue, h.Saturation, h.Value}
 	rowMaxes := []int{360, 100, 100}
 
 	rowVal := rowValues[row]
 	rowMax := rowMaxes[row]
-	pos := rowVal * h.sliderWidth / maxInt(1, rowMax)
+	pos := rowVal * h.sliderWidth / max(1, rowMax)
 	if pos >= h.sliderWidth {
 		pos = h.sliderWidth - 1
 	}
@@ -327,7 +327,7 @@ func (h *HSLComponent) renderSliderRow(row int) string {
 	var bar string
 	switch row {
 	case 0: // Hue - rainbow gradient
-		for j := 0; j < h.sliderWidth; j++ {
+		for j := range h.sliderWidth {
 			hVal := j * 360 / h.sliderWidth
 			r, g, b := ui.HsvToRGB(hVal, 100, 100)
 			if h.Inactive {
@@ -342,9 +342,9 @@ func (h *HSLComponent) renderSliderRow(row int) string {
 		}
 
 	case 1: // Saturation - gray to full color
-		for j := 0; j < h.sliderWidth; j++ {
+		for j := range h.sliderWidth {
 			s := j * 100 / h.sliderWidth
-			r, g, b := ui.HSLToRGB(h.Hue, s, 50) // Use 50% lightness for saturation preview
+			r, g, b := ui.HsvToRGB(h.Hue, s, 100) // Full value for saturation preview
 			if h.Inactive {
 				gray := (int(r) + int(g) + int(b)) / 3
 				r, g, b = uint8(gray), uint8(gray), uint8(gray)
@@ -356,10 +356,10 @@ func (h *HSLComponent) renderSliderRow(row int) string {
 			bar += lipgloss.NewStyle().Foreground(lipgloss.Color(fmt.Sprintf("#%02x%02x%02x", r, g, b))).Render(char)
 		}
 
-	case 2: // Lightness - black to white through color
-		for j := 0; j < h.sliderWidth; j++ {
-			l := j * 100 / h.sliderWidth
-			r, g, b := ui.HSLToRGB(h.Hue, h.Saturation, l)
+	case 2: // Value - black to full color
+		for j := range h.sliderWidth {
+			v := j * 100 / h.sliderWidth
+			r, g, b := ui.HsvToRGB(h.Hue, h.Saturation, v)
 			if h.Inactive {
 				gray := (int(r) + int(g) + int(b)) / 3
 				r, g, b = uint8(gray), uint8(gray), uint8(gray)
@@ -380,7 +380,7 @@ func (h *HSLComponent) renderSliderRow(row int) string {
 	}
 
 	// Color preview stripe
-	pr, pg, pb := ui.HSLToRGB(h.Hue, h.Saturation, h.Lightness)
+	pr, pg, pb := ui.HsvToRGB(h.Hue, h.Saturation, h.Value)
 	colorHex := fmt.Sprintf("#%02x%02x%02x", pr, pg, pb)
 	colorStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(colorHex))
 	bgStyle := lipgloss.NewStyle().Background(lipgloss.Color(colorHex))

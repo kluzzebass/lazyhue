@@ -390,6 +390,224 @@ func RenderBrightnessIndicatorFromHex(brightness float64, hexColor string) strin
 	return RenderBrightnessIndicator(brightness, lipgloss.Color(hexColor))
 }
 
+// RGBToXY converts RGB values (0-255) to CIE XY color coordinates.
+// This is the reverse of XyToRGB, used for converting user color inputs back to XY.
+func RGBToXY(r, g, b uint8) (x, y float64) {
+	// Normalize to 0-1
+	rFloat := float64(r) / 255.0
+	gFloat := float64(g) / 255.0
+	bFloat := float64(b) / 255.0
+
+	// Apply gamma correction
+	applyGamma := func(v float64) float64 {
+		if v > 0.04045 {
+			return math.Pow((v+0.055)/1.055, 2.4)
+		}
+		return v / 12.92
+	}
+
+	rFloat = applyGamma(rFloat)
+	gFloat = applyGamma(gFloat)
+	bFloat = applyGamma(bFloat)
+
+	// Convert to XYZ using Wide RGB D65 matrix (inverse of what's in XyToRGB)
+	X := rFloat*0.4124564 + gFloat*0.3575761 + bFloat*0.1804375
+	Y := rFloat*0.2126729 + gFloat*0.7151522 + bFloat*0.0721750
+	Z := rFloat*0.0193339 + gFloat*0.1191920 + bFloat*0.9503041
+
+	// Convert to xy chromaticity
+	sum := X + Y + Z
+	if sum == 0 {
+		// Default to D65 white point for black
+		return 0.3127, 0.329
+	}
+
+	x = X / sum
+	y = Y / sum
+
+	// Clamp to valid range
+	x = ClampFloat(x, 0.0, 1.0)
+	y = ClampFloat(y, 0.0, 1.0)
+
+	return x, y
+}
+
+// HSLToRGB converts HSL values to RGB.
+// H: 0-360, S: 0-100, L: 0-100
+// Returns R, G, B in 0-255 range.
+func HSLToRGB(h, s, l int) (r, g, b uint8) {
+	// Normalize to 0-1
+	hf := float64(h%360) / 360.0
+	sf := float64(s) / 100.0
+	lf := float64(l) / 100.0
+
+	if sf == 0 {
+		// Achromatic (gray)
+		gray := uint8(lf * 255)
+		return gray, gray, gray
+	}
+
+	var q float64
+	if lf < 0.5 {
+		q = lf * (1 + sf)
+	} else {
+		q = lf + sf - lf*sf
+	}
+	p := 2*lf - q
+
+	hueToRGB := func(p, q, t float64) float64 {
+		if t < 0 {
+			t += 1
+		}
+		if t > 1 {
+			t -= 1
+		}
+		if t < 1.0/6.0 {
+			return p + (q-p)*6*t
+		}
+		if t < 0.5 {
+			return q
+		}
+		if t < 2.0/3.0 {
+			return p + (q-p)*(2.0/3.0-t)*6
+		}
+		return p
+	}
+
+	rf := hueToRGB(p, q, hf+1.0/3.0)
+	gf := hueToRGB(p, q, hf)
+	bf := hueToRGB(p, q, hf-1.0/3.0)
+
+	return uint8(rf * 255), uint8(gf * 255), uint8(bf * 255)
+}
+
+// RGBToHSL converts RGB values (0-255) to HSL.
+// Returns H (0-360), S (0-100), L (0-100).
+func RGBToHSL(r, g, b uint8) (h, s, l int) {
+	rf := float64(r) / 255.0
+	gf := float64(g) / 255.0
+	bf := float64(b) / 255.0
+
+	maxVal := math.Max(math.Max(rf, gf), bf)
+	minVal := math.Min(math.Min(rf, gf), bf)
+
+	lf := (maxVal + minVal) / 2.0
+
+	if maxVal == minVal {
+		// Achromatic
+		return 0, 0, int(lf * 100)
+	}
+
+	d := maxVal - minVal
+	var sf float64
+	if lf > 0.5 {
+		sf = d / (2.0 - maxVal - minVal)
+	} else {
+		sf = d / (maxVal + minVal)
+	}
+
+	var hf float64
+	switch maxVal {
+	case rf:
+		hf = (gf - bf) / d
+		if gf < bf {
+			hf += 6
+		}
+	case gf:
+		hf = (bf-rf)/d + 2
+	case bf:
+		hf = (rf-gf)/d + 4
+	}
+	hf /= 6.0
+
+	return int(hf * 360), int(sf * 100), int(lf * 100)
+}
+
+// XYToHSL converts CIE XY color to HSL.
+// Uses full brightness for the conversion.
+func XYToHSL(x, y float64) (h, s, l int) {
+	r, g, b := XyToRGB(x, y, 100)
+	return RGBToHSL(r, g, b)
+}
+
+// HSLToXY converts HSL to CIE XY color.
+func HSLToXY(h, s, l int) (x, y float64) {
+	r, g, b := HSLToRGB(h, s, l)
+	return RGBToXY(r, g, b)
+}
+
+// XYToRGBInt converts CIE XY to RGB as int values (0-255).
+func XYToRGBInt(x, y float64) (r, g, b int) {
+	ru, gu, bu := XyToRGB(x, y, 100)
+	return int(ru), int(gu), int(bu)
+}
+
+// RGBIntToXY converts RGB int values (0-255) to CIE XY.
+func RGBIntToXY(r, g, b int) (x, y float64) {
+	return RGBToXY(uint8(clampInt(r, 0, 255)), uint8(clampInt(g, 0, 255)), uint8(clampInt(b, 0, 255)))
+}
+
+// clampInt clamps an int to the given range.
+func clampInt(v, minV, maxV int) int {
+	if v < minV {
+		return minV
+	}
+	if v > maxV {
+		return maxV
+	}
+	return v
+}
+
+// RGBToHSV converts RGB values (0-255) to HSV.
+// Returns H (0-360), S (0-100), V (0-100).
+func RGBToHSV(r, g, b uint8) (h, s, v int) {
+	rf := float64(r) / 255.0
+	gf := float64(g) / 255.0
+	bf := float64(b) / 255.0
+
+	maxVal := math.Max(math.Max(rf, gf), bf)
+	minVal := math.Min(math.Min(rf, gf), bf)
+
+	vf := maxVal
+
+	if maxVal == minVal {
+		// Achromatic
+		return 0, 0, int(vf * 100)
+	}
+
+	d := maxVal - minVal
+	sf := d / maxVal
+
+	var hf float64
+	switch maxVal {
+	case rf:
+		hf = (gf - bf) / d
+		if gf < bf {
+			hf += 6
+		}
+	case gf:
+		hf = (bf-rf)/d + 2
+	case bf:
+		hf = (rf-gf)/d + 4
+	}
+	hf /= 6.0
+
+	return int(hf * 360), int(sf * 100), int(vf * 100)
+}
+
+// XYToHSV converts CIE XY color to HSV.
+// Uses full brightness for the conversion.
+func XYToHSV(x, y float64) (h, s, v int) {
+	r, g, b := XyToRGB(x, y, 100)
+	return RGBToHSV(r, g, b)
+}
+
+// HSVToXY converts HSV to CIE XY color.
+func HSVToXY(h, s, v int) (x, y float64) {
+	r, g, b := HsvToRGB(h, s, v)
+	return RGBToXY(r, g, b)
+}
+
 // GetLightColor extracts the RGB color from a light and returns it as a hex string.
 // Returns empty string if light is off or has no color information.
 func GetLightColor(light hueclient.LightGet) string {

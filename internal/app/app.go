@@ -35,6 +35,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	// Handle blink tick messages from grid component
 	if blinkMsg, ok := msg.(field.BlinkTickMsg); ok {
+		// Skip lightGrid blink handling when test page is active
+		if m.showTestPage && m.testLightControl != nil {
+			_, cmd := m.testLightControl.Update(blinkMsg)
+			if cmd != nil {
+				cmds = append(cmds, cmd)
+			}
+			m.updateDetailContent()
+			return m, tea.Batch(cmds...)
+		}
 		if m.lightGrid != nil {
 			_, cmd := m.lightGrid.Update(blinkMsg)
 			if cmd != nil {
@@ -50,6 +59,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	// Handle field changed messages from new form component
 	if fieldMsg, ok := msg.(field.FieldChangedMsg); ok {
+		// Intercept test page field changes - don't send to bridge
+		if strings.HasPrefix(fieldMsg.FieldID, "lc:test-light:") {
+			m.status = fmt.Sprintf("Test: %s = %v", fieldMsg.FieldID, fieldMsg.Value)
+			m.updateDetailContent()
+			return m, nil
+		}
 		m.handleNewFieldChange(fieldMsg)
 		return m, nil
 	}
@@ -476,8 +491,21 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 
-		// 2. Inline editing (e.g., rename in grid) takes priority over global keys
-		if m.lightGrid.IsEditing() {
+		// 2. Test page component takes priority when active (except 't' to exit)
+		if m.showTestPage && m.testLightControl != nil && msg.String() != "t" {
+			if handled, cmd := m.testLightControl.RouteEvent(msg); handled {
+				if cmd != nil {
+					cmds = append(cmds, cmd)
+				}
+				// Re-render the test page
+				m.updateDetailContent()
+				return m, tea.Batch(cmds...)
+			}
+		}
+
+		// 3. Inline editing (e.g., rename in grid) takes priority over global keys
+		//    Skip when test page is active
+		if !m.showTestPage && m.lightGrid.IsEditing() {
 			if handled, cmd := m.lightGrid.RouteEvent(msg); handled {
 				if cmd != nil {
 					cmds = append(cmds, cmd)
@@ -530,6 +558,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// Toggle activity log panel
 			m.showActivity = !m.showActivity
 			m.rebuildLayout()
+			return m, nil
+
+		case keyStr == "t":
+			// Toggle test page for component development
+			m.showTestPage = !m.showTestPage
+			if m.showTestPage {
+				// Create or reset the test component
+				m.initTestLightControl()
+			}
+			m.updateDetailContent()
 			return m, nil
 
 		case key.Matches(msg, m.keys.NextBridge):
@@ -649,7 +687,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					return m, tea.Batch(cmds...)
 
 				case PanelDetail:
-					// Route to grid component first (for dropdowns, sliders, etc.)
+					// Route to test page component if active (skip lightGrid entirely)
+					if m.showTestPage && m.testLightControl != nil {
+						handled, cmd := m.testLightControl.RouteEvent(msg)
+						if handled {
+							m.updateDetailContent()
+						}
+						return m, cmd
+					}
+					// Route to grid component (for dropdowns, sliders, etc.)
 					if handled, cmd := m.lightGrid.RouteEvent(msg); handled {
 						// Don't rebuild grid - just re-render to preserve dropdown state
 						var content strings.Builder
@@ -875,6 +921,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// NOTE: Rename mode is now handled via TextInputModal in the component tree.
 		// When renaming, events are routed through componentRoot.RouteEvent() which
 		// sends TextInputConfirmedMsg/TextInputCancelledMsg that we handle above.
+
+		// Route to test page component if active (skip lightGrid entirely)
+		if m.showTestPage && m.testLightControl != nil {
+			handled, cmd := m.testLightControl.RouteEvent(msg)
+			if cmd != nil {
+				cmds = append(cmds, cmd)
+			}
+			if handled {
+				m.updateDetailContent()
+			}
+			return m, tea.Batch(cmds...)
+		}
 
 		// Route all events through the grid component first
 		// The grid handles its own keyboard navigation, mouse clicks, and editing

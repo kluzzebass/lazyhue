@@ -30,6 +30,16 @@ type RGBComponent struct {
 
 	// Slider bar width
 	sliderWidth int
+
+	// ShowSwatch controls whether the color preview swatch is displayed
+	ShowSwatch bool
+
+	// Inactive grays out the control (e.g., when using color temp mode)
+	Inactive bool
+
+	// Drag state
+	Dragging     bool
+	DragZoneInfo *zone.ZoneInfo
 }
 
 // NewRGBComponent creates a new RGB color picker component.
@@ -40,6 +50,7 @@ func NewRGBComponent(id, label string, red, green, blue int, styles *ui.Styles, 
 		Green:       green,
 		Blue:        blue,
 		sliderWidth: 20,
+		ShowSwatch:  true,
 	}
 }
 
@@ -52,40 +63,61 @@ func (c *RGBComponent) SetRGB(red, green, blue int) {
 
 // Update handles events for the RGB picker.
 func (c *RGBComponent) Update(msg tea.Msg) (component.Component, tea.Cmd) {
-	if c.ReadOnly {
-		return c, nil
-	}
-
-	switch msg := msg.(type) {
-	case tea.KeyMsg:
-		if c.Editing {
-			return c.handleEditingKey(msg)
-		}
-		return c.handleNormalKey(msg)
-
-	case tea.MouseClickMsg:
-		return c.handleMouseClick(msg)
-	}
-
+	// Events are handled via RouteEvent
 	return c, nil
 }
 
 // RouteEvent routes events to this component.
 func (c *RGBComponent) RouteEvent(msg tea.Msg) (bool, tea.Cmd) {
-	if c.ReadOnly {
+	if c.ReadOnly || c.Inactive {
 		return false, nil
 	}
 
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
-		if c.Editing {
-			_, cmd := c.handleEditingKey(msg)
-			return true, cmd // Editing captures all keys
-		}
 		switch msg.String() {
+		case "left", "h":
+			if !c.Editing {
+				c.saveOriginal()
+			}
+			c.adjustSlider(-1)
+			return true, c.emitChange()
+
+		case "right", "l":
+			if !c.Editing {
+				c.saveOriginal()
+			}
+			c.adjustSlider(1)
+			return true, c.emitChange()
+
+		case "up", "k":
+			// Move to previous slider, or let parent handle if at top
+			if c.SliderFocus > 0 {
+				c.SliderFocus--
+				return true, nil
+			}
+			return false, nil // Let parent navigate
+
+		case "down", "j":
+			// Move to next slider, or let parent handle if at bottom
+			if c.SliderFocus < 2 {
+				c.SliderFocus++
+				return true, nil
+			}
+			return false, nil // Let parent navigate
+
+		case "esc":
+			if c.Editing {
+				c.restoreOriginal()
+				c.Editing = false
+				return true, nil
+			}
+
 		case "enter", " ":
-			_, cmd := c.startEditing()
-			return true, cmd
+			if c.Editing {
+				c.Editing = false
+				return true, c.emitChange()
+			}
 		}
 
 	case tea.MouseClickMsg:
@@ -101,59 +133,71 @@ func (c *RGBComponent) RouteEvent(msg tea.Msg) (bool, tea.Cmd) {
 				}
 			}
 		}
+
+	case tea.MouseMotionMsg:
+		if c.Dragging && c.DragZoneInfo != nil {
+			c.updateFromMouseX(msg.X)
+			return true, c.emitChange()
+		}
+
+	case tea.MouseReleaseMsg:
+		if c.Dragging {
+			c.Dragging = false
+			c.DragZoneInfo = nil
+			return true, tea.Batch(
+				func() tea.Msg { return EndCaptureMsg{FieldID: c.ID} },
+				c.emitChange(),
+			)
+		}
 	}
 
 	return false, nil
 }
 
-func (c *RGBComponent) handleNormalKey(msg tea.KeyMsg) (component.Component, tea.Cmd) {
-	switch msg.String() {
-	case "enter", " ":
-		return c.startEditing()
+func (c *RGBComponent) updateFromMouseX(mouseX int) {
+	if c.DragZoneInfo == nil {
+		return
 	}
-	return c, nil
+	barStartOffset := 3 // "R: " prefix
+	clickPos := mouseX - c.DragZoneInfo.StartX - barStartOffset
+	if clickPos < 0 {
+		clickPos = 0
+	}
+	if clickPos > c.sliderWidth-1 {
+		clickPos = c.sliderWidth - 1
+	}
+	// Map 0..sliderWidth-1 to 0..255
+	value := clickPos * 255 / (c.sliderWidth - 1)
+	switch c.SliderFocus {
+	case 0:
+		c.Red = value
+	case 1:
+		c.Green = value
+	case 2:
+		c.Blue = value
+	}
 }
 
-func (c *RGBComponent) handleEditingKey(msg tea.KeyMsg) (component.Component, tea.Cmd) {
-	switch msg.String() {
-	case "esc":
-		// Cancel and restore original values
-		c.Red = c.OriginalRed
-		c.Green = c.OriginalGreen
-		c.Blue = c.OriginalBlue
-		c.Editing = false
-		return c, nil
+func (c *RGBComponent) saveOriginal() {
+	c.Editing = true
+	c.OriginalRed = c.Red
+	c.OriginalGreen = c.Green
+	c.OriginalBlue = c.Blue
+}
 
-	case "enter":
-		// Confirm edit
-		c.Editing = false
-		return c, func() tea.Msg {
-			return FieldChangedMsg{
-				FieldID: c.ID,
-				Value:   RGBValue{Red: c.Red, Green: c.Green, Blue: c.Blue},
-			}
+func (c *RGBComponent) restoreOriginal() {
+	c.Red = c.OriginalRed
+	c.Green = c.OriginalGreen
+	c.Blue = c.OriginalBlue
+}
+
+func (c *RGBComponent) emitChange() tea.Cmd {
+	return func() tea.Msg {
+		return FieldChangedMsg{
+			FieldID: c.ID,
+			Value:   RGBValue{Red: c.Red, Green: c.Green, Blue: c.Blue},
 		}
-
-	case "up", "k":
-		// Move to previous slider
-		if c.SliderFocus > 0 {
-			c.SliderFocus--
-		}
-
-	case "down", "j":
-		// Move to next slider
-		if c.SliderFocus < 2 {
-			c.SliderFocus++
-		}
-
-	case "left", "h":
-		c.adjustSlider(-1)
-
-	case "right", "l":
-		c.adjustSlider(1)
 	}
-
-	return c, nil
 }
 
 func (c *RGBComponent) adjustSlider(direction int) {
@@ -168,38 +212,27 @@ func (c *RGBComponent) adjustSlider(direction int) {
 	}
 }
 
-func (c *RGBComponent) handleMouseClick(msg tea.MouseClickMsg) (component.Component, tea.Cmd) {
-	if !c.Editing {
-		// Click on preview to start editing
-		if c.Zones != nil {
-			if z := c.Zones.Get(c.ZoneID()); z != nil && z.InBounds(msg) {
-				return c.startEditing()
-			}
-		}
-	}
-	return c, nil
-}
-
 func (c *RGBComponent) handleSliderClick(msg tea.MouseClickMsg, row int, z *zone.ZoneInfo) (component.Component, tea.Cmd) {
 	if !c.Editing {
-		c.startEditing()
+		c.saveOriginal()
 	}
 
 	c.SliderFocus = row
 
 	// Calculate position within slider bar
-	// The slider bar starts after "  R: " (5 chars from zone start)
-	barStartOffset := 5
+	// The slider bar starts after "R: " (3 chars from zone start)
+	barStartOffset := 3
 	clickPos := msg.X - z.StartX - barStartOffset
 	if clickPos < 0 {
 		clickPos = 0
 	}
-	if clickPos >= c.sliderWidth {
+	if clickPos > c.sliderWidth-1 {
 		clickPos = c.sliderWidth - 1
 	}
 
 	// Convert position to value (0-255)
-	value := clickPos * 255 / c.sliderWidth
+	// Map 0..sliderWidth-1 to 0..255
+	value := clickPos * 255 / (c.sliderWidth - 1)
 
 	switch row {
 	case 0: // Red
@@ -210,16 +243,14 @@ func (c *RGBComponent) handleSliderClick(msg tea.MouseClickMsg, row int, z *zone
 		c.Blue = value
 	}
 
-	return c, nil
-}
+	// Start drag mode
+	c.Dragging = true
+	c.DragZoneInfo = z
 
-func (c *RGBComponent) startEditing() (component.Component, tea.Cmd) {
-	c.Editing = true
-	c.OriginalRed = c.Red
-	c.OriginalGreen = c.Green
-	c.OriginalBlue = c.Blue
-	c.SliderFocus = 0
-	return c, nil
+	return c, tea.Batch(
+		func() tea.Msg { return StartCaptureMsg{FieldID: c.ID} },
+		c.emitChange(),
+	)
 }
 
 // FieldHeight returns the number of rows this component takes up.
@@ -239,9 +270,9 @@ func (c *RGBComponent) ViewControl() string {
 
 		sliderLine := c.renderSliderRow(row)
 
-		// Highlight focused slider when editing
-		if c.Editing && row == c.SliderFocus {
-			sliderLine = c.Styles.Focused.Render(sliderLine)
+		// Highlight focused slider when component is focused
+		if c.IsFocused() && row == c.SliderFocus {
+			sliderLine = c.Styles.Selected.Render(sliderLine)
 		}
 
 		// Mark row with zone
@@ -281,9 +312,9 @@ func (c *RGBComponent) View() string {
 
 		sliderLine := c.renderSliderRow(row)
 
-		// Highlight focused slider when editing
-		if c.Editing && row == c.SliderFocus {
-			sliderLine = c.Styles.Focused.Render(sliderLine)
+		// Highlight focused slider when component is focused
+		if c.IsFocused() && row == c.SliderFocus {
+			sliderLine = c.Styles.Selected.Render(sliderLine)
 		}
 
 		line := rowLabel + sliderLine
@@ -322,6 +353,11 @@ func (c *RGBComponent) renderSliderRow(row int) string {
 		case 2: // Blue slider
 			r, g, b = 0, 0, intensity
 		}
+		// Convert to grayscale when inactive
+		if c.Inactive {
+			gray := (r + g + b) / 3
+			r, g, b = gray, gray, gray
+		}
 		char := "─"
 		if j == pos {
 			char = "●"
@@ -331,6 +367,10 @@ func (c *RGBComponent) renderSliderRow(row int) string {
 
 	// Value display
 	valueStr := fmt.Sprintf("%s: %s %3d", rowLabels[row], bar, rowVal)
+
+	if !c.ShowSwatch {
+		return valueStr
+	}
 
 	// Color preview stripe
 	colorHex := fmt.Sprintf("#%02x%02x%02x", c.Red, c.Green, c.Blue)

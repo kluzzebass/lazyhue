@@ -65,6 +65,9 @@ const (
 	FieldPrefixMotionSensitivity = "motion-sensitivity:" // motion sensitivity (format: "motion-sensitivity:<sensorID>")
 	FieldPrefixTempEnabled       = "temp-enabled:"       // temperature sensor enabled (format: "temp-enabled:<sensorID>")
 	FieldPrefixLightLevelEnabled = "ll-enabled:"         // light level sensor enabled (format: "ll-enabled:<sensorID>")
+
+	// Light control component prefix
+	FieldPrefixLightControl = "lc:" // unified light control (format: "lc:<lightID>:<fieldType>")
 )
 
 // Field ID constructors - use these instead of string concatenation
@@ -249,4 +252,38 @@ func FieldIDTempEnabled(sensorID string) string {
 
 func FieldIDLightLevelEnabled(sensorID string) string {
 	return FieldPrefixLightLevelEnabled + sensorID
+}
+
+// Light control field constructors
+
+func FieldIDLightControlOn(lightID string) string {
+	return FieldPrefixLightControl + lightID + ":on"
+}
+
+func FieldIDLightControlIdentify(lightID string) string {
+	return FieldPrefixLightControl + lightID + ":identify"
+}
+
+func FieldIDLightControlBrightness(lightID string) string {
+	return FieldPrefixLightControl + lightID + ":brightness"
+}
+
+func FieldIDLightControlColorTemp(lightID string) string {
+	return FieldPrefixLightControl + lightID + ":colortemp"
+}
+
+func FieldIDLightControlColor(lightID string) string {
+	return FieldPrefixLightControl + lightID + ":color"
+}
+
+func FieldIDLightControlEffect(lightID string) string {
+	return FieldPrefixLightControl + lightID + ":effect"
+}
+
+func FieldIDLightControlGradientMode(lightID string) string {
+	return FieldPrefixLightControl + lightID + ":gradient-mode"
+}
+
+func FieldIDLightControlGradientPoints(lightID string) string {
+	return FieldPrefixLightControl + lightID + ":gradient-points"
 }

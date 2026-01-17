@@ -62,9 +62,7 @@ func (w *ColorWheel) Height() int {
 func (w *ColorWheel) SetColor(x, y float64) {
 	w.ColorX = x
 	w.ColorY = y
-	if !w.PosValid {
-		w.updatePositionFromColor()
-	}
+	w.updatePositionFromColor()
 }
 
 // SetOriginal stores the original color for cancel operations.

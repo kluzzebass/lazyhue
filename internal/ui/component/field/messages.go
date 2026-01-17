@@ -27,6 +27,11 @@ type HSLValue struct {
 	Hue, Saturation, Lightness int
 }
 
+// HSVValue is the value type for HSV fields.
+type HSVValue struct {
+	Hue, Saturation, Value int
+}
+
 // RGBValue is the value type for RGB fields.
 type RGBValue struct {
 	Red, Green, Blue int
