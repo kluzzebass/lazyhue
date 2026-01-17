@@ -20,10 +20,15 @@ func (m *Model) getPanelKey(panelID string) string {
 func (m *Model) rebuildLayout() {
 	var layoutRoot layout.Node
 
+	// Tree panel: 40% of width, capped at 60 characters
+	// This prevents wasted space on wide terminals without complex calculations
+	maxTreeWidth := 60
+	treeSizeSpec := layout.FlexWithConstraints(0.4, 0, maxTreeWidth)
+
 	if m.showActivity {
 		// Full layout with activity log
 		layoutRoot = layout.HSplit(
-			layout.Child{Size: layout.Flex(0.4), Node: layout.NewLeaf(PanelTree)},
+			layout.Child{Size: treeSizeSpec, Node: layout.NewLeaf(PanelTree)},
 			layout.Child{Size: layout.Flex(0.6), Node: layout.VSplit(
 				layout.Child{Size: layout.Flex(0.67), Node: layout.NewLeaf(PanelDetail)},
 				layout.Child{Size: layout.Flex(0.33), Node: layout.NewLeaf(PanelLog)},
@@ -32,7 +37,7 @@ func (m *Model) rebuildLayout() {
 	} else {
 		// Layout without activity log - just tree and detail
 		layoutRoot = layout.HSplit(
-			layout.Child{Size: layout.Flex(0.4), Node: layout.NewLeaf(PanelTree)},
+			layout.Child{Size: treeSizeSpec, Node: layout.NewLeaf(PanelTree)},
 			layout.Child{Size: layout.Flex(0.6), Node: layout.NewLeaf(PanelDetail)},
 		)
 	}

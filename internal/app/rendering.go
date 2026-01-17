@@ -8,6 +8,7 @@ import (
 	"image/color"
 
 	"github.com/charmbracelet/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/kluzzebass/lazyhue/internal/hue"
 	"github.com/kluzzebass/lazyhue/internal/hueclient"
 	"github.com/kluzzebass/lazyhue/internal/ui"
@@ -523,15 +524,21 @@ func (m *Model) renderDetailPanel(width, height int, focused bool, key string) s
 	lines = append(lines, topBorder)
 
 	for i, line := range contentLines {
-		if lipgloss.Width(line) > innerWidth {
-			line = lipgloss.Place(innerWidth, 1, lipgloss.Left, lipgloss.Top, line)
+		lineWidth := lipgloss.Width(line)
+		// Truncate if too wide
+		if lineWidth > innerWidth {
+			line = ansi.Truncate(line, innerWidth, "…")
+			lineWidth = lipgloss.Width(line)
 		}
-		paddedLine := lipgloss.Place(innerWidth, 1, lipgloss.Left, lipgloss.Top, line)
+		// Pad if too narrow
+		if lineWidth < innerWidth {
+			line = line + strings.Repeat(" ", innerWidth-lineWidth)
+		}
 		rightBorder := borderStyleColor.Render(border.Right)
 		if i < len(rightBorders) {
 			rightBorder = rightBorders[i]
 		}
-		lines = append(lines, leftBorder+paddedLine+rightBorder)
+		lines = append(lines, leftBorder+line+rightBorder)
 	}
 
 	// Fill to exact height (1 for top border + content + 1 for bottom border)
@@ -601,15 +608,23 @@ func (m *Model) renderLogPanel(width, height int, focused bool, key string) stri
 
 	// Render exactly the lines the viewport provides (should be innerHeight)
 	// Limit to innerHeight to prevent overflow
-	// Activity.Render() already handles truncation, so just pad to width
 	for i := 0; i < len(contentLines) && i < innerHeight; i++ {
 		line := contentLines[i]
-		paddedLine := lipgloss.Place(innerWidth, 1, lipgloss.Left, lipgloss.Top, line)
+		lineWidth := lipgloss.Width(line)
+		// Truncate if too wide
+		if lineWidth > innerWidth {
+			line = ansi.Truncate(line, innerWidth, "…")
+			lineWidth = lipgloss.Width(line)
+		}
+		// Pad if too narrow
+		if lineWidth < innerWidth {
+			line = line + strings.Repeat(" ", innerWidth-lineWidth)
+		}
 		rightBorder := borderStyleColor.Render(border.Right)
 		if i < len(rightBorders) {
 			rightBorder = rightBorders[i]
 		}
-		lines = append(lines, leftBorder+paddedLine+rightBorder)
+		lines = append(lines, leftBorder+line+rightBorder)
 	}
 
 	// Fill to exact height (1 for top border + content + 1 for bottom border)
@@ -633,46 +648,58 @@ func (m *Model) renderLogPanel(width, height int, focused bool, key string) stri
 // renderPanelHeader renders a panel header with hotkey and title.
 func (m *Model) renderPanelHeader(width int, keyStr, title string, borderColor color.Color) string {
 	border := lipgloss.RoundedBorder()
+	borderStyle := lipgloss.NewStyle().Foreground(borderColor)
+
+	// Target inner width (between corners)
+	innerWidth := width - 2
+	if innerWidth < 1 {
+		innerWidth = 1
+	}
 
 	keyRendered := ""
-	keyWidth := 0
 	if keyStr != "" {
 		keyStyle := lipgloss.NewStyle().
 			Foreground(m.styles.Theme.Primary).
 			Bold(true)
 		keyRendered = keyStyle.Render("[" + keyStr + "]")
-		keyWidth = lipgloss.Width(keyRendered)
 	}
 
 	titleStyle := lipgloss.NewStyle().
 		Foreground(m.styles.Theme.Primary).
 		Bold(true)
 	titleRendered := titleStyle.Render(title)
-	titleWidth := lipgloss.Width(titleRendered)
 
 	leftPadding := 1
 	middlePadding := 1
-	remainingWidth := width - keyWidth - titleWidth - leftPadding - middlePadding - 2
+
+	// Build the content part (key + title with padding)
+	var content string
+	if keyRendered != "" {
+		content = borderStyle.Render(strings.Repeat(border.Top, leftPadding)) +
+			keyRendered +
+			borderStyle.Render(strings.Repeat(border.Top, middlePadding)) +
+			titleRendered
+	} else {
+		content = borderStyle.Render(strings.Repeat(border.Top, leftPadding)) +
+			titleRendered
+	}
+	contentWidth := lipgloss.Width(content)
+
+	// If content is wider than available space, truncate it
+	if contentWidth > innerWidth {
+		content = ansi.Truncate(content, innerWidth, "")
+		contentWidth = lipgloss.Width(content)
+	}
+
+	// Fill remaining width with border
+	remainingWidth := innerWidth - contentWidth
 	if remainingWidth < 0 {
 		remainingWidth = 0
 	}
 
-	borderStyle := lipgloss.NewStyle().Foreground(borderColor)
-
-	if keyRendered != "" {
-		return borderStyle.Render(border.TopLeft) +
-			borderStyle.Render(strings.Repeat(border.Top, leftPadding)) +
-			keyRendered +
-			borderStyle.Render(strings.Repeat(border.Top, middlePadding)) +
-			titleRendered +
-			borderStyle.Render(strings.Repeat(border.Top, remainingWidth)) +
-			borderStyle.Render(border.TopRight)
-	}
-
 	return borderStyle.Render(border.TopLeft) +
-		borderStyle.Render(strings.Repeat(border.Top, leftPadding)) +
-		titleRendered +
-		borderStyle.Render(strings.Repeat(border.Top, remainingWidth+middlePadding)) +
+		content +
+		borderStyle.Render(strings.Repeat(border.Top, remainingWidth)) +
 		borderStyle.Render(border.TopRight)
 }
 

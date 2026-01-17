@@ -27,6 +27,8 @@ type Node interface {
 type SizeSpec struct {
 	Fixed  int     // Fixed size in cells (0 = use flex)
 	Weight float64 // Flex weight (ignored if Fixed > 0)
+	Min    int     // Minimum size (0 = no minimum)
+	Max    int     // Maximum size (0 = no maximum)
 }
 
 // Fixed creates a fixed-size spec.
@@ -37,6 +39,11 @@ func Fixed(size int) SizeSpec {
 // Flex creates a flexible-size spec with the given weight.
 func Flex(weight float64) SizeSpec {
 	return SizeSpec{Weight: weight}
+}
+
+// FlexWithConstraints creates a flexible-size spec with min/max constraints.
+func FlexWithConstraints(weight float64, min, max int) SizeSpec {
+	return SizeSpec{Weight: weight, Min: min, Max: max}
 }
 
 // Child pairs a size spec with a node.
@@ -70,46 +77,21 @@ func (c *Container) Layout(bounds Rect) {
 		return
 	}
 
-	// Calculate total fixed size and flex weight
-	var totalFixed int
-	var totalWeight float64
-	for _, child := range c.Children {
-		if child.Size.Fixed > 0 {
-			totalFixed += child.Size.Fixed
-		} else {
-			totalWeight += child.Size.Weight
-		}
-	}
-
-	// Available space for flex children
-	var available int
+	// Get total available space
+	var totalSpace int
 	if c.Horizontal {
-		available = bounds.Width - totalFixed
+		totalSpace = bounds.Width
 	} else {
-		available = bounds.Height - totalFixed
-	}
-	if available < 0 {
-		available = 0
+		totalSpace = bounds.Height
 	}
 
-	// Distribute space and layout children
+	// Calculate sizes with min/max constraints
+	sizes := c.calculateSizes(totalSpace)
+
+	// Layout children with calculated sizes
 	offset := 0
 	for i, child := range c.Children {
-		var size int
-		if child.Size.Fixed > 0 {
-			size = child.Size.Fixed
-		} else if totalWeight > 0 {
-			// Calculate flex size, handling remainder for last flex child
-			size = int(float64(available) * child.Size.Weight / totalWeight)
-			// Give remainder to last child to avoid gaps
-			if i == len(c.Children)-1 {
-				if c.Horizontal {
-					size = bounds.Width - offset
-				} else {
-					size = bounds.Height - offset
-				}
-			}
-		}
+		size := sizes[i]
 
 		var childBounds Rect
 		if c.Horizontal {
@@ -131,6 +113,100 @@ func (c *Container) Layout(bounds Rect) {
 		child.Node.Layout(childBounds)
 		offset += size
 	}
+}
+
+// calculateSizes distributes space among children respecting min/max constraints.
+func (c *Container) calculateSizes(totalSpace int) []int {
+	n := len(c.Children)
+	sizes := make([]int, n)
+	constrained := make([]bool, n) // Whether child hit a min/max constraint
+
+	// First pass: calculate initial sizes and total fixed/flex
+	var totalFixed int
+	var totalWeight float64
+	for i, child := range c.Children {
+		if child.Size.Fixed > 0 {
+			sizes[i] = child.Size.Fixed
+			constrained[i] = true
+			totalFixed += child.Size.Fixed
+		} else {
+			totalWeight += child.Size.Weight
+		}
+	}
+
+	// Available space for flex children
+	available := totalSpace - totalFixed
+	if available < 0 {
+		available = 0
+	}
+
+	// Second pass: calculate flex sizes and apply min/max constraints
+	// May need multiple iterations as constraining one child affects others
+	for iteration := 0; iteration < n; iteration++ {
+		changed := false
+
+		// Calculate unconstrained flex weight
+		var unconstrainedWeight float64
+		for i, child := range c.Children {
+			if !constrained[i] && child.Size.Fixed == 0 {
+				unconstrainedWeight += child.Size.Weight
+			}
+		}
+
+		if unconstrainedWeight == 0 {
+			break
+		}
+
+		// Distribute available space among unconstrained flex children
+		for i, child := range c.Children {
+			if constrained[i] || child.Size.Fixed > 0 {
+				continue
+			}
+
+			// Calculate proportional size
+			size := int(float64(available) * child.Size.Weight / unconstrainedWeight)
+
+			// Apply min constraint
+			if child.Size.Min > 0 && size < child.Size.Min {
+				sizes[i] = child.Size.Min
+				constrained[i] = true
+				available -= child.Size.Min
+				changed = true
+				continue
+			}
+
+			// Apply max constraint
+			if child.Size.Max > 0 && size > child.Size.Max {
+				sizes[i] = child.Size.Max
+				constrained[i] = true
+				available -= child.Size.Max
+				changed = true
+				continue
+			}
+
+			sizes[i] = size
+		}
+
+		if !changed {
+			break
+		}
+	}
+
+	// Final pass: ensure total equals totalSpace (give remainder to last unconstrained)
+	var total int
+	lastUnconstrained := -1
+	for i := range sizes {
+		total += sizes[i]
+		if !constrained[i] {
+			lastUnconstrained = i
+		}
+	}
+
+	if lastUnconstrained >= 0 && total != totalSpace {
+		sizes[lastUnconstrained] += totalSpace - total
+	}
+
+	return sizes
 }
 
 // Bounds returns this container's bounds.

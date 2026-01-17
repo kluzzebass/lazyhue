@@ -27,10 +27,11 @@ func NewTreePanelComponent(id string, panel *panels.TreePanel) *TreePanelCompone
 	return t
 }
 
-// Layout sets the bounds and updates the panel size.
+// Layout sets the bounds for event routing.
+// Note: Panel sizing is handled by rebuildLayout(), not the component tree.
 func (t *TreePanelComponent) Layout(bounds Rect) {
 	t.BaseComponent.Layout(bounds)
-	t.panel.SetSize(bounds.Width, bounds.Height)
+	// Don't call panel.SetSize here - rebuildLayout handles panel sizing with constraints
 	slog.Debug("TreePanelComponent.Layout", "id", t.id, "bounds", bounds)
 }
 

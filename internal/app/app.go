@@ -10,7 +10,6 @@ import (
 	"github.com/charmbracelet/bubbles/v2/key"
 	tea "github.com/charmbracelet/bubbletea/v2"
 	"github.com/charmbracelet/lipgloss/v2"
-	"github.com/charmbracelet/x/ansi"
 
 	"github.com/kluzzebass/lazyhue/internal/config"
 	"github.com/kluzzebass/lazyhue/internal/hue"
@@ -75,54 +74,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.status = fmt.Sprintf("Terminal too narrow (min %d cols, got %d)", minWidth, m.width)
 		}
 
-		// Reserve space for help
-		helpHeight := 1 // status line only
-		contentHeight := m.height - helpHeight
-
-		// Update old layout (for rendering)
-		m.layout.Layout(m.width, contentHeight)
+		// Rebuild layout with new dimensions (handles tree width capping)
+		m.rebuildLayout()
 
 		// Update component tree layout (for event routing)
+		helpHeight := 1
+		contentHeight := m.height - helpHeight
 		m.componentRoot.Layout(component.Rect{
 			X:      0,
 			Y:      0,
 			Width:  m.width,
 			Height: contentHeight,
 		})
-
-		// Update panel sizes
-		treeBounds := m.layout.Bounds(PanelTree)
-		m.tree.SetSize(treeBounds.Width, treeBounds.Height)
-
-		detailBounds := m.layout.Bounds(PanelDetail)
-		detailWidth := detailBounds.Width - 2
-		if detailWidth < 1 {
-			detailWidth = 1
-		}
-		detailHeight := detailBounds.Height - 2
-		if detailHeight < 1 {
-			detailHeight = 1
-		}
-		m.detailViewport.SetWidth(detailWidth)
-		m.detailViewport.SetHeight(detailHeight)
-
-		// Re-render detail content with new width
-		m.updateDetailContent()
-
-		logBounds := m.layout.Bounds(PanelLog)
-		logWidth := logBounds.Width - 2
-		if logWidth < 1 {
-			logWidth = 1
-		}
-		logHeight := logBounds.Height - 2
-		if logHeight < 1 {
-			logHeight = 1
-		}
-		m.logViewport.SetWidth(logWidth)
-		m.logViewport.SetHeight(logHeight)
-
-		// Re-render log content with new width to handle truncation
-		m.updateLogContent()
 
 		m.help.Width = m.width
 		return m, nil
@@ -996,17 +959,8 @@ func (m Model) View() string {
 		rightColumn = detailContent
 	}
 
-	// Compose layout - constrain each column to prevent terminal overflow
-	treeBounds := m.layout.Bounds(PanelTree)
-	if lipgloss.Width(leftColumn) > treeBounds.Width {
-		leftColumn = ansi.Truncate(leftColumn, treeBounds.Width, "")
-	}
-
-	rightMaxWidth := m.width - treeBounds.Width
-	if lipgloss.Width(rightColumn) > rightMaxWidth {
-		rightColumn = ansi.Truncate(rightColumn, rightMaxWidth, "")
-	}
-
+	// Compose layout - panels should already render at correct widths
+	// The tree panel's View() and detail panel rendering handle their own truncation
 	mainContent := lipgloss.JoinHorizontal(lipgloss.Top, leftColumn, rightColumn)
 
 	// Render status line with minimal help hint

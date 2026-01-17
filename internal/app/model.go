@@ -174,10 +174,12 @@ func New(creds *config.CredentialStore) Model {
 	h := help.New()
 
 	// Build layout tree
-	// Left column: Tree
-	// Right column: Detail + Log
+	// Left column: Tree (40% of width, max 60 chars)
+	// Right column: Detail + Log (remaining width)
+	maxTreeWidth := 60
+	treeSizeSpec := layout.FlexWithConstraints(0.4, 0, maxTreeWidth)
 	layoutRoot := layout.HSplit(
-		layout.Child{Size: layout.Flex(0.4), Node: layout.NewLeaf(PanelTree)},
+		layout.Child{Size: treeSizeSpec, Node: layout.NewLeaf(PanelTree)},
 		layout.Child{Size: layout.Flex(0.6), Node: layout.VSplit(
 			layout.Child{Size: layout.Flex(0.67), Node: layout.NewLeaf(PanelDetail)},
 			layout.Child{Size: layout.Flex(0.33), Node: layout.NewLeaf(PanelLog)},

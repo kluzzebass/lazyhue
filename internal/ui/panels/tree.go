@@ -441,6 +441,101 @@ func (p *TreePanel) SetSize(width, height int) {
 	p.list.SetDelegate(p.delegate)
 }
 
+// MinContentWidth returns the minimum width needed to display the tab bar,
+// including borders. This is the absolute minimum usable width for the panel.
+func (p *TreePanel) MinContentWidth() int {
+	// Calculate tab bar width: "[n]-Tab1-Tab2-Tab3-..."
+	tabBarWidth := 0
+	if p.key != "" {
+		tabBarWidth = 3 + 1 // "[n]-"
+	}
+	for i, tab := range p.tabs {
+		tabBarWidth += len(tab)
+		if i < len(p.tabs)-1 {
+			tabBarWidth += 1 // "-" separator
+		}
+	}
+	// Add corners (2) + left padding (1)
+	tabBarWidth += 3
+	return tabBarWidth
+}
+
+// MaxContentWidth returns the maximum width needed to display the tree content
+// when fully expanded, including borders. This is used to cap the panel width.
+func (p *TreePanel) MaxContentWidth() int {
+	maxWidth := 0
+
+	// Calculate tab bar width: "[n]-Tab1-Tab2-Tab3-..."
+	// Key "[n]" = 3 chars, then "-" separator, then tabs joined by "-"
+	tabBarWidth := 0
+	if p.key != "" {
+		tabBarWidth = 3 + 1 // "[n]-"
+	}
+	for i, tab := range p.tabs {
+		tabBarWidth += len(tab)
+		if i < len(p.tabs)-1 {
+			tabBarWidth += 1 // "-" separator
+		}
+	}
+	// Add corners (2) + left padding (1)
+	tabBarWidth += 3
+
+	// Calculate max width recursively for all nodes
+	var calcNodeWidth func(node *TreeNode, depth int)
+	calcNodeWidth = func(node *TreeNode, depth int) {
+		// Width components:
+		// - indent: 2 chars per depth level
+		// - prefix: 2 chars (expand/collapse indicator)
+		// - indicator: 2 chars (on/off dot + space)
+		// - label: text length
+		// - suffixes: group suffix + bridge suffix
+		indent := depth * 2
+		prefix := 2
+		indicator := 2
+
+		// Calculate label width (strip any count suffix styling)
+		baseLabel, countStr := splitLabelCount(node.Label)
+		labelWidth := len(baseLabel)
+		if countStr != "" {
+			labelWidth += 2 + len(countStr) + 1 // " [n]"
+		}
+
+		suffixWidth := 0
+		if node.GroupSuffix != "" {
+			// " [GroupName]" - strip parens, add brackets
+			content := strings.TrimPrefix(strings.TrimSuffix(node.GroupSuffix, ")"), "(")
+			suffixWidth += 2 + len(content) + 1 // " []" + content
+		}
+		if node.BridgeSuffix != "" {
+			// " [BridgeName]" - strip brackets, re-add
+			content := strings.TrimPrefix(strings.TrimSuffix(node.BridgeSuffix, "]"), "[")
+			suffixWidth += 2 + len(content) + 1 // " []" + content
+		}
+
+		nodeWidth := indent + prefix + indicator + labelWidth + suffixWidth
+		if nodeWidth > maxWidth {
+			maxWidth = nodeWidth
+		}
+
+		// Recurse to children
+		for _, child := range node.Children {
+			calcNodeWidth(child, depth+1)
+		}
+	}
+
+	// Process all root nodes
+	for _, root := range p.roots {
+		calcNodeWidth(root, 0)
+	}
+
+	// Return the maximum of tab bar width or content width, plus borders
+	contentWidth := maxWidth + 2
+	if tabBarWidth > contentWidth {
+		return tabBarWidth
+	}
+	return contentWidth
+}
+
 // Update handles messages.
 func (p *TreePanel) Update(msg tea.Msg) (*TreePanel, tea.Cmd) {
 	switch msg := msg.(type) {
@@ -604,16 +699,21 @@ func (p *TreePanel) View(focused bool) string {
 
 	// Content lines with side borders
 	for i, line := range contentLines {
-		// Truncate line if too long
-		if lipgloss.Width(line) > innerWidth {
-			line = lipgloss.Place(innerWidth, 1, lipgloss.Left, lipgloss.Top, line)
+		// Truncate line if too long using ansi.Truncate which handles ANSI codes properly
+		lineWidth := lipgloss.Width(line)
+		if lineWidth > innerWidth {
+			line = ansi.Truncate(line, innerWidth, "…")
+			lineWidth = lipgloss.Width(line)
 		}
-		paddedLine := lipgloss.Place(innerWidth, 1, lipgloss.Left, lipgloss.Top, line)
+		// Pad to fill width
+		if lineWidth < innerWidth {
+			line = line + strings.Repeat(" ", innerWidth-lineWidth)
+		}
 		rightBorder := borderStyleColor.Render(border.Right)
 		if i < len(rightBorders) {
 			rightBorder = rightBorders[i]
 		}
-		lines = append(lines, leftBorder+paddedLine+rightBorder)
+		lines = append(lines, leftBorder+line+rightBorder)
 	}
 
 	// Fill to exact height (1 for top border + content + 1 for bottom border)
@@ -637,16 +737,21 @@ func (p *TreePanel) View(focused bool) string {
 // renderTabbedBorder renders the top border with tabs embedded.
 func (p *TreePanel) renderTabbedBorder(focused bool, borderColor color.Color) string {
 	border := lipgloss.RoundedBorder()
+	borderStyle := lipgloss.NewStyle().Foreground(borderColor)
+
+	// Target inner width (between corners)
+	innerWidth := p.width - 2
+	if innerWidth < 1 {
+		innerWidth = 1
+	}
 
 	// Build key prefix (e.g., "[2]")
 	keyRendered := ""
-	keyWidth := 0
 	if p.key != "" {
 		keyStyle := lipgloss.NewStyle().
 			Foreground(p.styles.Theme.Primary).
 			Bold(true)
 		keyRendered = keyStyle.Render("[" + p.key + "]")
-		keyWidth = lipgloss.Width(keyRendered)
 	}
 
 	// Build tabs with clickable zones
@@ -674,33 +779,39 @@ func (p *TreePanel) renderTabbedBorder(focused bool, borderColor color.Color) st
 		}
 	}
 	tabString := strings.Join(tabParts, "")
-	tabWidth := lipgloss.Width(tabString)
 
 	// Calculate border segments
-	leftPadding := 1                                                                  // after TopLeft
-	middlePadding := 1                                                                // between key and tabs
-	remainingWidth := p.width - keyWidth - tabWidth - leftPadding - middlePadding - 2 // -2 for corners
+	leftPadding := 1  // after TopLeft
+	middlePadding := 1 // between key and tabs
 
+	// Build the content part (key + tabs with padding)
+	var content string
+	if keyRendered != "" {
+		content = borderStyle.Render(strings.Repeat(border.Top, leftPadding)) +
+			keyRendered +
+			borderStyle.Render(strings.Repeat(border.Top, middlePadding)) +
+			tabString
+	} else {
+		content = borderStyle.Render(strings.Repeat(border.Top, leftPadding)) +
+			tabString
+	}
+	contentWidth := lipgloss.Width(content)
+
+	// If content is wider than available space, truncate it
+	if contentWidth > innerWidth {
+		content = ansi.Truncate(content, innerWidth, "")
+		contentWidth = lipgloss.Width(content)
+	}
+
+	// Fill remaining width with border
+	remainingWidth := innerWidth - contentWidth
 	if remainingWidth < 0 {
 		remainingWidth = 0
 	}
 
-	borderStyle := lipgloss.NewStyle().Foreground(borderColor)
-
-	if keyRendered != "" {
-		return borderStyle.Render(border.TopLeft) +
-			borderStyle.Render(strings.Repeat(border.Top, leftPadding)) +
-			keyRendered +
-			borderStyle.Render(strings.Repeat(border.Top, middlePadding)) +
-			tabString +
-			borderStyle.Render(strings.Repeat(border.Top, remainingWidth)) +
-			borderStyle.Render(border.TopRight)
-	}
-
 	return borderStyle.Render(border.TopLeft) +
-		borderStyle.Render(strings.Repeat(border.Top, leftPadding)) +
-		tabString +
-		borderStyle.Render(strings.Repeat(border.Top, remainingWidth+middlePadding)) +
+		content +
+		borderStyle.Render(strings.Repeat(border.Top, remainingWidth)) +
 		borderStyle.Render(border.TopRight)
 }
 
