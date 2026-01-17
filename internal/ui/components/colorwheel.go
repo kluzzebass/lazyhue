@@ -311,13 +311,12 @@ func (w *ColorWheel) Render() string {
 				blockSat = 100
 			}
 
-			cr, cg, cb := ui.HsvToRGB(blockHue, blockSat, 100)
-
-			// Convert to grayscale if inactive
+			// Reduce saturation if inactive (grayscale mode)
+			sat := blockSat
 			if w.Grayscale {
-				gray := (cr + cg + cb) / 3
-				cr, cg, cb = gray, gray, gray
+				sat = blockSat / 4 // 25% saturation for muted look
 			}
+			cr, cg, cb := ui.HsvToRGB(blockHue, sat, 100)
 
 			blockColor := fmt.Sprintf("#%02X%02X%02X", cr, cg, cb)
 
