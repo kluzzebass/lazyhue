@@ -365,8 +365,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if bridge := m.manager.GetBridge(msg.bridgeID); bridge != nil {
 			m.rebuildTreeForActiveTab()
 			// Update detail panel if the event is for the currently selected entity
-			// Skip if grid is in editing mode to preserve edit state
-			if !m.lightGrid.IsEditing() {
+			// Skip if grid has a focused component to preserve focus and edit state
+			if m.lightGrid.FocusRow() < 0 {
 				if node := m.tree.SelectedNode(); node != nil && node.Item != nil {
 					selectedID := node.Item.ID
 					// Check if event matches selected entity
