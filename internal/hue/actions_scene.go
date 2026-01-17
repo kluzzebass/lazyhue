@@ -428,6 +428,13 @@ func (b *Bridge) buildSceneActionsWithPending(sceneID, lightID string, pending *
 			if pending.colorTemp != nil {
 				action.Action.ColorTemperature = &sceneColorTemperatureUpdate{Mirek: pending.colorTemp}
 			}
+			// Clear the opposite color mode when switching
+			if pending.clearColorTemp {
+				action.Action.ColorTemperature = nil
+			}
+			if pending.clearColor {
+				action.Action.Color = nil
+			}
 			found = true
 		}
 
@@ -604,6 +611,7 @@ func (b *Bridge) UpdateSceneActionColor(sceneID, lightID string, x, y float32) e
 	b.scheduleSceneUpdate(sceneID, lightID, func(p *pendingSceneAction) {
 		p.colorX = &xCopy
 		p.colorY = &yCopy
+		p.clearColorTemp = true // Switch to color mode
 	})
 
 	return nil
@@ -623,6 +631,7 @@ func (b *Bridge) UpdateSceneActionColorTemp(sceneID, lightID string, mirek int) 
 	mirekCopy := mirek
 	b.scheduleSceneUpdate(sceneID, lightID, func(p *pendingSceneAction) {
 		p.colorTemp = &mirekCopy
+		p.clearColor = true // Switch to color temp mode
 	})
 
 	return nil

@@ -75,11 +75,13 @@ type sceneDebounceEntry struct {
 
 // pendingSceneAction holds accumulated modifications for a scene action.
 type pendingSceneAction struct {
-	on         *bool
-	brightness *float32
-	colorX     *float32
-	colorY     *float32
-	colorTemp  *int
+	on             *bool
+	brightness     *float32
+	colorX         *float32
+	colorY         *float32
+	colorTemp      *int
+	clearColor     bool // Clear color when setting color temp
+	clearColorTemp bool // Clear color temp when setting color
 }
 
 // NewBridge creates a new bridge connection.
