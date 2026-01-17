@@ -763,10 +763,9 @@ func (g *Grid) FocusedRowYPosition() int {
 		rowLines := g.getRowLineCount(row)
 		y += rowLines
 
-		// Add gap lines between rows (except before first row)
-		if rowIdx < len(g.rows)-1 {
-			y += g.rowGap + 1 // +1 for the newline between rows
-		}
+		// Add gap lines between this row and next (rowGap extra blank lines)
+		// The newline that terminates each row doesn't add a line, but rowGap does
+		y += g.rowGap
 	}
 
 	return y
