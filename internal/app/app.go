@@ -926,8 +926,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				content.WriteString(m.lightGrid.View())
 			}
 			m.detailViewport.SetContent(content.String())
-			// Scroll viewport to keep focused row visible
-			m.scrollDetailViewportToFocusedRow()
+			// Only scroll for keyboard navigation, not mouse clicks
+			// Mouse clicks already have the viewport positioned where the user is looking
+			if _, isMouseMsg := msg.(tea.MouseMsg); !isMouseMsg {
+				m.scrollDetailViewportToFocusedRow()
+			}
 			return m, tea.Batch(cmds...)
 		}
 
