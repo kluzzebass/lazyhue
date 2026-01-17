@@ -49,6 +49,12 @@ func (c *ColorTempSliderComponent) renderColorTempBar(value, min, max, width int
 		g := warmG + (coolG-warmG)*j/width
 		b := warmB + (coolB-warmB)*j/width
 
+		// Convert to grayscale if inactive (not the current color mode)
+		if c.Inactive {
+			gray := (r + g + b) / 3
+			r, g, b = gray, gray, gray
+		}
+
 		char := "─"
 		if j == pos {
 			char = "●"

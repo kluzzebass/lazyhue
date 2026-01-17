@@ -205,6 +205,10 @@ func (m *Model) buildSceneGridRows(scene hueclient.SceneGet, state *hue.BridgeSt
 				})
 			}
 
+			// Determine active color mode for this action
+			// Color temp is active if it's set in the action, color is active otherwise
+			colorTempActive := action.Action.ColorTemperature != nil && action.Action.ColorTemperature.Mirek != 0
+
 			// Color temperature slider - show if light supports color temp
 			if light != nil && light.ColorTemperature != nil {
 				minMirek := light.ColorTemperature.MirekSchema.MirekMinimum
@@ -218,6 +222,8 @@ func (m *Model) buildSceneGridRows(scene hueclient.SceneGet, state *hue.BridgeSt
 					FieldIDSceneActionColorTemp(sceneID, lightID), "Color Temp", mirek, minMirek, maxMirek,
 					&m.styles, m.zones,
 				)
+				// Inactive (grayscale) when color wheel mode is active
+				slider.Inactive = !colorTempActive
 				rows = append(rows, gridlayout.GridRow{
 					Type: gridlayout.RowTypeNormal,
 					Cells: []gridlayout.GridCell{
@@ -240,6 +246,8 @@ func (m *Model) buildSceneGridRows(scene hueclient.SceneGet, state *hue.BridgeSt
 					FieldIDSceneActionColor(sceneID, lightID), "Color", x, y,
 					&m.styles, m.zones,
 				)
+				// Inactive (grayscale) when color temp mode is active
+				colorWheel.Inactive = colorTempActive
 				rows = append(rows, gridlayout.GridRow{
 					Type: gridlayout.RowTypeNormal,
 					Cells: []gridlayout.GridCell{

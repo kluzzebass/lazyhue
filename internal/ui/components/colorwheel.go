@@ -31,6 +31,9 @@ type ColorWheel struct {
 
 	// Blink state for selected cell
 	BlinkOn bool
+
+	// Grayscale renders the wheel in grayscale (for inactive state)
+	Grayscale bool
 }
 
 // NewColorWheel creates a new color wheel with standard dimensions.
@@ -309,6 +312,13 @@ func (w *ColorWheel) Render() string {
 			}
 
 			cr, cg, cb := ui.HsvToRGB(blockHue, blockSat, 100)
+
+			// Convert to grayscale if inactive
+			if w.Grayscale {
+				gray := (cr + cg + cb) / 3
+				cr, cg, cb = gray, gray, gray
+			}
+
 			blockColor := fmt.Sprintf("#%02X%02X%02X", cr, cg, cb)
 
 			// Check if this is the selected cell

@@ -34,6 +34,9 @@ type ColorWheelComponent struct {
 	// Mouse drag state
 	Dragging     bool
 	DragZoneInfo map[int]*zone.ZoneInfo // Cached zone info for each row during drag
+
+	// Inactive renders the wheel in grayscale (not the active color mode)
+	Inactive bool
 }
 
 // NewColorWheelComponent creates a new color wheel component.
@@ -351,6 +354,9 @@ func (c *ColorWheelComponent) ViewControl() string {
 
 func (c *ColorWheelComponent) renderWheelControl() string {
 	var out strings.Builder
+
+	// Set grayscale mode based on inactive state
+	c.Wheel.Grayscale = c.Inactive
 
 	wheelLines := strings.Split(c.Wheel.Render(), "\n")
 	for row, line := range wheelLines {

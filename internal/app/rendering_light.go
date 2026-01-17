@@ -449,6 +449,12 @@ func (m *Model) buildControlsRows(light hueclient.LightGet) []gridlayout.GridRow
 		})
 	}
 
+	// Determine active color mode: MirekValid=true means color temp mode is active
+	mirekValid := false
+	if light.ColorTemperature != nil {
+		mirekValid = light.ColorTemperature.MirekValid
+	}
+
 	// Color temperature (if supported)
 	if light.ColorTemperature != nil {
 		mirek := light.ColorTemperature.Mirek
@@ -467,6 +473,8 @@ func (m *Model) buildControlsRows(light hueclient.LightGet) []gridlayout.GridRow
 			"colortemp", "Color Temp", mirek, minMirek, maxMirek,
 			&m.styles, m.zones,
 		)
+		// Inactive (grayscale) when color wheel mode is active
+		slider.Inactive = !mirekValid
 		rows = append(rows, gridlayout.GridRow{
 			Type: gridlayout.RowTypeNormal,
 			Cells: []gridlayout.GridCell{
@@ -487,6 +495,8 @@ func (m *Model) buildControlsRows(light hueclient.LightGet) []gridlayout.GridRow
 			"color", "Color", x, y,
 			&m.styles, m.zones,
 		)
+		// Inactive (grayscale) when color temp mode is active
+		colorWheel.Inactive = mirekValid
 		rows = append(rows, gridlayout.GridRow{
 			Type: gridlayout.RowTypeNormal,
 			Cells: []gridlayout.GridCell{

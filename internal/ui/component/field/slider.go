@@ -27,6 +27,7 @@ type SliderComponent struct {
 	RenderBar   func(value, min, max, width int, styles *ui.Styles) string
 	FormatValue func(value, min, max int) string
 	Inverted    bool // If true, left=max, right=min (for color temp)
+	Inactive    bool // If true, render in grayscale (not the active color mode)
 }
 
 // NewSliderComponent creates a new slider component.
