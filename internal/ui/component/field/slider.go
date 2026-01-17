@@ -217,17 +217,19 @@ func (s *SliderComponent) findZoneStartX(zoneInfo *zone.ZoneInfo, mouseX, mouseY
 func (s *SliderComponent) calculateValueFromX(mouseX, zoneStartX int) int {
 	barWidth := 20 // Standard slider bar width
 
-	// Calculate relative position within the bar
+	// Calculate relative position within the bar (0 to barWidth-1)
 	relativeX := mouseX - zoneStartX
 	relativeX = clamp(relativeX, 0, barWidth-1)
 
+	// Map position to value range
+	// Position 0 = Min, Position barWidth-1 = Max
 	var newValue int
 	if s.Inverted {
 		// Inverted: left = max, right = min
-		newValue = s.Max - (relativeX * (s.Max - s.Min) / barWidth)
+		newValue = s.Max - (relativeX * (s.Max - s.Min) / (barWidth - 1))
 	} else {
 		// Normal: left = min, right = max
-		newValue = s.Min + (relativeX * (s.Max - s.Min) / barWidth)
+		newValue = s.Min + (relativeX * (s.Max - s.Min) / (barWidth - 1))
 	}
 
 	return clamp(newValue, s.Min, s.Max)
