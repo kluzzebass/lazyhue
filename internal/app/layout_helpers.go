@@ -20,9 +20,9 @@ func (m *Model) getPanelKey(panelID string) string {
 func (m *Model) rebuildLayout() {
 	var layoutRoot layout.Node
 
-	// Tree panel: 40% of width, capped at 60 characters
-	// This prevents wasted space on wide terminals without complex calculations
-	maxTreeWidth := 60
+	// Tree panel: 40% of width, capped at the maximum content width
+	// This prevents wasted space on wide terminals
+	maxTreeWidth := max(m.tree.MaxContentWidth(), 30) // 30 = minimum usable width
 	treeSizeSpec := layout.FlexWithConstraints(0.4, 0, maxTreeWidth)
 
 	if m.showActivity {
