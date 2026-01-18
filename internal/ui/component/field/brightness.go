@@ -25,6 +25,7 @@ type BrightnessSliderComponent struct {
 // NewBrightnessSliderComponent creates a new brightness slider.
 func NewBrightnessSliderComponent(id, label string, value int, styles *ui.Styles, zones *zone.Manager) *BrightnessSliderComponent {
 	slider := NewSliderComponent(id, label, value, 0, 100, 5, styles, zones)
+	slider.BarWidth = 22
 
 	b := &BrightnessSliderComponent{
 		SliderComponent: slider,

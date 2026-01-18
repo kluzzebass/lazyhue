@@ -114,9 +114,15 @@ func (t *ToggleComponent) toggle() (component.Component, tea.Cmd) {
 func (t *ToggleComponent) ViewControl() string {
 	var valueStr string
 	if t.Value {
-		valueStr = "[●] " + t.OnLabel
+		valueStr = "[●]"
+		if t.OnLabel != "" {
+			valueStr += " " + t.OnLabel
+		}
 	} else {
-		valueStr = "[ ] " + t.OffLabel
+		valueStr = "[ ]"
+		if t.OffLabel != "" {
+			valueStr += " " + t.OffLabel
+		}
 	}
 
 	// Wrap with zone for mouse detection

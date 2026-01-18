@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea/v2"
+	"github.com/charmbracelet/lipgloss/v2"
 	"github.com/kluzzebass/lazyhue/internal/ui"
 	"github.com/kluzzebass/lazyhue/internal/ui/component"
 	"github.com/kluzzebass/lazyhue/internal/ui/components"
@@ -81,6 +82,9 @@ type LightControlComponent struct {
 
 	// Internal state for reactive color updates
 	updatingColors bool // Prevents infinite loops when syncing colors
+
+	// colorsDirty is set when user is actively editing colors (prevents SSE overwrites)
+	colorsDirty bool
 }
 
 // NewLightControlComponent creates a new unified light control component.
@@ -97,7 +101,8 @@ func NewLightControlComponent(lightID, bridgeID, name string, styles *ui.Styles,
 
 	// Create child components with prefixed IDs
 	c.powerToggle = NewToggleComponent(baseID+":on", "", true, styles, zones)
-	c.powerToggle.SetLabels("", "") // No labels, just checkbox
+	c.powerToggle.OnLabel = ""
+	c.powerToggle.OffLabel = ""
 
 	c.identifyButton = NewButtonComponent(baseID+":identify", "", "ID", styles, zones)
 
@@ -106,6 +111,9 @@ func NewLightControlComponent(lightID, bridgeID, name string, styles *ui.Styles,
 	c.colorTempSlider = NewColorTempSliderComponent(baseID+":colortemp", "Color Temp", 350, 153, 500, styles, zones)
 
 	c.colorWheel = NewColorWheelComponent(baseID+":color-wheel", "Color", 0.3127, 0.329, styles, zones)
+	// Increase color wheel radii to match the height of all sliders
+	c.colorWheel.Wheel.RadiusX = 10
+	c.colorWheel.Wheel.RadiusY = 5
 
 	c.rgbControl = NewRGBComponent(baseID+":rgb", "RGB", 255, 255, 255, styles, zones)
 	c.rgbControl.ShowSwatch = false
@@ -139,46 +147,64 @@ func NewLightControlComponent(lightID, bridgeID, name string, styles *ui.Styles,
 }
 
 // SetState updates all internal state and child components.
+// If colorsDirty is true, color-related controls are not updated (preserves user edits).
 func (c *LightControlComponent) SetState(state LightControlState) {
-	c.state = state
+	// Always update capabilities
+	prevHasColor := c.state.HasColor
+	prevHasColorTemp := c.state.HasColorTemp
+	prevHasEffects := c.state.HasEffects
+	prevHasGradient := c.state.HasGradient
+
+	c.state.HasDimming = state.HasDimming
+	c.state.HasColor = state.HasColor
+	c.state.HasColorTemp = state.HasColorTemp
+	c.state.HasEffects = state.HasEffects
+	c.state.HasGradient = state.HasGradient
 
 	// Update power toggle
+	c.state.On = state.On
 	c.powerToggle.SetValue(state.On)
 
 	// Update brightness
+	c.state.Brightness = state.Brightness
 	c.brightnessSlider.SetValue(state.Brightness)
-	c.brightnessSlider.ColorX = state.ColorX
-	c.brightnessSlider.ColorY = state.ColorY
-	if state.MirekValid {
-		c.brightnessSlider.ColorTempMirek = state.ColorTemp
-	}
-
-	// Update color temp slider
-	c.colorTempSlider.SetValue(state.ColorTemp)
-	c.colorTempSlider.Min = state.MinMirek
-	c.colorTempSlider.Max = state.MaxMirek
-	c.colorTempSlider.Inactive = !state.MirekValid
 	c.colorTempSlider.Brightness = state.Brightness
-
-	// Update color controls
-	c.colorWheel.SetColor(state.ColorX, state.ColorY)
-	c.colorWheel.Inactive = state.MirekValid
 	c.colorWheel.Brightness = state.Brightness
 
-	// Convert XY to RGB, HSL, and HSV for the other controls
-	r, g, b := ui.XyToRGB(state.ColorX, state.ColorY, 100)
-	c.rgbControl.SetRGB(int(r), int(g), int(b))
-	c.rgbControl.Inactive = state.MirekValid
+	// Skip color-related updates if user is actively editing
+	if !c.colorsDirty {
+		// Update color temp
+		c.state.ColorTemp = state.ColorTemp
+		c.state.MinMirek = state.MinMirek
+		c.state.MaxMirek = state.MaxMirek
+		c.state.MirekValid = state.MirekValid
+		c.colorTempSlider.SetValue(state.ColorTemp)
+		c.colorTempSlider.Min = state.MinMirek
+		c.colorTempSlider.Max = state.MaxMirek
+		c.colorTempSlider.Inactive = !state.MirekValid
 
-	h, s, l := ui.RGBToHSL(r, g, b)
-	c.hslControl.SetHSL(h, s, l)
-	c.hslControl.Inactive = state.MirekValid
+		// Update color
+		c.state.ColorX = state.ColorX
+		c.state.ColorY = state.ColorY
+		c.brightnessSlider.ColorX = state.ColorX
+		c.brightnessSlider.ColorY = state.ColorY
+		if state.MirekValid {
+			c.brightnessSlider.ColorTempMirek = state.ColorTemp
+		}
 
-	hh, ss, v := ui.RGBToHSV(r, g, b)
-	c.hsvControl.SetHSV(hh, ss, v)
-	c.hsvControl.Inactive = state.MirekValid
+		// Sync all color controls to the new XY values
+		c.syncColorControlsToPoint(state.ColorX, state.ColorY)
+
+		// Update inactive state
+		c.colorWheel.Inactive = state.MirekValid
+		c.rgbControl.Inactive = state.MirekValid
+		c.hslControl.Inactive = state.MirekValid
+		c.hsvControl.Inactive = state.MirekValid
+	}
 
 	// Update effect selector
+	c.state.EffectIndex = state.EffectIndex
+	c.state.Effects = state.Effects
 	if len(state.Effects) > 0 {
 		options := make([]Option, len(state.Effects))
 		for i, effect := range state.Effects {
@@ -188,14 +214,23 @@ func (c *LightControlComponent) SetState(state LightControlState) {
 		c.effectSelect.SetValue(state.EffectIndex)
 	}
 
-	// Update gradient editor
-	if state.HasGradient && len(state.GradientPoints) > 0 {
-		c.gradientEditor.Points = state.GradientPoints
-		c.gradientEditor.MaxPoints = state.MaxGradientPoints
+	// Update gradient editor (only if not editing gradient)
+	if !c.gradientEditor.Editing {
+		c.state.GradientPoints = state.GradientPoints
+		c.state.GradientMode = state.GradientMode
+		c.state.GradientModes = state.GradientModes
+		c.state.MaxGradientPoints = state.MaxGradientPoints
+		if state.HasGradient && len(state.GradientPoints) > 0 {
+			c.gradientEditor.Points = state.GradientPoints
+			c.gradientEditor.MaxPoints = state.MaxGradientPoints
+		}
 	}
 
-	// Update focusable fields based on capabilities
-	c.updateFocusableFields()
+	// Update focusable fields if capabilities changed
+	if prevHasColor != state.HasColor || prevHasColorTemp != state.HasColorTemp ||
+		prevHasEffects != state.HasEffects || prevHasGradient != state.HasGradient {
+		c.updateFocusableFields()
+	}
 }
 
 // updateFocusableFields rebuilds the list of focusable field indices.
@@ -232,6 +267,24 @@ func (c *LightControlComponent) updateFocusableFields() {
 
 	// Update focus state on children
 	c.updateChildFocus()
+}
+
+// syncColorControlsToPoint syncs all color controls (wheel, RGB, HSL, HSV) to the given XY point.
+func (c *LightControlComponent) syncColorControlsToPoint(x, y float64) {
+	// Update color wheel
+	c.colorWheel.SetColor(x, y)
+
+	// Convert XY to RGB
+	r, g, b := ui.XyToRGB(x, y, 100)
+	c.rgbControl.SetRGB(int(r), int(g), int(b))
+
+	// Convert RGB to HSL
+	h, s, l := ui.RGBToHSL(r, g, b)
+	c.hslControl.SetHSL(h, s, l)
+
+	// Convert RGB to HSV
+	hh, ss, v := ui.RGBToHSV(r, g, b)
+	c.hsvControl.SetHSV(hh, ss, v)
 }
 
 // getFieldByIndex returns the component at the given logical index.
@@ -322,9 +375,17 @@ func (c *LightControlComponent) Update(msg tea.Msg) (component.Component, tea.Cm
 	// Handle capture field messages
 	if _, ok := msg.(StartCaptureMsg); ok {
 		c.captureField = c.focusIndex
+		// Set colorsDirty for color control captures
+		if c.focusIndex >= 0 && c.focusIndex < len(c.focusableFields) {
+			fieldIdx := c.focusableFields[c.focusIndex]
+			if fieldIdx >= 4 && fieldIdx <= 7 {
+				c.colorsDirty = true
+			}
+		}
 	}
 	if _, ok := msg.(EndCaptureMsg); ok {
 		c.captureField = -1
+		c.colorsDirty = false // Allow SSE updates again
 	}
 
 	return c, tea.Batch(cmds...)
@@ -347,8 +408,29 @@ func (c *LightControlComponent) RouteEvent(msg tea.Msg) (bool, tea.Cmd) {
 
 	// Route to focused field first
 	if focusedField := c.getFocusedField(); focusedField != nil {
+		// Track gradient selection before routing
+		prevGradientSelection := c.gradientEditor.SelectedIndex
+
 		if handled, cmd := focusedField.RouteEvent(msg); handled {
-			return true, c.wrapFieldCmd(cmd, c.focusableFields[c.focusIndex])
+			fieldIdx := c.focusableFields[c.focusIndex]
+
+			// For color controls, do immediate sync on key events too
+			if fieldIdx >= 4 && fieldIdx <= 7 {
+				if _, ok := msg.(tea.KeyMsg); ok {
+					c.colorsDirty = true
+					c.syncColorFromField(fieldIdx)
+				}
+			}
+
+			// Sync color controls when gradient swatch selection changes
+			if fieldIdx == 9 && c.gradientEditor.SelectedIndex != prevGradientSelection {
+				if c.gradientEditor.SelectedIndex >= 0 && c.gradientEditor.SelectedIndex < len(c.gradientEditor.Points) {
+					pt := c.gradientEditor.Points[c.gradientEditor.SelectedIndex]
+					c.syncColorControlsToPoint(pt.X, pt.Y)
+				}
+			}
+
+			return true, c.wrapFieldCmd(cmd, fieldIdx)
 		}
 	}
 
@@ -385,6 +467,19 @@ func (c *LightControlComponent) wrapFieldCmd(cmd tea.Cmd, fieldIndex int) tea.Cm
 				// Color wheel, RGB, HSL, or HSV -> emit as color change
 				fcm.FieldID = c.ID + ":color"
 				fcm.Value = ColorValue{X: c.state.ColorX, Y: c.state.ColorY}
+			}
+
+			// Sync color controls when gradient point changes
+			if fieldIndex == 9 {
+				if gv, ok := fcm.Value.(GradientValue); ok {
+					// Update internal state
+					c.state.GradientPoints = gv.Points
+					// Sync color controls to show the selected gradient point's color
+					if c.gradientEditor.SelectedIndex >= 0 && c.gradientEditor.SelectedIndex < len(gv.Points) {
+						pt := gv.Points[c.gradientEditor.SelectedIndex]
+						c.syncColorControlsToPoint(pt.X, pt.Y)
+					}
+				}
 			}
 
 			return fcm
@@ -524,11 +619,74 @@ func (c *LightControlComponent) handleMouseClick(msg tea.MouseClickMsg) (bool, t
 			// Focus this field
 			c.focusIndex = i
 			c.updateChildFocus()
+
+			// For color controls, do immediate sync to prevent lag
+			if fieldIdx >= 4 && fieldIdx <= 7 {
+				c.colorsDirty = true // Prevent SSE overwrites while editing
+				c.syncColorFromField(fieldIdx)
+			}
+
 			return true, c.wrapFieldCmd(cmd, fieldIdx)
 		}
 	}
 
 	return false, nil
+}
+
+// syncColorFromField syncs all color controls from the given field's current values.
+func (c *LightControlComponent) syncColorFromField(fieldIdx int) {
+	if c.updatingColors {
+		return
+	}
+	c.updatingColors = true
+	defer func() { c.updatingColors = false }()
+
+	var x, y float64
+
+	switch fieldIdx {
+	case 4: // Color wheel
+		x = c.colorWheel.ColorX
+		y = c.colorWheel.ColorY
+
+	case 5: // RGB
+		x, y = ui.RGBIntToXY(c.rgbControl.Red, c.rgbControl.Green, c.rgbControl.Blue)
+
+	case 6: // HSL
+		r, g, b := ui.HSLToRGB(c.hslControl.Hue, c.hslControl.Saturation, c.hslControl.Lightness)
+		x, y = ui.RGBToXY(r, g, b)
+
+	case 7: // HSV
+		r, g, b := ui.HsvToRGB(c.hsvControl.Hue, c.hsvControl.Saturation, c.hsvControl.Value)
+		x, y = ui.RGBToXY(r, g, b)
+
+	default:
+		return
+	}
+
+	// Update internal state
+	c.state.ColorX = x
+	c.state.ColorY = y
+	c.brightnessSlider.ColorX = x
+	c.brightnessSlider.ColorY = y
+
+	// Convert XY to RGB for syncing other controls
+	r, g, b := ui.XyToRGB(x, y, 100)
+
+	// Sync controls (skip the source)
+	if fieldIdx != 4 {
+		c.colorWheel.SetColor(x, y)
+	}
+	if fieldIdx != 5 {
+		c.rgbControl.SetRGB(int(r), int(g), int(b))
+	}
+	if fieldIdx != 6 {
+		h, s, l := ui.RGBToHSL(r, g, b)
+		c.hslControl.SetHSL(h, s, l)
+	}
+	if fieldIdx != 7 {
+		hh, ss, v := ui.RGBToHSV(r, g, b)
+		c.hsvControl.SetHSV(hh, ss, v)
+	}
 }
 
 // moveFocus moves focus by delta, staying within focusable fields.
@@ -553,20 +711,37 @@ func (c *LightControlComponent) moveFocus(delta int) {
 
 // FieldHeight returns the number of rows this component takes up.
 func (c *LightControlComponent) FieldHeight() int {
-	height := 1 // Header row (name + power + identify)
+	// Calculate left column height (sliders)
+	leftHeight := 0
 
 	if c.state.HasDimming {
-		height++ // Brightness
+		leftHeight++ // Brightness
 	}
 	if c.state.HasColorTemp {
-		height++ // Color temp
+		leftHeight++ // Color temp
 	}
 	if c.state.HasColor {
-		height += c.colorWheel.FieldHeight() // Color wheel (multi-row)
-		height += c.rgbControl.FieldHeight() // RGB (3 rows)
-		height += c.hslControl.FieldHeight() // HSL (3 rows)
-		height += c.hsvControl.FieldHeight() // HSV (3 rows)
+		leftHeight += c.rgbControl.FieldHeight() // RGB (3 rows)
+		leftHeight += c.hslControl.FieldHeight() // HSL (3 rows)
+		leftHeight += c.hsvControl.FieldHeight() // HSV (3 rows)
 	}
+
+	// Right column is color wheel
+	rightHeight := 0
+	if c.state.HasColor {
+		rightHeight = c.colorWheel.FieldHeight()
+	}
+
+	// Content height is max of left and right
+	contentHeight := leftHeight
+	if rightHeight > contentHeight {
+		contentHeight = rightHeight
+	}
+
+	// Add 2 for border (top + bottom)
+	height := contentHeight + 2
+
+	// Add rows below border
 	if c.state.HasEffects {
 		height += c.effectSelect.FieldHeight()
 	}
@@ -579,79 +754,165 @@ func (c *LightControlComponent) FieldHeight() int {
 
 // ViewControl renders the light control component.
 func (c *LightControlComponent) ViewControl() string {
-	var out strings.Builder
-
-	// Header row: [●] Light Name [ID]
-	out.WriteString(c.renderHeaderRow())
+	// Build left column (sliders)
+	var leftLines []string
 
 	// Brightness slider
 	if c.state.HasDimming {
-		out.WriteString("\n")
-		out.WriteString(c.renderFieldRow(2, c.brightnessSlider))
+		leftLines = append(leftLines, c.renderFieldRow(2, c.brightnessSlider))
 	}
 
 	// Color temp slider
 	if c.state.HasColorTemp {
-		out.WriteString("\n")
-		out.WriteString(c.renderFieldRow(3, c.colorTempSlider))
+		leftLines = append(leftLines, c.renderFieldRow(3, c.colorTempSlider))
 	}
 
-	// Color controls
+	// RGB (3 rows)
 	if c.state.HasColor {
-		// Color wheel
-		out.WriteString("\n")
-		out.WriteString(c.renderMultiRowField(4, c.colorWheel))
-
-		// RGB
-		out.WriteString("\n")
-		out.WriteString(c.renderMultiRowField(5, c.rgbControl))
-
-		// HSL
-		out.WriteString("\n")
-		out.WriteString(c.renderMultiRowField(6, c.hslControl))
-
-		// HSV
-		out.WriteString("\n")
-		out.WriteString(c.renderMultiRowField(7, c.hsvControl))
+		rgbLines := strings.Split(c.renderMultiRowField(5, c.rgbControl), "\n")
+		leftLines = append(leftLines, rgbLines...)
 	}
 
-	// Effect selector
-	if c.state.HasEffects {
-		out.WriteString("\n")
-		out.WriteString(c.renderFieldRow(8, c.effectSelect))
+	// HSL (3 rows)
+	if c.state.HasColor {
+		hslLines := strings.Split(c.renderMultiRowField(6, c.hslControl), "\n")
+		leftLines = append(leftLines, hslLines...)
 	}
 
-	// Gradient editor
-	if c.state.HasGradient {
-		out.WriteString("\n")
-		out.WriteString(c.renderMultiRowField(9, c.gradientEditor))
+	// HSV (3 rows)
+	if c.state.HasColor {
+		hsvLines := strings.Split(c.renderMultiRowField(7, c.hsvControl), "\n")
+		leftLines = append(leftLines, hsvLines...)
 	}
 
-	return out.String()
-}
-
-// renderHeaderRow renders the header with power toggle, name, and identify button.
-func (c *LightControlComponent) renderHeaderRow() string {
-	// Focus indicator
-	focusPrefix := "  "
-	if c.isFocusedField(0) || c.isFocusedField(1) {
-		focusPrefix = "> "
+	// Build right column (color wheel) if we have color capability
+	var rightLines []string
+	if c.state.HasColor {
+		wheelView := c.renderMultiRowField(4, c.colorWheel)
+		rightLines = strings.Split(wheelView, "\n")
 	}
 
-	// Power toggle
-	powerView := c.powerToggle.ViewControl()
+	// Join left and right columns side by side
+	var contentLines []string
+	maxLines := len(leftLines)
+	if len(rightLines) > maxLines {
+		maxLines = len(rightLines)
+	}
 
-	// Name with styling based on power state
+	// Find max width of left column for padding
+	leftWidth := 0
+	for _, line := range leftLines {
+		w := lipgloss.Width(line)
+		if w > leftWidth {
+			leftWidth = w
+		}
+	}
+
+	// Find max width of right column for padding
+	rightWidth := 0
+	for _, line := range rightLines {
+		w := lipgloss.Width(line)
+		if w > rightWidth {
+			rightWidth = w
+		}
+	}
+
+	for i := 0; i < maxLines; i++ {
+		var left, right string
+		if i < len(leftLines) {
+			left = leftLines[i]
+		}
+		if i < len(rightLines) {
+			right = rightLines[i]
+		}
+
+		// Pad columns to consistent width
+		leftPadded := left + strings.Repeat(" ", leftWidth-lipgloss.Width(left))
+		rightPadded := right + strings.Repeat(" ", rightWidth-lipgloss.Width(right))
+		contentLines = append(contentLines, leftPadded+" "+rightPadded)
+	}
+
+	// Calculate total content width
+	contentWidth := leftWidth + 1 + rightWidth
+
+	// Build border manually with name in top and ID button in bottom
+	borderColor := c.Styles.Theme.Border
+	borderStyle := lipgloss.NewStyle().Foreground(borderColor)
+
 	nameStyle := c.Styles.Base
 	if !c.state.On {
 		nameStyle = c.Styles.Dimmed
 	}
-	nameView := nameStyle.Render(c.Name)
+	nameStr := nameStyle.Render(c.Name)
 
-	// Identify button
-	identifyView := c.identifyButton.ViewControl()
+	// On/Off toggle in top border (no label)
+	toggleStr := c.powerToggle.ViewControl()
 
-	return fmt.Sprintf("%s%s %s %s", focusPrefix, powerView, nameView, identifyView)
+	// ID button for bottom border
+	idButton := c.identifyButton.ViewControl()
+	idWidth := lipgloss.Width(idButton)
+
+	// Top border: ╭─ ○ Name ───────────────╮
+	topLeft := borderStyle.Render("╭")
+	topRight := borderStyle.Render("╮")
+	topContent := toggleStr + " " + nameStr
+	topContentWidth := lipgloss.Width(topContent)
+	leftDashWidth := 1
+
+	// Bottom border: ╰───────────────── [ID] ─╯
+	bottomLeft := borderStyle.Render("╰")
+	bottomRight := borderStyle.Render("╯")
+	bottomContentWidth := idWidth
+	neededTopWidth := leftDashWidth + topContentWidth
+	if neededTopWidth > contentWidth {
+		contentWidth = neededTopWidth
+	}
+	if bottomContentWidth > contentWidth {
+		contentWidth = bottomContentWidth
+	}
+	topFillWidth := contentWidth - neededTopWidth
+	if topFillWidth < 0 {
+		topFillWidth = 0
+	}
+	topFillLeft := borderStyle.Render(strings.Repeat("─", leftDashWidth))
+	topFillRight := borderStyle.Render(strings.Repeat("─", topFillWidth))
+	topBorder := topLeft + topFillLeft + topContent + topFillRight + topRight
+	bottomFillLeft := contentWidth - bottomContentWidth
+	if bottomFillLeft < 0 {
+		bottomFillLeft = 0
+	}
+	bottomFill := borderStyle.Render(strings.Repeat("─", bottomFillLeft))
+	bottomBorder := bottomLeft + bottomFill + idButton + bottomRight
+
+	// Content rows with side borders
+	var result strings.Builder
+	result.WriteString(topBorder)
+	for _, line := range contentLines {
+		result.WriteString("\n")
+		result.WriteString(borderStyle.Render("│"))
+		lineWidth := lipgloss.Width(line)
+		if lineWidth < contentWidth {
+			line = line + strings.Repeat(" ", contentWidth-lineWidth)
+		}
+		result.WriteString(line)
+		result.WriteString(borderStyle.Render("│"))
+	}
+	result.WriteString("\n")
+	result.WriteString(bottomBorder)
+
+	// Add effect selector below border if present
+	if c.state.HasEffects {
+		result.WriteString("\n")
+		result.WriteString(c.renderFieldRow(8, c.effectSelect))
+	}
+
+	// Add gradient editor below border if present
+	if c.state.HasGradient {
+		result.WriteString("\n")
+		result.WriteString(c.renderMultiRowField(9, c.gradientEditor))
+	}
+
+	return result.String()
 }
 
 // renderFieldRow renders a single-row field with focus indicator (no label - minimal labeling).

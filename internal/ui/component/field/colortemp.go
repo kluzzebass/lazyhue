@@ -18,6 +18,7 @@ type ColorTempSliderComponent struct {
 func NewColorTempSliderComponent(id, label string, value, min, max int, styles *ui.Styles, zones *zone.Manager) *ColorTempSliderComponent {
 	slider := NewSliderComponent(id, label, value, min, max, 10, styles, zones)
 	slider.Inverted = true // Left = warm (high mirek), right = cool (low mirek)
+	slider.BarWidth = 21
 
 	c := &ColorTempSliderComponent{
 		SliderComponent: slider,

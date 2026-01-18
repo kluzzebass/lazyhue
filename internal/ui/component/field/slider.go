@@ -18,6 +18,8 @@ type SliderComponent struct {
 	Min   int
 	Max   int
 	Step  int // Amount to change on arrow key press
+	// BarWidth controls the rendered slider bar width in characters.
+	BarWidth int
 
 	// Mouse capture state
 	Dragging       bool
@@ -41,6 +43,7 @@ func NewSliderComponent(id, label string, value, min, max, step int, styles *ui.
 		Step:           step,
 		DragZoneStartX: -1,
 		Brightness:     100, // Full brightness by default
+		BarWidth:       20,
 	}
 }
 
@@ -218,7 +221,7 @@ func (s *SliderComponent) findZoneStartX(zoneInfo *zone.ZoneInfo, mouseX, mouseY
 }
 
 func (s *SliderComponent) calculateValueFromX(mouseX, zoneStartX int) int {
-	barWidth := 20 // Standard slider bar width
+	barWidth := s.barWidth()
 
 	// Calculate relative position within the bar (0 to barWidth-1)
 	relativeX := mouseX - zoneStartX
@@ -240,7 +243,7 @@ func (s *SliderComponent) calculateValueFromX(mouseX, zoneStartX int) int {
 
 // ViewControl renders only the control portion (no label).
 func (s *SliderComponent) ViewControl() string {
-	barWidth := 20
+	barWidth := s.barWidth()
 
 	// Build the bar
 	var barStr string
@@ -296,6 +299,13 @@ func (s *SliderComponent) defaultRenderBar(width int) string {
 	}
 
 	return bar
+}
+
+func (s *SliderComponent) barWidth() int {
+	if s.BarWidth > 0 {
+		return s.BarWidth
+	}
+	return 20
 }
 
 // Helper function
