@@ -165,88 +165,18 @@ func MirekToRGB(mirek int) (r, g, b uint8) {
 }
 
 // XyToHueSat converts XY color to hue (0-360) and saturation (0-100).
+// This derives hue/sat from the RGB representation to keep conversions consistent.
 func XyToHueSat(x, y float64) (hue int, sat int) {
-	whiteX, whiteY := 0.3127, 0.329
-	dx := x - whiteX
-	dy := y - whiteY
-	radius := math.Sqrt(dx*dx + dy*dy)
-	angle := math.Atan2(dy, dx)
-
-	// Convert angle to degrees (0-360)
-	hue = int(angle * 180 / math.Pi)
-	if hue < 0 {
-		hue += 360
-	}
-
-	// Convert radius to saturation percentage (0-100)
-	// Max radius is about 0.4 for fully saturated colors
-	sat = int(radius / 0.4 * 100)
-	if sat > 100 {
-		sat = 100
-	}
-	if sat < 0 {
-		sat = 0
-	}
-
-	return hue, sat
+	r, g, b := XyToRGB(x, y, 100)
+	h, s, _ := RGBToHSV(r, g, b)
+	return h, s
 }
 
 // HueSatToXY converts hue (0-360) and saturation (0-100) to XY color.
-// Maps HSV hue to CIE XY color space, interpolating between RGB primaries.
+// Uses full value (brightness) to align with the XY<->RGB conversion.
 func HueSatToXY(hue, sat int) (x, y float64) {
-	// CIE xy coordinates for sRGB primaries and white point D65
-	whiteX, whiteY := 0.3127, 0.329
-	redX, redY := 0.64, 0.33
-	greenX, greenY := 0.30, 0.60
-	blueX, blueY := 0.15, 0.06
-
-	// Normalize hue to 0-360
-	h := ((hue % 360) + 360) % 360
-	s := float64(sat) / 100.0
-
-	// Determine which two primaries to interpolate between
-	var primaryX, primaryY float64
-	if h < 60 {
-		// Red to Yellow (interpolate Red toward Green)
-		t := float64(h) / 60.0
-		primaryX = redX + t*(greenX-redX)*0.5
-		primaryY = redY + t*(greenY-redY)*0.5
-	} else if h < 120 {
-		// Yellow to Green
-		t := float64(h-60) / 60.0
-		primaryX = redX + 0.5*(greenX-redX) + t*0.5*(greenX-redX)
-		primaryY = redY + 0.5*(greenY-redY) + t*0.5*(greenY-redY)
-	} else if h < 180 {
-		// Green to Cyan (interpolate Green toward Blue)
-		t := float64(h-120) / 60.0
-		primaryX = greenX + t*(blueX-greenX)*0.5
-		primaryY = greenY + t*(blueY-greenY)*0.5
-	} else if h < 240 {
-		// Cyan to Blue
-		t := float64(h-180) / 60.0
-		primaryX = greenX + 0.5*(blueX-greenX) + t*0.5*(blueX-greenX)
-		primaryY = greenY + 0.5*(blueY-greenY) + t*0.5*(blueY-greenY)
-	} else if h < 300 {
-		// Blue to Magenta (interpolate Blue toward Red)
-		t := float64(h-240) / 60.0
-		primaryX = blueX + t*(redX-blueX)*0.5
-		primaryY = blueY + t*(redY-blueY)*0.5
-	} else {
-		// Magenta to Red
-		t := float64(h-300) / 60.0
-		primaryX = blueX + 0.5*(redX-blueX) + t*0.5*(redX-blueX)
-		primaryY = blueY + 0.5*(redY-blueY) + t*0.5*(redY-blueY)
-	}
-
-	// Interpolate between white and the primary based on saturation
-	x = whiteX + s*(primaryX-whiteX)
-	y = whiteY + s*(primaryY-whiteY)
-
-	// Clamp to valid range
-	x = ClampFloat(x, 0.0, 1.0)
-	y = ClampFloat(y, 0.0, 1.0)
-
-	return x, y
+	r, g, b := HsvToRGB(hue, sat, 100)
+	return RGBToXY(r, g, b)
 }
 
 // RotateColor rotates a color around the color wheel by delta radians.
@@ -410,10 +340,11 @@ func RGBToXY(r, g, b uint8) (x, y float64) {
 	gFloat = applyGamma(gFloat)
 	bFloat = applyGamma(bFloat)
 
-	// Convert to XYZ using Wide RGB D65 matrix (inverse of what's in XyToRGB)
-	X := rFloat*0.4124564 + gFloat*0.3575761 + bFloat*0.1804375
-	Y := rFloat*0.2126729 + gFloat*0.7151522 + bFloat*0.0721750
-	Z := rFloat*0.0193339 + gFloat*0.1191920 + bFloat*0.9503041
+	// Convert to XYZ using Wide RGB D65 matrix (inverse of XyToRGB)
+	// Coefficients from Philips Hue documentation for wide-gamut conversion.
+	X := rFloat*0.664511 + gFloat*0.154324 + bFloat*0.162028
+	Y := rFloat*0.283881 + gFloat*0.668433 + bFloat*0.047685
+	Z := rFloat*0.000088 + gFloat*0.072310 + bFloat*0.986039
 
 	// Convert to xy chromaticity
 	sum := X + Y + Z

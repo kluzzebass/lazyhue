@@ -8,7 +8,6 @@ import (
 	"github.com/charmbracelet/lipgloss/v2"
 	"github.com/kluzzebass/lazyhue/internal/ui"
 	"github.com/kluzzebass/lazyhue/internal/ui/component"
-	"github.com/kluzzebass/lazyhue/internal/ui/components"
 	zone "github.com/lrstanley/bubblezone/v2"
 )
 
@@ -184,16 +183,27 @@ func (c *LightControlComponent) SetState(state LightControlState) {
 		c.colorTempSlider.Inactive = !state.MirekValid
 
 		// Update color
-		c.state.ColorX = state.ColorX
-		c.state.ColorY = state.ColorY
-		c.brightnessSlider.ColorX = state.ColorX
-		c.brightnessSlider.ColorY = state.ColorY
+		if state.HasGradient && len(state.GradientPoints) > 0 {
+			idx := c.gradientEditor.SelectedIndex
+			if idx < 0 || idx >= len(state.GradientPoints) {
+				idx = 0
+				c.gradientEditor.SelectedIndex = 0
+			}
+			pt := state.GradientPoints[idx]
+			c.state.ColorX = pt.X
+			c.state.ColorY = pt.Y
+		} else {
+			c.state.ColorX = state.ColorX
+			c.state.ColorY = state.ColorY
+		}
+		c.brightnessSlider.ColorX = c.state.ColorX
+		c.brightnessSlider.ColorY = c.state.ColorY
 		if state.MirekValid {
 			c.brightnessSlider.ColorTempMirek = state.ColorTemp
 		}
 
-		// Sync all color controls to the new XY values
-		c.syncColorControlsToPoint(state.ColorX, state.ColorY)
+		// Sync all color controls to the active XY values
+		c.syncColorControlsToPoint(c.state.ColorX, c.state.ColorY)
 
 		// Update inactive state
 		c.colorWheel.Inactive = state.MirekValid
@@ -220,9 +230,20 @@ func (c *LightControlComponent) SetState(state LightControlState) {
 		c.state.GradientMode = state.GradientMode
 		c.state.GradientModes = state.GradientModes
 		c.state.MaxGradientPoints = state.MaxGradientPoints
+
 		if state.HasGradient && len(state.GradientPoints) > 0 {
 			c.gradientEditor.Points = state.GradientPoints
 			c.gradientEditor.MaxPoints = state.MaxGradientPoints
+			c.gradientEditor.MinPoints = 2
+		} else if state.HasColor {
+			c.gradientEditor.Points = []GradientPoint{{X: state.ColorX, Y: state.ColorY}}
+			c.gradientEditor.MaxPoints = 1
+			c.gradientEditor.MinPoints = 1
+		}
+
+		if len(c.gradientEditor.Points) > 0 &&
+			(c.gradientEditor.SelectedIndex < 0 || c.gradientEditor.SelectedIndex >= len(c.gradientEditor.Points)) {
+			c.gradientEditor.SelectedIndex = 0
 		}
 	}
 
@@ -256,7 +277,7 @@ func (c *LightControlComponent) updateFocusableFields() {
 	if c.state.HasEffects {
 		c.focusableFields = append(c.focusableFields, 8) // Effect
 	}
-	if c.state.HasGradient {
+	if c.state.HasColor || c.state.HasGradient {
 		c.focusableFields = append(c.focusableFields, 9) // Gradient
 	}
 
@@ -273,6 +294,17 @@ func (c *LightControlComponent) updateFocusableFields() {
 func (c *LightControlComponent) syncColorControlsToPoint(x, y float64) {
 	// Update color wheel
 	c.colorWheel.SetColor(x, y)
+
+	// Update brightness slider color display (XY mode)
+	if c.state.MirekValid {
+		c.brightnessSlider.ColorX = 0
+		c.brightnessSlider.ColorY = 0
+		c.brightnessSlider.ColorTempMirek = c.state.ColorTemp
+	} else {
+		c.brightnessSlider.ColorX = x
+		c.brightnessSlider.ColorY = y
+		c.brightnessSlider.ColorTempMirek = 0
+	}
 
 	// Convert XY to RGB
 	r, g, b := ui.XyToRGB(x, y, 100)
@@ -461,12 +493,16 @@ func (c *LightControlComponent) wrapFieldCmd(cmd tea.Cmd, fieldIndex int) tea.Cm
 			// Handle reactive color updates
 			c.handleReactiveColorUpdate(fcm, fieldIndex)
 
-			// Rewrite the field ID to use the standard color field ID
-			// so the app handler can route it correctly
+			// Rewrite the field ID so the app handler can route it correctly
 			if fieldIndex == 4 || fieldIndex == 5 || fieldIndex == 6 || fieldIndex == 7 {
-				// Color wheel, RGB, HSL, or HSV -> emit as color change
-				fcm.FieldID = c.ID + ":color"
-				fcm.Value = ColorValue{X: c.state.ColorX, Y: c.state.ColorY}
+				// Color wheel, RGB, HSL, or HSV -> emit as color or gradient point change
+				if updated, points := c.updateSelectedGradientPoint(c.state.ColorX, c.state.ColorY); updated {
+					fcm.FieldID = c.ID + ":gradient-points"
+					fcm.Value = GradientValue{Points: points}
+				} else {
+					fcm.FieldID = c.ID + ":color"
+					fcm.Value = ColorValue{X: c.state.ColorX, Y: c.state.ColorY}
+				}
 			}
 
 			// Sync color controls when gradient point changes
@@ -500,6 +536,7 @@ func (c *LightControlComponent) handleReactiveColorUpdate(msg FieldChangedMsg, f
 	switch fieldIndex {
 	case 4: // Color wheel
 		if cv, ok := msg.Value.(ColorValue); ok {
+			c.SwitchToColorMode()
 			c.state.ColorX = cv.X
 			c.state.ColorY = cv.Y
 
@@ -520,6 +557,7 @@ func (c *LightControlComponent) handleReactiveColorUpdate(msg FieldChangedMsg, f
 
 	case 5: // RGB
 		if rv, ok := msg.Value.(RGBValue); ok {
+			c.SwitchToColorMode()
 			// Convert RGB to XY
 			x, y := ui.RGBIntToXY(rv.Red, rv.Green, rv.Blue)
 			c.state.ColorX = x
@@ -527,6 +565,8 @@ func (c *LightControlComponent) handleReactiveColorUpdate(msg FieldChangedMsg, f
 
 			// Update color wheel
 			c.colorWheel.SetColor(x, y)
+			hh, ss, _ := ui.RGBToHSV(uint8(rv.Red), uint8(rv.Green), uint8(rv.Blue))
+			c.colorWheel.SetHueSatPosition(hh, ss)
 
 			// Update HSL
 			h, s, l := ui.RGBToHSL(uint8(rv.Red), uint8(rv.Green), uint8(rv.Blue))
@@ -543,7 +583,8 @@ func (c *LightControlComponent) handleReactiveColorUpdate(msg FieldChangedMsg, f
 
 	case 6: // HSL
 		if hv, ok := msg.Value.(HSLValue); ok {
-			// Convert HSL to RGB then XY
+			c.SwitchToColorMode()
+			// Convert HSL to RGB, then to XY
 			r, g, b := ui.HSLToRGB(hv.Hue, hv.Saturation, hv.Lightness)
 			x, y := ui.RGBToXY(r, g, b)
 			c.state.ColorX = x
@@ -551,6 +592,8 @@ func (c *LightControlComponent) handleReactiveColorUpdate(msg FieldChangedMsg, f
 
 			// Update color wheel
 			c.colorWheel.SetColor(x, y)
+			hh, ss, _ := ui.RGBToHSV(r, g, b)
+			c.colorWheel.SetHueSatPosition(hh, ss)
 
 			// Update RGB
 			c.rgbControl.SetRGB(int(r), int(g), int(b))
@@ -566,7 +609,8 @@ func (c *LightControlComponent) handleReactiveColorUpdate(msg FieldChangedMsg, f
 
 	case 7: // HSV
 		if hv, ok := msg.Value.(HSVValue); ok {
-			// Convert HSV to RGB then XY
+			c.SwitchToColorMode()
+			// Convert HSV to RGB, then to XY
 			r, g, b := ui.HsvToRGB(hv.Hue, hv.Saturation, hv.Value)
 			x, y := ui.RGBToXY(r, g, b)
 			c.state.ColorX = x
@@ -574,6 +618,7 @@ func (c *LightControlComponent) handleReactiveColorUpdate(msg FieldChangedMsg, f
 
 			// Update color wheel
 			c.colorWheel.SetColor(x, y)
+			c.colorWheel.SetHueSatPosition(hv.Hue, hv.Saturation)
 
 			// Update RGB
 			c.rgbControl.SetRGB(int(r), int(g), int(b))
@@ -587,6 +632,23 @@ func (c *LightControlComponent) handleReactiveColorUpdate(msg FieldChangedMsg, f
 			c.brightnessSlider.ColorY = y
 		}
 	}
+}
+
+func (c *LightControlComponent) updateSelectedGradientPoint(x, y float64) (bool, []GradientPoint) {
+	idx := c.gradientEditor.SelectedIndex
+	if idx < 0 || idx >= len(c.gradientEditor.Points) {
+		return false, nil
+	}
+
+	c.gradientEditor.Points[idx] = GradientPoint{X: x, Y: y}
+	c.state.GradientPoints = make([]GradientPoint, len(c.gradientEditor.Points))
+	copy(c.state.GradientPoints, c.gradientEditor.Points)
+
+	if !c.state.HasGradient {
+		return false, c.state.GradientPoints
+	}
+
+	return true, c.state.GradientPoints
 }
 
 func (c *LightControlComponent) handleKey(msg tea.KeyMsg) (bool, tea.Cmd) {
@@ -626,6 +688,14 @@ func (c *LightControlComponent) handleMouseClick(msg tea.MouseClickMsg) (bool, t
 				c.syncColorFromField(fieldIdx)
 			}
 
+			// Sync color controls when gradient swatch selection changes
+			if fieldIdx == 9 {
+				if c.gradientEditor.SelectedIndex >= 0 && c.gradientEditor.SelectedIndex < len(c.gradientEditor.Points) {
+					pt := c.gradientEditor.Points[c.gradientEditor.SelectedIndex]
+					c.syncColorControlsToPoint(pt.X, pt.Y)
+				}
+			}
+
 			return true, c.wrapFieldCmd(cmd, fieldIdx)
 		}
 	}
@@ -642,22 +712,34 @@ func (c *LightControlComponent) syncColorFromField(fieldIdx int) {
 	defer func() { c.updatingColors = false }()
 
 	var x, y float64
+	var hue, sat int
+	useHueSat := false
 
 	switch fieldIdx {
 	case 4: // Color wheel
+		c.SwitchToColorMode()
 		x = c.colorWheel.ColorX
 		y = c.colorWheel.ColorY
 
 	case 5: // RGB
+		c.SwitchToColorMode()
 		x, y = ui.RGBIntToXY(c.rgbControl.Red, c.rgbControl.Green, c.rgbControl.Blue)
+		hue, sat, _ = ui.RGBToHSV(uint8(c.rgbControl.Red), uint8(c.rgbControl.Green), uint8(c.rgbControl.Blue))
+		useHueSat = true
 
 	case 6: // HSL
+		c.SwitchToColorMode()
+		x, y = ui.HSLToXY(c.hslControl.Hue, c.hslControl.Saturation, c.hslControl.Lightness)
 		r, g, b := ui.HSLToRGB(c.hslControl.Hue, c.hslControl.Saturation, c.hslControl.Lightness)
-		x, y = ui.RGBToXY(r, g, b)
+		hue, sat, _ = ui.RGBToHSV(r, g, b)
+		useHueSat = true
 
 	case 7: // HSV
-		r, g, b := ui.HsvToRGB(c.hsvControl.Hue, c.hsvControl.Saturation, c.hsvControl.Value)
-		x, y = ui.RGBToXY(r, g, b)
+		c.SwitchToColorMode()
+		x, y = ui.HSVToXY(c.hsvControl.Hue, c.hsvControl.Saturation, c.hsvControl.Value)
+		hue = c.hsvControl.Hue
+		sat = c.hsvControl.Saturation
+		useHueSat = true
 
 	default:
 		return
@@ -675,6 +757,9 @@ func (c *LightControlComponent) syncColorFromField(fieldIdx int) {
 	// Sync controls (skip the source)
 	if fieldIdx != 4 {
 		c.colorWheel.SetColor(x, y)
+		if useHueSat {
+			c.colorWheel.SetHueSatPosition(hue, sat)
+		}
 	}
 	if fieldIdx != 5 {
 		c.rgbControl.SetRGB(int(r), int(g), int(b))
@@ -745,7 +830,7 @@ func (c *LightControlComponent) FieldHeight() int {
 	if c.state.HasEffects {
 		height += c.effectSelect.FieldHeight()
 	}
-	if c.state.HasGradient {
+	if c.state.HasColor || c.state.HasGradient {
 		height += c.gradientEditor.FieldHeight()
 	}
 
@@ -907,7 +992,7 @@ func (c *LightControlComponent) ViewControl() string {
 	}
 
 	// Add gradient editor below border if present
-	if c.state.HasGradient {
+	if c.state.HasColor || c.state.HasGradient {
 		result.WriteString("\n")
 		result.WriteString(c.renderMultiRowField(9, c.gradientEditor))
 	}
@@ -1005,6 +1090,9 @@ func (c *LightControlComponent) SetColorMode(mirekValid bool) {
 	c.state.MirekValid = mirekValid
 	c.colorTempSlider.Inactive = !mirekValid
 	c.colorWheel.Inactive = mirekValid
+	c.rgbControl.Inactive = mirekValid
+	c.hslControl.Inactive = mirekValid
+	c.hsvControl.Inactive = mirekValid
 }
 
 // SwitchToColorMode switches to XY color mode.
@@ -1018,7 +1106,7 @@ func (c *LightControlComponent) SwitchToColorTempMode() {
 }
 
 // WheelRenderer returns the color wheel for external access if needed.
-func (c *LightControlComponent) WheelRenderer() *components.ColorWheel {
+func (c *LightControlComponent) WheelRenderer() *ColorWheel {
 	return c.colorWheel.Wheel
 }
 

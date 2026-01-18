@@ -9,24 +9,23 @@ import (
 	"github.com/charmbracelet/lipgloss/v2"
 	"github.com/kluzzebass/lazyhue/internal/ui"
 	"github.com/kluzzebass/lazyhue/internal/ui/component"
-	"github.com/kluzzebass/lazyhue/internal/ui/components"
 	zone "github.com/lrstanley/bubblezone/v2"
 )
 
-// GradientEditorComponent allows editing gradient points with a color wheel.
+// GradientEditorComponent allows selecting gradient points for external editing.
 type GradientEditorComponent struct {
 	*BaseField
 
 	// Gradient points
 	Points    []GradientPoint
 	MaxPoints int
-	MinPoints int // Always 2
+	MinPoints int // Minimum allowed points
 
 	// Selection state
 	SelectedIndex int // -1 if none selected
 
 	// Color wheel for editing
-	Wheel *components.ColorWheel
+	Wheel *ColorWheel
 
 	// Editing state
 	Editing          bool
@@ -40,19 +39,26 @@ type GradientEditorComponent struct {
 
 // NewGradientEditorComponent creates a new gradient editor.
 func NewGradientEditorComponent(id, label string, points []GradientPoint, maxPoints int, styles *ui.Styles, zones *zone.Manager) *GradientEditorComponent {
-	wheel := components.NewColorWheel()
+	wheel := NewColorWheel()
 
-	// Ensure we have at least 2 points
-	if len(points) < 2 {
-		// Default to white-to-white if no points
-		points = []GradientPoint{{0.3127, 0.329}, {0.3127, 0.329}}
+	minPoints := 2
+	if maxPoints <= 1 {
+		minPoints = 1
+	}
+
+	// Ensure we have at least the minimum points
+	if len(points) < minPoints {
+		defaultPoint := GradientPoint{0.3127, 0.329}
+		for len(points) < minPoints {
+			points = append(points, defaultPoint)
+		}
 	}
 
 	return &GradientEditorComponent{
 		BaseField:     NewBaseField(id, label, styles, zones),
 		Points:        points,
 		MaxPoints:     maxPoints,
-		MinPoints:     2,
+		MinPoints:     minPoints,
 		SelectedIndex: -1,
 		Wheel:         wheel,
 	}
@@ -128,13 +134,11 @@ func (g *GradientEditorComponent) RouteEvent(msg tea.Msg) (bool, tea.Cmd) {
 				return true, nil
 			}
 		case "enter", " ":
-			if g.SelectedIndex >= 0 {
-				return true, g.startEditing()
-			} else if len(g.Points) > 0 {
+			if g.SelectedIndex < 0 && len(g.Points) > 0 {
 				g.SelectedIndex = 0
 				g.syncWheelToSelected()
-				return true, nil
 			}
+			return true, nil
 		case "+", "=":
 			if len(g.Points) < g.MaxPoints {
 				return true, g.addPoint()
@@ -154,7 +158,7 @@ func (g *GradientEditorComponent) RouteEvent(msg tea.Msg) (bool, tea.Cmd) {
 					if z := g.Zones.Get(zoneID); z != nil && z.InBounds(msg) {
 						g.SelectedIndex = i
 						g.syncWheelToSelected()
-						return true, g.startEditing()
+						return true, nil
 					}
 				}
 			}
@@ -223,8 +227,9 @@ func (g *GradientEditorComponent) handleNormalKey(msg tea.KeyMsg) (component.Com
 			g.syncWheelToSelected()
 		}
 	case "enter", " ":
-		if g.SelectedIndex >= 0 {
-			return g, g.startEditing()
+		if g.SelectedIndex < 0 && len(g.Points) > 0 {
+			g.SelectedIndex = 0
+			g.syncWheelToSelected()
 		}
 	}
 	return g, nil
@@ -409,10 +414,7 @@ func (g *GradientEditorComponent) scheduleBlinkTick() tea.Cmd {
 
 // FieldHeight returns the height of this component.
 func (g *GradientEditorComponent) FieldHeight() int {
-	// Swatches row + (color wheel if editing)
-	if g.Editing {
-		return 1 + g.Wheel.Height()
-	}
+	// Swatches row only
 	return 1
 }
 
@@ -422,12 +424,6 @@ func (g *GradientEditorComponent) ViewControl() string {
 
 	// Render swatches row
 	out.WriteString(g.renderSwatches())
-
-	// Render color wheel if editing
-	if g.Editing {
-		out.WriteString("\n")
-		out.WriteString(g.renderWheel())
-	}
 
 	return out.String()
 }

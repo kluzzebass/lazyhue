@@ -1,5 +1,4 @@
-// Package components provides reusable UI components.
-package components
+package field
 
 import (
 	"fmt"
@@ -63,6 +62,41 @@ func (w *ColorWheel) SetColor(x, y float64) {
 	w.ColorX = x
 	w.ColorY = y
 	w.updatePositionFromColor()
+}
+
+// SetHueSatPosition updates the cursor position from HSV hue/saturation.
+func (w *ColorWheel) SetHueSatPosition(hue, sat int) {
+	h := ((hue % 360) + 360) % 360
+	if sat < 0 {
+		sat = 0
+	}
+	if sat > 100 {
+		sat = 100
+	}
+
+	angleRad := float64(90-h) * math.Pi / 180
+	dist := float64(sat) / 100.0
+	xNorm := dist * math.Cos(angleRad)
+	yNorm := -dist * math.Sin(angleRad)
+
+	w.SelCol = w.RadiusX + int(math.Round(xNorm*float64(w.RadiusX)))
+	w.SelRow = w.RadiusY + int(math.Round(yNorm*float64(w.RadiusY)))
+
+	// Clamp to valid range
+	if w.SelRow < 0 {
+		w.SelRow = 0
+	}
+	if w.SelRow > w.RadiusY*2 {
+		w.SelRow = w.RadiusY * 2
+	}
+	if w.SelCol < 0 {
+		w.SelCol = 0
+	}
+	if w.SelCol > w.RadiusX*2 {
+		w.SelCol = w.RadiusX * 2
+	}
+
+	w.PosValid = true
 }
 
 // SetOriginal stores the original color for cancel operations.
@@ -203,15 +237,15 @@ func (w *ColorWheel) HandleClick(row, col int) bool {
 func (w *ColorWheel) updatePositionFromColor() {
 	hue, sat := ui.XyToHueSat(w.ColorX, w.ColorY)
 
-	// The wheel uses: hue = -angle*180/π + 90
-	// So: angle = (90 - hue) * π/180
+	// The wheel uses: hue = -angle*180/pi + 90
+	// So: angle = (90 - hue) * pi/180
 	angleRad := float64(90-hue) * math.Pi / 180
 	dist := float64(sat) / 100.0
 	xNorm := dist * math.Cos(angleRad)
 	yNorm := -dist * math.Sin(angleRad)
 
-	w.SelCol = w.RadiusX + int(xNorm*float64(w.RadiusX)+0.5)
-	w.SelRow = w.RadiusY + int(yNorm*float64(w.RadiusY)+0.5)
+	w.SelCol = w.RadiusX + int(math.Round(xNorm*float64(w.RadiusX)))
+	w.SelRow = w.RadiusY + int(math.Round(yNorm*float64(w.RadiusY)))
 
 	// Clamp to valid range
 	if w.SelRow < 0 {
@@ -323,9 +357,9 @@ func (w *ColorWheel) Render() string {
 				cr, cg, cb = uint8(lum), uint8(lum), uint8(lum)
 			}
 
-			// Apply brightness dimming (0% brightness → 50% luminance, 100% → 100%)
+			// Apply brightness dimming (0% brightness -> 50% luminance, 100% -> 100%)
 			if w.Brightness < 100 && w.Brightness >= 0 {
-				factor := 0.5 + float64(w.Brightness)/200.0 // 0→0.5, 100→1.0
+				factor := 0.5 + float64(w.Brightness)/200.0 // 0->0.5, 100->1.0
 				cr = uint8(float64(cr) * factor)
 				cg = uint8(float64(cg) * factor)
 				cb = uint8(float64(cb) * factor)

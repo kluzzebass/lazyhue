@@ -1330,6 +1330,11 @@ func (m *Model) handleNewFieldChange(msg field.FieldChangedMsg) {
 			points := convertToAPIPoints(v.Points)
 			m.status = fmt.Sprintf("Gradient points: %d", len(points))
 			err = bridge.SetLightGradientPoints(gradientLightID, points)
+			if err != nil {
+				m.status = fmt.Sprintf("Error: %v", err)
+			}
+			// Avoid immediate UI rebuild; wait for SSE to refresh
+			return
 		}
 	} else if strings.HasPrefix(msg.FieldID, FieldPrefixLightControl) {
 		// Unified light control component - format: lc:{lightID}:{fieldType}
@@ -1414,6 +1419,11 @@ func (m *Model) handleNewFieldChange(msg field.FieldChangedMsg) {
 				if v, ok := msg.Value.(field.GradientValue); ok {
 					points := convertToAPIPoints(v.Points)
 					err = bridge.SetLightGradientPoints(lcLightID, points)
+					if err != nil {
+						m.status = fmt.Sprintf("Error: %v", err)
+					}
+					// Avoid immediate UI rebuild; wait for SSE to refresh
+					return
 				}
 			}
 		}

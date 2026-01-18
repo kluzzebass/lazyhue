@@ -2,13 +2,13 @@ package field
 
 import (
 	"fmt"
+	"math"
 	"strings"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea/v2"
 	"github.com/kluzzebass/lazyhue/internal/ui"
 	"github.com/kluzzebass/lazyhue/internal/ui/component"
-	"github.com/kluzzebass/lazyhue/internal/ui/components"
 	zone "github.com/lrstanley/bubblezone/v2"
 )
 
@@ -25,7 +25,7 @@ type ColorWheelComponent struct {
 	OriginalY float64
 
 	// The color wheel renderer
-	Wheel *components.ColorWheel
+	Wheel *ColorWheel
 
 	// Blink timer state
 	blinkTimerActive    bool
@@ -44,7 +44,7 @@ type ColorWheelComponent struct {
 
 // NewColorWheelComponent creates a new color wheel component.
 func NewColorWheelComponent(id, label string, colorX, colorY float64, styles *ui.Styles, zones *zone.Manager) *ColorWheelComponent {
-	wheel := components.NewColorWheel()
+	wheel := NewColorWheel()
 	wheel.SetColor(colorX, colorY)
 
 	return &ColorWheelComponent{
@@ -61,6 +61,43 @@ func (c *ColorWheelComponent) SetColor(x, y float64) {
 	c.ColorX = x
 	c.ColorY = y
 	c.Wheel.SetColor(x, y)
+}
+
+// SetHueSatPosition updates the cursor position from HSV hue/saturation.
+func (c *ColorWheelComponent) SetHueSatPosition(hue, sat int) {
+	h := ((hue % 360) + 360) % 360
+	if sat < 0 {
+		sat = 0
+	}
+	if sat > 100 {
+		sat = 100
+	}
+
+	angleRad := float64(90-h) * math.Pi / 180
+	dist := float64(sat) / 100.0
+	xNorm := dist * math.Cos(angleRad)
+	yNorm := -dist * math.Sin(angleRad)
+
+	selCol := c.Wheel.RadiusX + int(math.Round(xNorm*float64(c.Wheel.RadiusX)))
+	selRow := c.Wheel.RadiusY + int(math.Round(yNorm*float64(c.Wheel.RadiusY)))
+
+	// Clamp to valid range
+	if selRow < 0 {
+		selRow = 0
+	}
+	if selRow > c.Wheel.RadiusY*2 {
+		selRow = c.Wheel.RadiusY * 2
+	}
+	if selCol < 0 {
+		selCol = 0
+	}
+	if selCol > c.Wheel.RadiusX*2 {
+		selCol = c.Wheel.RadiusX * 2
+	}
+
+	c.Wheel.SelRow = selRow
+	c.Wheel.SelCol = selCol
+	c.Wheel.PosValid = true
 }
 
 // Update handles events for the color wheel.

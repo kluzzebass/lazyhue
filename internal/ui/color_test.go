@@ -164,6 +164,162 @@ func TestHueSatToXY(t *testing.T) {
 	}
 }
 
+func TestRGBToXYRoundTrip(t *testing.T) {
+	tests := []struct {
+		name       string
+		r, g, b    uint8
+		tolerance  int
+	}{
+		{"red", 255, 0, 0, 8},
+		{"green", 0, 255, 0, 8},
+		{"blue", 0, 0, 255, 8},
+		{"white", 255, 255, 255, 6},
+		{"warm", 255, 180, 100, 8},
+		{"cool", 150, 200, 255, 8},
+		{"dim teal", 32, 96, 96, 10},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			x, y := RGBToXY(tt.r, tt.g, tt.b)
+			r2, g2, b2 := XyToRGB(x, y, 100)
+			if abs(int(r2)-int(tt.r)) > tt.tolerance ||
+				abs(int(g2)-int(tt.g)) > tt.tolerance ||
+				abs(int(b2)-int(tt.b)) > tt.tolerance {
+				t.Errorf("RGB->XY->RGB mismatch: start (%d,%d,%d) got (%d,%d,%d)",
+					tt.r, tt.g, tt.b, r2, g2, b2)
+			}
+		})
+	}
+}
+
+func TestRGBToHSLRoundTrip(t *testing.T) {
+	tests := []struct {
+		name       string
+		r, g, b    uint8
+		tolerance  int
+	}{
+		{"red", 255, 0, 0, 3},
+		{"green", 0, 255, 0, 3},
+		{"blue", 0, 0, 255, 3},
+		{"white", 255, 255, 255, 3},
+		{"gray", 128, 128, 128, 3},
+		{"teal", 0, 128, 128, 4},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			h, s, l := RGBToHSL(tt.r, tt.g, tt.b)
+			r2, g2, b2 := HSLToRGB(h, s, l)
+			if abs(int(r2)-int(tt.r)) > tt.tolerance ||
+				abs(int(g2)-int(tt.g)) > tt.tolerance ||
+				abs(int(b2)-int(tt.b)) > tt.tolerance {
+				t.Errorf("RGB->HSL->RGB mismatch: start (%d,%d,%d) got (%d,%d,%d)",
+					tt.r, tt.g, tt.b, r2, g2, b2)
+			}
+		})
+	}
+}
+
+func TestRGBToHSVRoundTrip(t *testing.T) {
+	tests := []struct {
+		name       string
+		r, g, b    uint8
+		tolerance  int
+	}{
+		{"red", 255, 0, 0, 3},
+		{"green", 0, 255, 0, 3},
+		{"blue", 0, 0, 255, 3},
+		{"white", 255, 255, 255, 3},
+		{"gray", 128, 128, 128, 3},
+		{"orange", 255, 165, 0, 4},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			h, s, v := RGBToHSV(tt.r, tt.g, tt.b)
+			r2, g2, b2 := HsvToRGB(h, s, v)
+			if abs(int(r2)-int(tt.r)) > tt.tolerance ||
+				abs(int(g2)-int(tt.g)) > tt.tolerance ||
+				abs(int(b2)-int(tt.b)) > tt.tolerance {
+				t.Errorf("RGB->HSV->RGB mismatch: start (%d,%d,%d) got (%d,%d,%d)",
+					tt.r, tt.g, tt.b, r2, g2, b2)
+			}
+		})
+	}
+}
+
+func TestXYToHSLRoundTrip(t *testing.T) {
+	tests := []struct {
+		name   string
+		x, y   float64
+	}{
+		{"red region", 0.64, 0.33},
+		{"green region", 0.30, 0.60},
+		{"blue region", 0.15, 0.06},
+		{"white point", 0.3127, 0.329},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			h, s, l := XYToHSL(tt.x, tt.y)
+			x2, y2 := HSLToXY(h, s, l)
+			if !nearFloat(tt.x, x2, 0.05) || !nearFloat(tt.y, y2, 0.05) {
+				t.Errorf("XY->HSL->XY mismatch: start (%f,%f) got (%f,%f)", tt.x, tt.y, x2, y2)
+			}
+		})
+	}
+}
+
+func TestXYToHSVRoundTrip(t *testing.T) {
+	tests := []struct {
+		name   string
+		x, y   float64
+	}{
+		{"red region", 0.64, 0.33},
+		{"green region", 0.30, 0.60},
+		{"blue region", 0.15, 0.06},
+		{"white point", 0.3127, 0.329},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			h, s, v := XYToHSV(tt.x, tt.y)
+			x2, y2 := HSVToXY(h, s, v)
+			if !nearFloat(tt.x, x2, 0.05) || !nearFloat(tt.y, y2, 0.05) {
+				t.Errorf("XY->HSV->XY mismatch: start (%f,%f) got (%f,%f)", tt.x, tt.y, x2, y2)
+			}
+		})
+	}
+}
+
+func TestRGBIntToXYRoundTrip(t *testing.T) {
+	tests := []struct {
+		name    string
+		r, g, b int
+		tolerance int
+	}{
+		{"red", 255, 0, 0, 8},
+		{"green", 0, 255, 0, 8},
+		{"blue", 0, 0, 255, 8},
+		{"white", 255, 255, 255, 6},
+		{"warm", 255, 180, 100, 8},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			x, y := RGBIntToXY(tt.r, tt.g, tt.b)
+			r2, g2, b2 := XYToRGBInt(x, y)
+			if abs(r2-tt.r) > tt.tolerance ||
+				abs(g2-tt.g) > tt.tolerance ||
+				abs(b2-tt.b) > tt.tolerance {
+				t.Errorf("RGBInt->XY->RGBInt mismatch: start (%d,%d,%d) got (%d,%d,%d)",
+					tt.r, tt.g, tt.b, r2, g2, b2)
+			}
+		})
+	}
+}
+
 func TestRotateColor(t *testing.T) {
 	// Start with a color away from white point
 	startX, startY := 0.5, 0.4
@@ -352,4 +508,8 @@ func abs(x int) int {
 		return -x
 	}
 	return x
+}
+
+func nearFloat(a, b, tol float64) bool {
+	return math.Abs(a-b) <= tol
 }
