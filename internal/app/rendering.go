@@ -1504,6 +1504,43 @@ func (m *Model) initTestLightControl() {
 	m.testLightControl = field.NewLightControlComponent("test-light", "test-bridge", "Test Light", &m.styles, m.zones)
 	m.testLightControl.SetState(testState)
 	m.testLightControl.Focus()
+	m.testLightControlActive = 0
+
+	monoState := field.LightControlState{
+		On:         true,
+		Brightness: 40,
+		HasDimming: true,
+	}
+	m.testLightControlMono = field.NewLightControlComponent("test-light-mono", "test-bridge", "Mono Light", &m.styles, m.zones)
+	m.testLightControlMono.SetState(monoState)
+	m.testLightControlMono.Blur()
+
+	colorState := field.LightControlState{
+		On:         true,
+		Brightness: 65,
+		ColorX:     0.35,
+		ColorY:     0.33,
+		MirekValid: false,
+		HasDimming: true,
+		HasColor:   true,
+	}
+	m.testLightControlColor = field.NewLightControlComponent("test-light-color", "test-bridge", "Color Light", &m.styles, m.zones)
+	m.testLightControlColor.SetState(colorState)
+	m.testLightControlColor.Blur()
+
+	tempState := field.LightControlState{
+		On:         true,
+		Brightness: 55,
+		ColorTemp:  320,
+		MinMirek:   153,
+		MaxMirek:   500,
+		MirekValid: true,
+		HasDimming: true,
+		HasColorTemp: true,
+	}
+	m.testLightControlTemp = field.NewLightControlComponent("test-light-temp", "test-bridge", "Temp Light", &m.styles, m.zones)
+	m.testLightControlTemp.SetState(tempState)
+	m.testLightControlTemp.Blur()
 }
 
 // buildTestPageContent builds test page content for component development.
@@ -1518,6 +1555,18 @@ func (m *Model) buildTestPageContent() string {
 	// Render the stored component
 	if m.testLightControl != nil {
 		sb.WriteString(m.testLightControl.ViewControl())
+		if m.testLightControlMono != nil {
+			sb.WriteString("\n\n")
+			sb.WriteString(m.testLightControlMono.ViewControl())
+		}
+		if m.testLightControlColor != nil {
+			sb.WriteString("\n\n")
+			sb.WriteString(m.testLightControlColor.ViewControl())
+		}
+		if m.testLightControlTemp != nil {
+			sb.WriteString("\n\n")
+			sb.WriteString(m.testLightControlTemp.ViewControl())
+		}
 	} else {
 		sb.WriteString("(Component not initialized)")
 	}

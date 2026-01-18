@@ -126,7 +126,11 @@ type Model struct {
 	showTestPage bool // Whether test page is displayed in detail panel
 
 	// Test page component (for development)
-	testLightControl *field.LightControlComponent
+	testLightControl     *field.LightControlComponent
+	testLightControlMono *field.LightControlComponent
+	testLightControlColor *field.LightControlComponent
+	testLightControlTemp *field.LightControlComponent
+	testLightControlActive int
 
 	// State restoration
 	stateRestored      bool   // Whether UI state has been restored from disk

@@ -2,6 +2,7 @@ package field
 
 import (
 	"fmt"
+	"math"
 
 	"github.com/charmbracelet/lipgloss/v2"
 	"github.com/kluzzebass/lazyhue/internal/ui"
@@ -43,26 +44,23 @@ func (c *ColorTempSliderComponent) renderColorTempBar(value, min, max, width int
 
 	bar := ""
 	for j := 0; j < width; j++ {
-		// Gradient from warm orange to cool blue
-		warmR, warmG, warmB := 255, 180, 100 // Warm (left, high mirek)
-		coolR, coolG, coolB := 150, 200, 255 // Cool (right, low mirek)
-		r := warmR + (coolR-warmR)*j/width
-		g := warmG + (coolG-warmG)*j/width
-		b := warmB + (coolB-warmB)*j/width
+		ratio := float64(j) / float64(maxInt(1, width-1))
+		mirek := int(math.Round(float64(max) - ratio*float64(max-min)))
+		r, g, b := ui.MirekToRGB(mirek)
 
 		// Desaturate if inactive (not the current color mode)
 		if c.Inactive {
 			// Calculate luminance (perceived brightness)
-			lum := (299*r + 587*g + 114*b) / 1000
-			r, g, b = lum, lum, lum
+			lum := (299*int(r) + 587*int(g) + 114*int(b)) / 1000
+			r, g, b = uint8(lum), uint8(lum), uint8(lum)
 		}
 
 		// Apply brightness dimming (0% brightness → 50% luminance, 100% → 100%)
 		if c.Brightness < 100 && c.Brightness >= 0 {
 			factor := 0.5 + float64(c.Brightness)/200.0 // 0→0.5, 100→1.0
-			r = int(float64(r) * factor)
-			g = int(float64(g) * factor)
-			b = int(float64(b) * factor)
+			r = uint8(float64(r) * factor)
+			g = uint8(float64(g) * factor)
+			b = uint8(float64(b) * factor)
 		}
 
 		char := "─"

@@ -152,6 +152,7 @@ func NewLightControlComponent(lightID, bridgeID, name string, styles *ui.Styles,
 // If colorsDirty is true, color-related controls are not updated (preserves user edits).
 func (c *LightControlComponent) SetState(state LightControlState) {
 	// Always update capabilities
+	prevHasDimming := c.state.HasDimming
 	prevHasColor := c.state.HasColor
 	prevHasColorTemp := c.state.HasColorTemp
 	prevHasEffects := c.state.HasEffects
@@ -251,8 +252,9 @@ func (c *LightControlComponent) SetState(state LightControlState) {
 	}
 
 	// Update focusable fields if capabilities changed
-	if prevHasColor != state.HasColor || prevHasColorTemp != state.HasColorTemp ||
-		prevHasEffects != state.HasEffects || prevHasGradient != state.HasGradient {
+	if prevHasDimming != state.HasDimming || prevHasColor != state.HasColor ||
+		prevHasColorTemp != state.HasColorTemp || prevHasEffects != state.HasEffects ||
+		prevHasGradient != state.HasGradient {
 		c.updateFocusableFields()
 	}
 }
@@ -281,7 +283,7 @@ func (c *LightControlComponent) updateFocusableFields() {
 	if c.state.HasColor {
 		c.focusableFields = append(c.focusableFields, 4) // Color wheel
 	}
-	if c.state.HasColor || c.state.HasGradient {
+	if c.state.HasGradient {
 		c.focusableFields = append(c.focusableFields, 9) // Gradient
 	}
 	c.focusableFields = append(c.focusableFields, 1) // Identify button
@@ -842,9 +844,38 @@ func (c *LightControlComponent) moveFocus(delta int) {
 		newIndex = len(c.focusableFields) - 1
 	}
 
+	for newIndex >= 0 && newIndex < len(c.focusableFields) && !c.isFieldVisible(c.focusableFields[newIndex]) {
+		newIndex += delta
+		if newIndex < 0 {
+			newIndex = 0
+			break
+		}
+		if newIndex >= len(c.focusableFields) {
+			newIndex = len(c.focusableFields) - 1
+			break
+		}
+	}
+
 	if newIndex != c.focusIndex {
 		c.focusIndex = newIndex
 		c.updateChildFocus()
+	}
+}
+
+func (c *LightControlComponent) isFieldVisible(fieldIndex int) bool {
+	switch fieldIndex {
+	case 2:
+		return c.state.HasDimming
+	case 3:
+		return c.state.HasColorTemp
+	case 4, 5, 6, 7:
+		return c.state.HasColor
+	case 8:
+		return c.state.HasEffects
+	case 9:
+		return c.state.HasGradient
+	default:
+		return true
 	}
 }
 
@@ -941,12 +972,17 @@ func (c *LightControlComponent) ViewControl() string {
 
 	// Find max width of right column for padding
 	rightWidth := 0
+	rightPadding := 0
 	for _, line := range rightLines {
 		w := lipgloss.Width(line)
 		if w > rightWidth {
 			rightWidth = w
 		}
 	}
+	if rightWidth > 0 {
+		rightPadding = 2
+	}
+	rightWidthWithPadding := rightWidth + rightPadding
 
 	for i := 0; i < maxLines; i++ {
 		var left, right string
@@ -959,12 +995,12 @@ func (c *LightControlComponent) ViewControl() string {
 
 		// Pad columns to consistent width
 		leftPadded := left + strings.Repeat(" ", leftWidth-lipgloss.Width(left))
-		rightPadded := right + strings.Repeat(" ", rightWidth-lipgloss.Width(right))
+		rightPadded := right + strings.Repeat(" ", rightWidthWithPadding-lipgloss.Width(right))
 		contentLines = append(contentLines, leftPadded+" "+rightPadded)
 	}
 
 	// Calculate total content width
-	contentWidth := leftWidth + 1 + rightWidth
+	contentWidth := leftWidth + 1 + rightWidthWithPadding
 
 	// Build border manually with name in top and ID button in bottom
 	borderColor := c.Styles.Theme.Border
@@ -990,7 +1026,7 @@ func (c *LightControlComponent) ViewControl() string {
 	}
 	swatchStr := ""
 	swatchWidth := 0
-	if c.state.HasColor || c.state.HasGradient {
+	if c.state.HasGradient {
 		swatchStr = c.gradientEditor.ViewControl()
 		swatchWidth = lipgloss.Width(swatchStr)
 	}
@@ -1007,7 +1043,9 @@ func (c *LightControlComponent) ViewControl() string {
 	bottomRight := borderStyle.Render("╯")
 	bottomSideDash := 1
 	gapWidth := 0
-	if effectWidth > 0 && idWidth > 0 {
+	effectGap := ""
+	if effectWidth > 0 && (swatchWidth > 0 || idWidth > 0) {
+		effectGap = borderStyle.Render("─")
 		gapWidth = 1
 	}
 	swatchGap := ""
@@ -1037,7 +1075,7 @@ func (c *LightControlComponent) ViewControl() string {
 	bottomSideDashStr := borderStyle.Render(strings.Repeat("─", bottomSideDash))
 	var bottomBorder string
 	if effectWidth > 0 {
-		bottomBorder = bottomLeft + bottomSideDashStr + effectStr + bottomFill
+		bottomBorder = bottomLeft + bottomSideDashStr + effectStr + effectGap + bottomFill
 	} else {
 		bottomBorder = bottomLeft + bottomSideDashStr + bottomFill
 	}
@@ -1075,7 +1113,11 @@ func (c *LightControlComponent) renderFieldRow(fieldIndex int, cr ControlRendere
 		focusPrefix = "> "
 	}
 
-	return focusPrefix + cr.ViewControl()
+	row := focusPrefix + cr.ViewControl()
+	if fieldIndex == 2 && c.isMonoControl() {
+		row += " "
+	}
+	return row
 }
 
 // renderMultiRowField renders a multi-row field with focus indicator on first row (no label - minimal labeling).
@@ -1105,6 +1147,10 @@ func (c *LightControlComponent) renderMultiRowField(fieldIndex int, cr ControlRe
 	return out.String()
 }
 
+func (c *LightControlComponent) isMonoControl() bool {
+	return c.state.HasDimming && !c.state.HasColor && !c.state.HasColorTemp && !c.state.HasEffects && !c.state.HasGradient
+}
+
 // isFocusedField checks if the given field index is currently focused.
 func (c *LightControlComponent) isFocusedField(fieldIndex int) bool {
 	if c.focusIndex >= 0 && c.focusIndex < len(c.focusableFields) {
@@ -1118,6 +1164,13 @@ func (c *LightControlComponent) View() string {
 	return c.ViewControl()
 }
 
+// Blur clears focus from the component and all child controls.
+func (c *LightControlComponent) Blur() {
+	c.BaseField.Blur()
+	c.focusIndex = -1
+	c.updateChildFocus()
+}
+
 // Focus sets focus on the first available child control.
 func (c *LightControlComponent) Focus() {
 	c.BaseField.Focus()
@@ -1128,6 +1181,22 @@ func (c *LightControlComponent) Focus() {
 		c.focusIndex = 0
 	}
 	c.updateChildFocus()
+}
+
+// IsAtFirstFocusable returns true when focus is at the first field.
+func (c *LightControlComponent) IsAtFirstFocusable() bool {
+	if len(c.focusableFields) == 0 {
+		return true
+	}
+	return c.focusIndex <= 0
+}
+
+// IsAtLastFocusable returns true when focus is at the last field.
+func (c *LightControlComponent) IsAtLastFocusable() bool {
+	if len(c.focusableFields) == 0 {
+		return true
+	}
+	return c.focusIndex >= len(c.focusableFields)-1
 }
 
 // Children returns all child components.

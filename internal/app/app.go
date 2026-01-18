@@ -37,9 +37,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if blinkMsg, ok := msg.(field.BlinkTickMsg); ok {
 		// Skip lightGrid blink handling when test page is active
 		if m.showTestPage && m.testLightControl != nil {
-			_, cmd := m.testLightControl.Update(blinkMsg)
-			if cmd != nil {
-				cmds = append(cmds, cmd)
+			for _, control := range m.testLightControls() {
+				_, cmd := control.Update(blinkMsg)
+				if cmd != nil {
+					cmds = append(cmds, cmd)
+				}
 			}
 			m.updateDetailContent()
 			return m, tea.Batch(cmds...)
@@ -60,7 +62,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// Handle field changed messages from new form component
 	if fieldMsg, ok := msg.(field.FieldChangedMsg); ok {
 		// Intercept test page field changes - don't send to bridge
-		if strings.HasPrefix(fieldMsg.FieldID, "lc:test-light:") {
+		if strings.HasPrefix(fieldMsg.FieldID, "lc:test-light:") ||
+			strings.HasPrefix(fieldMsg.FieldID, "lc:test-light-mono:") ||
+			strings.HasPrefix(fieldMsg.FieldID, "lc:test-light-color:") ||
+			strings.HasPrefix(fieldMsg.FieldID, "lc:test-light-temp:") {
 			m.status = fmt.Sprintf("Test: %s = %v", fieldMsg.FieldID, fieldMsg.Value)
 			m.updateDetailContent()
 			return m, nil
@@ -493,7 +498,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		// 2. Test page component takes priority when active (except 't' to exit)
 		if m.showTestPage && m.testLightControl != nil && msg.String() != "t" {
-			if handled, cmd := m.testLightControl.RouteEvent(msg); handled {
+			if handled, cmd := m.routeTestLightControls(msg); handled {
 				if cmd != nil {
 					cmds = append(cmds, cmd)
 				}
@@ -689,11 +694,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				case PanelDetail:
 					// Route to test page component if active (skip lightGrid entirely)
 					if m.showTestPage && m.testLightControl != nil {
-						handled, cmd := m.testLightControl.RouteEvent(msg)
+						handled, cmd := m.routeTestLightControls(msg)
 						if handled {
 							m.updateDetailContent()
+							return m, cmd
 						}
-						return m, cmd
 					}
 					// Route to grid component (for dropdowns, sliders, etc.)
 					if handled, cmd := m.lightGrid.RouteEvent(msg); handled {
@@ -924,14 +929,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		// Route to test page component if active (skip lightGrid entirely)
 		if m.showTestPage && m.testLightControl != nil {
-			handled, cmd := m.testLightControl.RouteEvent(msg)
+			handled, cmd := m.routeTestLightControls(msg)
 			if cmd != nil {
 				cmds = append(cmds, cmd)
 			}
 			if handled {
 				m.updateDetailContent()
+				return m, tea.Batch(cmds...)
 			}
-			return m, tea.Batch(cmds...)
 		}
 
 		// Route all events through the grid component first
@@ -983,6 +988,73 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 
 	return m, tea.Batch(cmds...)
+}
+
+func (m *Model) routeTestLightControls(msg tea.Msg) (bool, tea.Cmd) {
+	controls := m.testLightControls()
+	if !m.showTestPage || len(controls) == 0 {
+		return false, nil
+	}
+
+	if m.testLightControlActive < 0 || m.testLightControlActive >= len(controls) {
+		m.testLightControlActive = 0
+	}
+	activeIdx := m.testLightControlActive
+	active := controls[activeIdx]
+
+	if keyMsg, ok := msg.(tea.KeyMsg); ok && len(controls) > 1 {
+		switch keyMsg.String() {
+		case "down", "j":
+			if active.IsAtLastFocusable() && activeIdx < len(controls)-1 {
+				active.Blur()
+				controls[activeIdx+1].Focus()
+				m.testLightControlActive = activeIdx + 1
+				return true, nil
+			}
+		case "up", "k":
+			if active.IsAtFirstFocusable() && activeIdx > 0 {
+				active.Blur()
+				controls[activeIdx-1].Focus()
+				m.testLightControlActive = activeIdx - 1
+				return true, nil
+			}
+		}
+	}
+
+	if handled, cmd := active.RouteEvent(msg); handled {
+		return true, cmd
+	}
+
+	for i, control := range controls {
+		if i == activeIdx {
+			continue
+		}
+		if handled, cmd := control.RouteEvent(msg); handled {
+			active.Blur()
+			control.Focus()
+			m.testLightControlActive = i
+			return true, cmd
+		}
+	}
+
+	return false, nil
+}
+
+func (m *Model) testLightControls() []*field.LightControlComponent {
+	controls := make([]*field.LightControlComponent, 0, 4)
+	if m.testLightControl != nil {
+		controls = append(controls, m.testLightControl)
+	}
+	if m.testLightControlMono != nil {
+		controls = append(controls, m.testLightControlMono)
+	}
+	if m.testLightControlColor != nil {
+		controls = append(controls, m.testLightControlColor)
+	}
+	if m.testLightControlTemp != nil {
+		controls = append(controls, m.testLightControlTemp)
+	}
+	return controls
 }
 
 // rebuildTreeForActiveTab rebuilds the tree based on the active tab.
