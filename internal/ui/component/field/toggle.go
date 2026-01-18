@@ -16,6 +16,9 @@ type ToggleComponent struct {
 	Value    bool
 	OnLabel  string
 	OffLabel string
+
+	// BracketFocusOnly renders focus styling on brackets only.
+	BracketFocusOnly bool
 }
 
 // NewToggleComponent creates a new toggle component.
@@ -123,6 +126,13 @@ func (t *ToggleComponent) ViewControl() string {
 		if t.OffLabel != "" {
 			valueStr += " " + t.OffLabel
 		}
+	}
+
+	if t.BracketFocusOnly && t.IsFocused() && len(valueStr) >= 3 {
+		mid := valueStr[1 : len(valueStr)-1]
+		valueStr = t.Styles.Selected.Render("[") +
+			t.Styles.Base.Render(mid) +
+			t.Styles.Selected.Render("]")
 	}
 
 	// Wrap with zone for mouse detection

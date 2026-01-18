@@ -123,14 +123,16 @@ func (b *ButtonComponent) press() (component.Component, tea.Cmd) {
 // ViewControl renders only the control portion (no label).
 func (b *ButtonComponent) ViewControl() string {
 	// Render as a button-like element with visual feedback when pressed
-	var style = b.Styles.Base
+	labelStr := b.Styles.Base.Render(b.ButtonLabel)
 	if b.pressed {
-		style = b.Styles.Accent
-	} else if b.IsFocused() {
-		style = b.Styles.Focused
+		labelStr = b.Styles.Accent.Render(b.ButtonLabel)
+	}
+	bracketStyle := b.Styles.Base
+	if b.IsFocused() {
+		bracketStyle = b.Styles.Selected
 	}
 
-	buttonStr := style.Render(fmt.Sprintf("[ %s ]", b.ButtonLabel))
+	buttonStr := bracketStyle.Render("[") + " " + labelStr + " " + bracketStyle.Render("]")
 
 	// Wrap with zone for mouse detection
 	if b.Zones != nil {

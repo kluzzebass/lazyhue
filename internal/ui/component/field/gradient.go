@@ -430,6 +430,7 @@ func (g *GradientEditorComponent) ViewControl() string {
 
 func (g *GradientEditorComponent) renderSwatches() string {
 	var parts []string
+	sep := g.Styles.Dimmed.Render("─")
 
 	// Render each gradient point as a colored square
 	for i, pt := range g.Points {
@@ -442,20 +443,31 @@ func (g *GradientEditorComponent) renderSwatches() string {
 
 		// Selected indicator
 		swatch := "██"
-		if i == g.SelectedIndex {
-			// Show selection with different character
-			if g.Editing {
-				swatch = "▓▓"
-			} else {
-				swatch = "▒▒"
+		rendered := ""
+		isSelected := i == g.SelectedIndex
+		if isSelected {
+			// Show selection with brackets; color depends on control focus
+			swatch = "██"
+			bracketStyle := g.Styles.Base
+			if g.IsFocused() {
+				bracketStyle = g.Styles.Selected
 			}
+			rendered = bracketStyle.Render("[") + style.Render(swatch) + bracketStyle.Render("]")
+		} else {
+			rendered = style.Render(swatch)
 		}
 
 		zoneID := fmt.Sprintf("%s-swatch-%d", g.ZoneID(), i)
 		if g.Zones != nil {
-			parts = append(parts, g.Zones.Mark(zoneID, style.Render(swatch)))
+			parts = append(parts, g.Zones.Mark(zoneID, rendered))
 		} else {
-			parts = append(parts, style.Render(swatch))
+			parts = append(parts, rendered)
+		}
+		if i < len(g.Points)-1 {
+			nextSelected := (i + 1) == g.SelectedIndex
+			if !(isSelected || nextSelected) {
+				parts = append(parts, sep)
+			}
 		}
 	}
 
@@ -471,6 +483,11 @@ func (g *GradientEditorComponent) renderSwatches() string {
 
 	addZoneID := fmt.Sprintf("%s-add", g.ZoneID())
 	removeZoneID := fmt.Sprintf("%s-remove", g.ZoneID())
+
+	// Add separator before buttons unless last swatch is bracketed
+	if len(g.Points) > 0 && g.SelectedIndex != len(g.Points)-1 {
+		parts = append(parts, sep)
+	}
 
 	addBtn := addStyle.Render("[+]")
 	removeBtn := removeStyle.Render("[-]")

@@ -23,6 +23,9 @@ type SelectComponent struct {
 	Open   bool
 	Cursor int // Current highlight position in dropdown
 	Scroll int // Scroll offset for long option lists
+
+	// CycleOnly disables dropdown and uses left/right cycling
+	CycleOnly bool
 }
 
 const maxVisibleOptions = 5
@@ -61,12 +64,18 @@ func (s *SelectComponent) Update(msg tea.Msg) (component.Component, tea.Cmd) {
 
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
+		if s.CycleOnly {
+			return s.handleCycleKey(msg)
+		}
 		if s.Open {
 			return s.handleDropdownKey(msg)
 		}
 		return s.handleClosedKey(msg)
 
 	case tea.MouseClickMsg:
+		if s.CycleOnly {
+			return s.handleCycleClick(msg)
+		}
 		return s.handleMouseClick(msg)
 
 	case tea.MouseWheelMsg:
@@ -86,6 +95,13 @@ func (s *SelectComponent) RouteEvent(msg tea.Msg) (bool, tea.Cmd) {
 
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
+		if s.CycleOnly {
+			_, cmd := s.handleCycleKey(msg)
+			if cmd == nil {
+				return false, nil
+			}
+			return true, cmd
+		}
 		if s.Open {
 			_, cmd := s.handleDropdownKey(msg)
 			return true, cmd // Dropdown captures all keys when open
@@ -98,6 +114,15 @@ func (s *SelectComponent) RouteEvent(msg tea.Msg) (bool, tea.Cmd) {
 
 	case tea.MouseClickMsg:
 		if msg.Button == tea.MouseLeft {
+			if s.CycleOnly {
+				if s.Zones != nil {
+					if z := s.Zones.Get(s.ZoneID()); z != nil && z.InBounds(msg) {
+						_, cmd := s.cycle(1)
+						return true, cmd
+					}
+				}
+				return false, nil
+			}
 			// Check main zone
 			if s.Zones != nil {
 				if z := s.Zones.Get(s.ZoneID()); z != nil && z.InBounds(msg) {
@@ -133,6 +158,51 @@ func (s *SelectComponent) handleClosedKey(msg tea.KeyMsg) (component.Component, 
 		return s.openDropdown()
 	}
 	return s, nil
+}
+
+func (s *SelectComponent) handleCycleKey(msg tea.KeyMsg) (component.Component, tea.Cmd) {
+	switch msg.String() {
+	case "left", "h":
+		return s.cycle(-1)
+	case "right", "l":
+		return s.cycle(1)
+	case "up", "k", "down", "j":
+		return s, nil
+	}
+	return s, nil
+}
+
+func (s *SelectComponent) handleCycleClick(msg tea.MouseClickMsg) (component.Component, tea.Cmd) {
+	if msg.Button != tea.MouseLeft {
+		return s, nil
+	}
+	if s.Zones != nil {
+		if z := s.Zones.Get(s.ZoneID()); z != nil && z.InBounds(msg) {
+			return s.cycle(1)
+		}
+	}
+	return s, nil
+}
+
+func (s *SelectComponent) cycle(delta int) (component.Component, tea.Cmd) {
+	if len(s.Options) == 0 {
+		return s, nil
+	}
+	next := s.Value + delta
+	if next < 0 {
+		next = len(s.Options) - 1
+	}
+	if next >= len(s.Options) {
+		next = 0
+	}
+	s.Value = s.Options[next].Value
+	s.Cursor = next
+	return s, func() tea.Msg {
+		return FieldChangedMsg{
+			FieldID: s.ID,
+			Value:   SelectValue{Index: s.Value},
+		}
+	}
 }
 
 func (s *SelectComponent) handleDropdownKey(msg tea.KeyMsg) (component.Component, tea.Cmd) {
@@ -230,6 +300,9 @@ func (s *SelectComponent) ensureCursorVisible() {
 
 // FieldHeight returns the number of rows this component takes up.
 func (s *SelectComponent) FieldHeight() int {
+	if s.CycleOnly {
+		return 1
+	}
 	if s.Open {
 		// Header line + top border + visible options + bottom border
 		visibleOpts := len(s.Options)
@@ -243,10 +316,47 @@ func (s *SelectComponent) FieldHeight() int {
 
 // ViewControl renders only the control portion (no label).
 func (s *SelectComponent) ViewControl() string {
+	if s.CycleOnly {
+		return s.renderCycleControl()
+	}
 	if s.Open {
 		return s.renderDropdownControl()
 	}
 	return s.renderClosedControl()
+}
+
+func (s *SelectComponent) renderCycleControl() string {
+	currentLabel := "---"
+	var currentColor color.Color
+	for _, opt := range s.Options {
+		if opt.Value == s.Value {
+			currentLabel = opt.Label
+			currentColor = opt.Color
+			break
+		}
+	}
+
+	leftArrow := "◀"
+	rightArrow := "▶"
+	arrowStyle := s.Styles.Base
+	if s.IsFocused() {
+		arrowStyle = s.Styles.Selected
+	}
+	maxLabelLen := 0
+	for _, opt := range s.Options {
+		if len(opt.Label) > maxLabelLen {
+			maxLabelLen = len(opt.Label)
+		}
+	}
+	paddedLabel := fmt.Sprintf("%-*s", maxLabelLen, currentLabel)
+	if currentColor != nil {
+		paddedLabel = lipgloss.NewStyle().Foreground(currentColor).Render(paddedLabel)
+	}
+	control := fmt.Sprintf("%s %s %s", arrowStyle.Render(leftArrow), paddedLabel, arrowStyle.Render(rightArrow))
+	if s.Zones != nil {
+		return s.Zones.Mark(s.ZoneID(), control)
+	}
+	return control
 }
 
 func (s *SelectComponent) renderClosedControl() string {

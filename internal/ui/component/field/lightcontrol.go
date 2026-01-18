@@ -6,6 +6,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea/v2"
 	"github.com/charmbracelet/lipgloss/v2"
+	"github.com/kluzzebass/lazyhue/internal/hue"
 	"github.com/kluzzebass/lazyhue/internal/ui"
 	"github.com/kluzzebass/lazyhue/internal/ui/component"
 	zone "github.com/lrstanley/bubblezone/v2"
@@ -102,6 +103,7 @@ func NewLightControlComponent(lightID, bridgeID, name string, styles *ui.Styles,
 	c.powerToggle = NewToggleComponent(baseID+":on", "", true, styles, zones)
 	c.powerToggle.OnLabel = ""
 	c.powerToggle.OffLabel = ""
+	c.powerToggle.BracketFocusOnly = true
 
 	c.identifyButton = NewButtonComponent(baseID+":identify", "", "ID", styles, zones)
 
@@ -124,6 +126,7 @@ func NewLightControlComponent(lightID, bridgeID, name string, styles *ui.Styles,
 	c.hsvControl.ShowSwatch = false
 
 	c.effectSelect = NewSelectComponent(baseID+":effect", "Effect", 0, nil, styles, zones)
+	c.effectSelect.CycleOnly = true
 
 	c.gradientEditor = NewGradientEditorComponent(baseID+":gradient", "Gradient", nil, 5, styles, zones)
 
@@ -218,7 +221,7 @@ func (c *LightControlComponent) SetState(state LightControlState) {
 	if len(state.Effects) > 0 {
 		options := make([]Option, len(state.Effects))
 		for i, effect := range state.Effects {
-			options[i] = Option{Label: effect, Value: i}
+			options[i] = Option{Label: hue.EffectDisplayName(effect), Value: i}
 		}
 		c.effectSelect.SetOptions(options)
 		c.effectSelect.SetValue(state.EffectIndex)
@@ -258,9 +261,8 @@ func (c *LightControlComponent) SetState(state LightControlState) {
 func (c *LightControlComponent) updateFocusableFields() {
 	c.focusableFields = []int{}
 
-	// Order: Power, Identify, Brightness, ColorTemp, ColorWheel, RGB, HSL, HSV, Effect, Gradient
+	// Order: Power, Brightness, ColorTemp, RGB, HSL, HSV, Effect, ColorWheel, Gradient, Identify
 	c.focusableFields = append(c.focusableFields, 0) // Power toggle
-	c.focusableFields = append(c.focusableFields, 1) // Identify button
 
 	if c.state.HasDimming {
 		c.focusableFields = append(c.focusableFields, 2) // Brightness
@@ -269,7 +271,6 @@ func (c *LightControlComponent) updateFocusableFields() {
 		c.focusableFields = append(c.focusableFields, 3) // Color temp
 	}
 	if c.state.HasColor {
-		c.focusableFields = append(c.focusableFields, 4) // Color wheel
 		c.focusableFields = append(c.focusableFields, 5) // RGB
 		c.focusableFields = append(c.focusableFields, 6) // HSL
 		c.focusableFields = append(c.focusableFields, 7) // HSV
@@ -277,9 +278,13 @@ func (c *LightControlComponent) updateFocusableFields() {
 	if c.state.HasEffects {
 		c.focusableFields = append(c.focusableFields, 8) // Effect
 	}
+	if c.state.HasColor {
+		c.focusableFields = append(c.focusableFields, 4) // Color wheel
+	}
 	if c.state.HasColor || c.state.HasGradient {
 		c.focusableFields = append(c.focusableFields, 9) // Gradient
 	}
+	c.focusableFields = append(c.focusableFields, 1) // Identify button
 
 	// Focus first field if current focus is invalid
 	if len(c.focusableFields) > 0 && c.focusIndex >= len(c.focusableFields) {
@@ -371,6 +376,20 @@ func (c *LightControlComponent) updateChildFocus() {
 	// Focus the current field
 	if field := c.getFocusedField(); field != nil {
 		field.Focus()
+		switch focused := field.(type) {
+		case *RGBComponent:
+			if focused.SliderFocus < 0 || focused.SliderFocus > 2 {
+				focused.SliderFocus = 0
+			}
+		case *HSLComponent:
+			if focused.SliderFocus < 0 || focused.SliderFocus > 2 {
+				focused.SliderFocus = 0
+			}
+		case *HSVComponent:
+			if focused.SliderFocus < 0 || focused.SliderFocus > 2 {
+				focused.SliderFocus = 0
+			}
+		}
 	}
 }
 
@@ -442,15 +461,27 @@ func (c *LightControlComponent) RouteEvent(msg tea.Msg) (bool, tea.Cmd) {
 	if focusedField := c.getFocusedField(); focusedField != nil {
 		// Track gradient selection before routing
 		prevGradientSelection := c.gradientEditor.SelectedIndex
+		if msg, ok := msg.(tea.KeyMsg); ok {
+			fieldIdx := c.focusableFields[c.focusIndex]
+			if c.state.MirekValid && fieldIdx >= 4 && fieldIdx <= 7 {
+				switch msg.String() {
+				case "left", "right", "h", "l":
+					c.SwitchToColorMode()
+				}
+			}
+		}
 
 		if handled, cmd := focusedField.RouteEvent(msg); handled {
 			fieldIdx := c.focusableFields[c.focusIndex]
 
-			// For color controls, do immediate sync on key events too
+			// For color controls, do immediate sync on value-changing keys only
 			if fieldIdx >= 4 && fieldIdx <= 7 {
-				if _, ok := msg.(tea.KeyMsg); ok {
-					c.colorsDirty = true
-					c.syncColorFromField(fieldIdx)
+				if keyMsg, ok := msg.(tea.KeyMsg); ok {
+					switch keyMsg.String() {
+					case "left", "right", "h", "l":
+						c.colorsDirty = true
+						c.syncColorFromField(fieldIdx)
+					}
 				}
 			}
 
@@ -534,6 +565,16 @@ func (c *LightControlComponent) handleReactiveColorUpdate(msg FieldChangedMsg, f
 	defer func() { c.updatingColors = false }()
 
 	switch fieldIndex {
+	case 3: // Color temp slider
+		if sv, ok := msg.Value.(SliderValue); ok {
+			c.SwitchToColorTempMode()
+			c.state.ColorTemp = sv.Value
+			c.colorTempSlider.SetValue(sv.Value)
+			c.brightnessSlider.ColorX = 0
+			c.brightnessSlider.ColorY = 0
+			c.brightnessSlider.ColorTempMirek = sv.Value
+		}
+
 	case 4: // Color wheel
 		if cv, ok := msg.Value.(ColorValue); ok {
 			c.SwitchToColorMode()
@@ -656,10 +697,18 @@ func (c *LightControlComponent) handleKey(msg tea.KeyMsg) (bool, tea.Cmd) {
 	// (e.g., at edge of multi-slider control), so we handle it here
 	switch msg.String() {
 	case "up", "k":
+		if c.getFocusedField() == nil {
+			c.FocusFirst()
+			return true, nil
+		}
 		c.moveFocus(-1)
 		return true, nil
 
 	case "down", "j":
+		if c.getFocusedField() == nil {
+			c.FocusFirst()
+			return true, nil
+		}
 		c.moveFocus(1)
 		return true, nil
 	}
@@ -674,6 +723,11 @@ func (c *LightControlComponent) handleMouseClick(msg tea.MouseClickMsg) (bool, t
 		field := c.getFieldByIndex(fieldIdx)
 		if field == nil {
 			continue
+		}
+
+		// Switch back to color mode when interacting with color controls
+		if c.state.MirekValid && fieldIdx >= 4 && fieldIdx <= 7 {
+			c.SwitchToColorMode()
 		}
 
 		// Let the field handle the click - it knows its own zone structure
@@ -826,14 +880,6 @@ func (c *LightControlComponent) FieldHeight() int {
 	// Add 2 for border (top + bottom)
 	height := contentHeight + 2
 
-	// Add rows below border
-	if c.state.HasEffects {
-		height += c.effectSelect.FieldHeight()
-	}
-	if c.state.HasColor || c.state.HasGradient {
-		height += c.gradientEditor.FieldHeight()
-	}
-
 	return height
 }
 
@@ -933,21 +979,42 @@ func (c *LightControlComponent) ViewControl() string {
 	// On/Off toggle in top border (no label)
 	toggleStr := c.powerToggle.ViewControl()
 
-	// ID button for bottom border
+	// Bottom border content: effects selector (left), swatches (right), and ID button (rightmost)
 	idButton := c.identifyButton.ViewControl()
 	idWidth := lipgloss.Width(idButton)
+	effectStr := ""
+	effectWidth := 0
+	if c.state.HasEffects {
+		effectStr = c.effectSelect.ViewControl()
+		effectWidth = lipgloss.Width(effectStr)
+	}
+	swatchStr := ""
+	swatchWidth := 0
+	if c.state.HasColor || c.state.HasGradient {
+		swatchStr = c.gradientEditor.ViewControl()
+		swatchWidth = lipgloss.Width(swatchStr)
+	}
 
 	// Top border: ╭─ ○ Name ───────────────╮
 	topLeft := borderStyle.Render("╭")
 	topRight := borderStyle.Render("╮")
-	topContent := toggleStr + " " + nameStr
+	topContent := toggleStr + "─" + nameStr
 	topContentWidth := lipgloss.Width(topContent)
 	leftDashWidth := 1
 
-	// Bottom border: ╰───────────────── [ID] ─╯
+	// Bottom border: ╰─[Effect]───────────────[ID]─╯
 	bottomLeft := borderStyle.Render("╰")
 	bottomRight := borderStyle.Render("╯")
-	bottomContentWidth := idWidth
+	bottomSideDash := 1
+	gapWidth := 0
+	if effectWidth > 0 && idWidth > 0 {
+		gapWidth = 1
+	}
+	swatchGap := ""
+	if swatchWidth > 0 && idWidth > 0 {
+		swatchGap = c.Styles.Dimmed.Render("─")
+	}
+	bottomContentWidth := effectWidth + gapWidth + swatchWidth + lipgloss.Width(swatchGap) + idWidth + (bottomSideDash * 2)
 	neededTopWidth := leftDashWidth + topContentWidth
 	if neededTopWidth > contentWidth {
 		contentWidth = neededTopWidth
@@ -967,7 +1034,20 @@ func (c *LightControlComponent) ViewControl() string {
 		bottomFillLeft = 0
 	}
 	bottomFill := borderStyle.Render(strings.Repeat("─", bottomFillLeft))
-	bottomBorder := bottomLeft + bottomFill + idButton + bottomRight
+	bottomSideDashStr := borderStyle.Render(strings.Repeat("─", bottomSideDash))
+	var bottomBorder string
+	if effectWidth > 0 {
+		bottomBorder = bottomLeft + bottomSideDashStr + effectStr + bottomFill
+	} else {
+		bottomBorder = bottomLeft + bottomSideDashStr + bottomFill
+	}
+	if swatchWidth > 0 {
+		bottomBorder += swatchStr
+		if swatchGap != "" {
+			bottomBorder += swatchGap
+		}
+	}
+	bottomBorder += idButton + bottomSideDashStr + bottomRight
 
 	// Content rows with side borders
 	var result strings.Builder
@@ -984,18 +1064,6 @@ func (c *LightControlComponent) ViewControl() string {
 	}
 	result.WriteString("\n")
 	result.WriteString(bottomBorder)
-
-	// Add effect selector below border if present
-	if c.state.HasEffects {
-		result.WriteString("\n")
-		result.WriteString(c.renderFieldRow(8, c.effectSelect))
-	}
-
-	// Add gradient editor below border if present
-	if c.state.HasColor || c.state.HasGradient {
-		result.WriteString("\n")
-		result.WriteString(c.renderMultiRowField(9, c.gradientEditor))
-	}
 
 	return result.String()
 }
@@ -1050,6 +1118,18 @@ func (c *LightControlComponent) View() string {
 	return c.ViewControl()
 }
 
+// Focus sets focus on the first available child control.
+func (c *LightControlComponent) Focus() {
+	c.BaseField.Focus()
+	if len(c.focusableFields) == 0 {
+		return
+	}
+	if c.focusIndex < 0 || c.focusIndex >= len(c.focusableFields) {
+		c.focusIndex = 0
+	}
+	c.updateChildFocus()
+}
+
 // Children returns all child components.
 func (c *LightControlComponent) Children() []component.Component {
 	return []component.Component{
@@ -1093,6 +1173,9 @@ func (c *LightControlComponent) SetColorMode(mirekValid bool) {
 	c.rgbControl.Inactive = mirekValid
 	c.hslControl.Inactive = mirekValid
 	c.hsvControl.Inactive = mirekValid
+	if !mirekValid {
+		c.brightnessSlider.ColorTempMirek = 0
+	}
 }
 
 // SwitchToColorMode switches to XY color mode.
