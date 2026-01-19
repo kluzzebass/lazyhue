@@ -3,6 +3,7 @@ package field
 import (
 	"fmt"
 	"math"
+	"strconv"
 
 	tea "github.com/charmbracelet/bubbletea/v2"
 	"github.com/charmbracelet/lipgloss/v2"
@@ -125,7 +126,9 @@ func (c *ColorTempSliderComponent) renderColorTempBar(value, min, max, width int
 func (c *ColorTempSliderComponent) formatColorTemp(value, min, max int) string {
 	// Convert mirek to Kelvin (mirek = 1,000,000 / K)
 	kelvin := 1000000 / maxInt(1, value)
-	return fmt.Sprintf("%dK", kelvin)
+	_, maxK := c.kelvinRange()
+	maxDigits := len(strconv.Itoa(maxK))
+	return fmt.Sprintf("%*dK", maxDigits, kelvin)
 }
 
 func (c *ColorTempSliderComponent) adjustKelvin(delta int) tea.Cmd {
@@ -144,6 +147,29 @@ func (c *ColorTempSliderComponent) adjustKelvin(delta int) tea.Cmd {
 			Value:   SliderValue{Value: c.Value},
 		}
 	}
+}
+
+// ViewControl renders only the control portion and adjusts bar width
+// to account for the max temperature digit width.
+func (c *ColorTempSliderComponent) ViewControl() string {
+	c.adjustBarWidth()
+	return c.SliderComponent.ViewControl()
+}
+
+func (c *ColorTempSliderComponent) adjustBarWidth() {
+	_, maxK := c.kelvinRange()
+	maxDigits := len(strconv.Itoa(maxK))
+	baseDigits := 4 // 6500K-style ranges
+	baseWidth := 21
+	reduce := 0
+	if maxDigits > baseDigits {
+		reduce = maxDigits - baseDigits
+	}
+	width := baseWidth - reduce
+	if width < 10 {
+		width = 10
+	}
+	c.BarWidth = width
 }
 
 func (c *ColorTempSliderComponent) handleKelvinClick(msg tea.MouseClickMsg) tea.Cmd {

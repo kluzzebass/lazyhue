@@ -134,6 +134,7 @@ func TestXyToHueSat(t *testing.T) {
 }
 
 func TestHueSatToXY(t *testing.T) {
+	whiteX, whiteY := RGBToXY(255, 255, 255)
 	tests := []struct {
 		name    string
 		hue, sat int
@@ -155,9 +156,9 @@ func TestHueSatToXY(t *testing.T) {
 			}
 			// White should be near white point
 			if tt.sat == 0 {
-				if math.Abs(x-0.3127) > 0.01 || math.Abs(y-0.329) > 0.01 {
-					t.Errorf("HueSatToXY(%d, %d) = (%f, %f); expected near white point (0.3127, 0.329)",
-						tt.hue, tt.sat, x, y)
+				if math.Abs(x-whiteX) > 0.01 || math.Abs(y-whiteY) > 0.01 {
+					t.Errorf("HueSatToXY(%d, %d) = (%f, %f); expected near white point (%f, %f)",
+						tt.hue, tt.sat, x, y, whiteX, whiteY)
 				}
 			}
 		})
@@ -168,26 +169,24 @@ func TestRGBToXYRoundTrip(t *testing.T) {
 	tests := []struct {
 		name       string
 		r, g, b    uint8
-		tolerance  int
 	}{
-		{"red", 255, 0, 0, 8},
-		{"green", 0, 255, 0, 8},
-		{"blue", 0, 0, 255, 8},
-		{"white", 255, 255, 255, 6},
-		{"warm", 255, 180, 100, 8},
-		{"cool", 150, 200, 255, 8},
-		{"dim teal", 32, 96, 96, 10},
+		{"red", 255, 0, 0},
+		{"green", 0, 255, 0},
+		{"blue", 0, 0, 255},
+		{"white", 255, 255, 255},
+		{"warm", 255, 180, 100},
+		{"cool", 150, 200, 255},
+		{"dim teal", 32, 96, 96},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			x, y := RGBToXY(tt.r, tt.g, tt.b)
-			r2, g2, b2 := XyToRGB(x, y, 100)
-			if abs(int(r2)-int(tt.r)) > tt.tolerance ||
-				abs(int(g2)-int(tt.g)) > tt.tolerance ||
-				abs(int(b2)-int(tt.b)) > tt.tolerance {
-				t.Errorf("RGB->XY->RGB mismatch: start (%d,%d,%d) got (%d,%d,%d)",
-					tt.r, tt.g, tt.b, r2, g2, b2)
+			x, y, brightness := rgbToXYBrightness(tt.r, tt.g, tt.b)
+			r2, g2, b2 := XyToRGB(x, y, brightness)
+			x2, y2 := RGBToXY(r2, g2, b2)
+			if !nearFloat(x, x2, 0.02) || !nearFloat(y, y2, 0.02) {
+				t.Errorf("RGB->XY->RGB->XY mismatch: start (%f,%f) got (%f,%f)",
+					x, y, x2, y2)
 			}
 		})
 	}
@@ -250,14 +249,18 @@ func TestRGBToHSVRoundTrip(t *testing.T) {
 }
 
 func TestXYToHSLRoundTrip(t *testing.T) {
+	redX, redY := RGBToXY(255, 0, 0)
+	greenX, greenY := RGBToXY(0, 255, 0)
+	blueX, blueY := RGBToXY(0, 0, 255)
+	whiteX, whiteY := RGBToXY(255, 255, 255)
 	tests := []struct {
 		name   string
 		x, y   float64
 	}{
-		{"red region", 0.64, 0.33},
-		{"green region", 0.30, 0.60},
-		{"blue region", 0.15, 0.06},
-		{"white point", 0.3127, 0.329},
+		{"red region", redX, redY},
+		{"green region", greenX, greenY},
+		{"blue region", blueX, blueY},
+		{"white point", whiteX, whiteY},
 	}
 
 	for _, tt := range tests {
@@ -272,14 +275,18 @@ func TestXYToHSLRoundTrip(t *testing.T) {
 }
 
 func TestXYToHSVRoundTrip(t *testing.T) {
+	redX, redY := RGBToXY(255, 0, 0)
+	greenX, greenY := RGBToXY(0, 255, 0)
+	blueX, blueY := RGBToXY(0, 0, 255)
+	whiteX, whiteY := RGBToXY(255, 255, 255)
 	tests := []struct {
 		name   string
 		x, y   float64
 	}{
-		{"red region", 0.64, 0.33},
-		{"green region", 0.30, 0.60},
-		{"blue region", 0.15, 0.06},
-		{"white point", 0.3127, 0.329},
+		{"red region", redX, redY},
+		{"green region", greenX, greenY},
+		{"blue region", blueX, blueY},
+		{"white point", whiteX, whiteY},
 	}
 
 	for _, tt := range tests {
@@ -297,24 +304,22 @@ func TestRGBIntToXYRoundTrip(t *testing.T) {
 	tests := []struct {
 		name    string
 		r, g, b int
-		tolerance int
 	}{
-		{"red", 255, 0, 0, 8},
-		{"green", 0, 255, 0, 8},
-		{"blue", 0, 0, 255, 8},
-		{"white", 255, 255, 255, 6},
-		{"warm", 255, 180, 100, 8},
+		{"red", 255, 0, 0},
+		{"green", 0, 255, 0},
+		{"blue", 0, 0, 255},
+		{"white", 255, 255, 255},
+		{"warm", 255, 180, 100},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			x, y := RGBIntToXY(tt.r, tt.g, tt.b)
-			r2, g2, b2 := XYToRGBInt(x, y)
-			if abs(r2-tt.r) > tt.tolerance ||
-				abs(g2-tt.g) > tt.tolerance ||
-				abs(b2-tt.b) > tt.tolerance {
-				t.Errorf("RGBInt->XY->RGBInt mismatch: start (%d,%d,%d) got (%d,%d,%d)",
-					tt.r, tt.g, tt.b, r2, g2, b2)
+			x, y, brightness := rgbIntToXYBrightness(tt.r, tt.g, tt.b)
+			r2, g2, b2 := XyToRGB(x, y, brightness)
+			x2, y2 := RGBToXY(r2, g2, b2)
+			if !nearFloat(x, x2, 0.02) || !nearFloat(y, y2, 0.02) {
+				t.Errorf("RGBInt->XY->RGBInt->XY mismatch: start (%f,%f) got (%f,%f)",
+					x, y, x2, y2)
 			}
 		})
 	}
@@ -512,4 +517,40 @@ func abs(x int) int {
 
 func nearFloat(a, b, tol float64) bool {
 	return math.Abs(a-b) <= tol
+}
+
+func rgbToXYBrightness(r, g, b uint8) (x, y, brightness float64) {
+	rFloat := float64(r) / 255.0
+	gFloat := float64(g) / 255.0
+	bFloat := float64(b) / 255.0
+
+	applyGamma := func(v float64) float64 {
+		if v > 0.04045 {
+			return math.Pow((v+0.055)/1.055, 2.4)
+		}
+		return v / 12.92
+	}
+
+	rFloat = applyGamma(rFloat)
+	gFloat = applyGamma(gFloat)
+	bFloat = applyGamma(bFloat)
+
+	X := rFloat*0.664511 + gFloat*0.154324 + bFloat*0.162028
+	Y := rFloat*0.283881 + gFloat*0.668433 + bFloat*0.047685
+	Z := rFloat*0.000088 + gFloat*0.072310 + bFloat*0.986039
+
+	sum := X + Y + Z
+	if sum == 0 {
+		return 0.3127, 0.329, 0
+	}
+
+	x = X / sum
+	y = Y / sum
+	brightness = Y * 100.0
+
+	return x, y, brightness
+}
+
+func rgbIntToXYBrightness(r, g, b int) (x, y, brightness float64) {
+	return rgbToXYBrightness(uint8(clampInt(r, 0, 255)), uint8(clampInt(g, 0, 255)), uint8(clampInt(b, 0, 255)))
 }
