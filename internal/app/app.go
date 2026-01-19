@@ -1037,6 +1037,16 @@ func (m *Model) routeTestLightControls(msg tea.Msg) (bool, tea.Cmd) {
 		}
 	}
 
+	// Consume key/mouse events when test page is active to avoid leaking to panels behind.
+	// Allow "t" to pass through so it can toggle the test page.
+	if keyMsg, ok := msg.(tea.KeyMsg); ok && keyMsg.String() == "t" {
+		return false, nil
+	}
+	switch msg.(type) {
+	case tea.KeyMsg, tea.MouseClickMsg, tea.MouseMotionMsg, tea.MouseReleaseMsg:
+		return true, nil
+	}
+
 	return false, nil
 }
 

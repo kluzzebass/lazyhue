@@ -11,6 +11,13 @@ import (
 	"github.com/kluzzebass/lazyhue/internal/hueclient"
 )
 
+const (
+	lightBrightnessDebounceDelay = 50 * time.Millisecond
+	lightColorDebounceDelay      = 150 * time.Millisecond
+	lightColorTempDebounceDelay  = 150 * time.Millisecond
+	lightGradientDebounceDelay   = 50 * time.Millisecond
+)
+
 // ToggleLight toggles a light on or off.
 func (b *Bridge) ToggleLight(lightID string) error {
 	b.mu.RLock()
@@ -143,7 +150,7 @@ func (b *Bridge) SetLightBrightness(lightID string, brightness float64) error {
 	}
 
 	br := float32(brightness)
-	b.brightnessDebounce[lightID] = time.AfterFunc(50*time.Millisecond, func() {
+	b.brightnessDebounce[lightID] = time.AfterFunc(lightBrightnessDebounceDelay, func() {
 		b.mu.RLock()
 		client := b.client
 		b.mu.RUnlock()
@@ -198,7 +205,7 @@ func (b *Bridge) SetLightColor(lightID string, x, y float64) error {
 	}
 
 	xf, yf := float32(x), float32(y)
-	b.colorDebounce[lightID] = time.AfterFunc(50*time.Millisecond, func() {
+	b.colorDebounce[lightID] = time.AfterFunc(lightColorDebounceDelay, func() {
 		b.mu.RLock()
 		client := b.client
 		b.mu.RUnlock()
@@ -260,7 +267,7 @@ func (b *Bridge) SetLightColorTemperature(lightID string, mirek int) error {
 		lightName = b.state.GetLightName(light)
 	}
 
-	b.colorTempDebounce[lightID] = time.AfterFunc(50*time.Millisecond, func() {
+	b.colorTempDebounce[lightID] = time.AfterFunc(lightColorTempDebounceDelay, func() {
 		b.mu.RLock()
 		client := b.client
 		b.mu.RUnlock()
@@ -485,6 +492,68 @@ func (b *Bridge) SetLightGradientMode(lightID string, mode hueclient.LightGetGra
 	return nil
 }
 
+// SetLightGradientModeWithPoints sets a light's gradient mode with explicit points in one request.
+// The Hue API requires points to be included when changing mode.
+func (b *Bridge) SetLightGradientModeWithPoints(lightID string, mode hueclient.LightGetGradientMode, points []hueclient.ActionGetActionColor) error {
+	b.mu.RLock()
+	client := b.client
+	b.mu.RUnlock()
+
+	if client == nil {
+		return ErrAuthFailed
+	}
+
+	lightName := "Unknown"
+	if light, ok := b.state.GetLight(lightID); ok {
+		lightName = b.state.GetLightName(light)
+	}
+
+	// Build wrapped points from provided points
+	wrappedPoints := make([]gradientPointPut, 0, len(points))
+	for i := range points {
+		pt := points[i]
+		wrappedPoints = append(wrappedPoints, gradientPointPut{Color: &pt})
+	}
+
+	// Optimistic update (mode + points) for state cache
+	b.state.SetLightGradientMode(lightID, mode)
+	if len(points) > 0 {
+		gradientPoints := make([]hueclient.GradientPointGet, len(points))
+		for i, pt := range points {
+			gradientPoints[i] = hueclient.GradientPointGet{Color: pt}
+		}
+		b.state.SetLightGradientPoints(lightID, gradientPoints)
+	}
+
+	b.logRequest(fmt.Sprintf("%s: gradient mode %s", lightName, mode))
+
+	reqBody := gradientModePutBody{
+		Gradient: &gradientModePut{
+			Mode:   &mode,
+			Points: wrappedPoints,
+		},
+	}
+	bodyBytes, err := json.Marshal(reqBody)
+	if err != nil {
+		b.logError(fmt.Sprintf("%s: gradient mode failed: %v", lightName, err))
+		return err
+	}
+
+	resp, err := client.UpdateLightWithBody(context.Background(), toResourceId(lightID), "application/json", bytes.NewReader(bodyBytes))
+	if err != nil {
+		b.logError(fmt.Sprintf("%s: gradient mode failed: %v", lightName, err))
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 400 {
+		errMsg := fmt.Sprintf("%s: gradient mode failed: HTTP %d", lightName, resp.StatusCode)
+		b.logError(errMsg)
+		return errors.New(errMsg)
+	}
+	return nil
+}
+
 // gradientPointPut wraps a Color in a "color" field for the PUT API.
 // The Hue API expects: { "color": { "xy": { "x": ..., "y": ... } } }
 type gradientPointPut struct {
@@ -537,7 +606,7 @@ func (b *Bridge) SetLightGradientPoints(lightID string, points []hueclient.Actio
 		wrappedPoints[i] = gradientPointPut{Color: &points[i]}
 	}
 
-	b.colorDebounce[debounceKey] = time.AfterFunc(50*time.Millisecond, func() {
+	b.colorDebounce[debounceKey] = time.AfterFunc(lightGradientDebounceDelay, func() {
 		b.mu.RLock()
 		client := b.client
 		b.mu.RUnlock()

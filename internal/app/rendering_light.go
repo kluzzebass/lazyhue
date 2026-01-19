@@ -421,123 +421,14 @@ func (m *Model) buildControlsRows(light hueclient.LightGet) []gridlayout.GridRow
 		Section: header,
 	})
 
-	// On/Off toggle
-	onValue := light.On.On
-	toggle := field.NewToggleComponent("on", "Power", onValue, &m.styles, m.zones)
-	toggle.SetLabels("On", "Off")
+	control := field.NewLightControlComponent(light.Id, light.Owner.Rid, light.Metadata.Name, &m.styles, m.zones)
+	control.SetState(buildLightControlStateFromLight(light))
 	rows = append(rows, gridlayout.GridRow{
 		Type: gridlayout.RowTypeNormal,
 		Cells: []gridlayout.GridCell{
-			{Component: gridlayout.NewLabelWithWidth("Power", infoLabelWidth)},
-			{Component: toggle},
+			{Component: control, ColSpan: 2},
 		},
 	})
-
-	// Brightness (if dimmable)
-	if light.Dimming != nil {
-		brightness := int(light.Dimming.Brightness)
-		slider := field.NewBrightnessSliderComponent(
-			"brightness", "Brightness", brightness,
-			&m.styles, m.zones,
-		)
-		rows = append(rows, gridlayout.GridRow{
-			Type: gridlayout.RowTypeNormal,
-			Cells: []gridlayout.GridCell{
-				{Component: gridlayout.NewLabelWithWidth("Brightness", infoLabelWidth)},
-				{Component: slider},
-			},
-		})
-	}
-
-	// Determine active color mode: MirekValid=true means color temp mode is active
-	mirekValid := false
-	if light.ColorTemperature != nil {
-		mirekValid = light.ColorTemperature.MirekValid
-	}
-
-	// Color temperature (if supported)
-	if light.ColorTemperature != nil {
-		mirek := light.ColorTemperature.Mirek
-		if mirek == 0 {
-			mirek = 250 // default if not set
-		}
-		minMirek := light.ColorTemperature.MirekSchema.MirekMinimum
-		maxMirek := light.ColorTemperature.MirekSchema.MirekMaximum
-		if minMirek == 0 {
-			minMirek = 153
-		}
-		if maxMirek == 0 {
-			maxMirek = 500
-		}
-		slider := field.NewColorTempSliderComponent(
-			"colortemp", "Color Temp", mirek, minMirek, maxMirek,
-			&m.styles, m.zones,
-		)
-		// Inactive (grayscale) when color wheel mode is active
-		slider.Inactive = !mirekValid
-		rows = append(rows, gridlayout.GridRow{
-			Type: gridlayout.RowTypeNormal,
-			Cells: []gridlayout.GridCell{
-				{Component: gridlayout.NewLabelWithWidth("Color Temp", infoLabelWidth)},
-				{Component: slider},
-			},
-		})
-	}
-
-	// Color (if supported)
-	if light.Color != nil {
-		x := float64(light.Color.Xy.X)
-		y := float64(light.Color.Xy.Y)
-		if x == 0 && y == 0 {
-			x, y = 0.3127, 0.329 // default white point
-		}
-		colorWheel := field.NewColorWheelComponent(
-			"color", "Color", x, y,
-			&m.styles, m.zones,
-		)
-		// Inactive (grayscale) when color temp mode is active
-		colorWheel.Inactive = mirekValid
-		rows = append(rows, gridlayout.GridRow{
-			Type: gridlayout.RowTypeNormal,
-			Cells: []gridlayout.GridCell{
-				{Component: gridlayout.NewLabelWithWidth("Color", infoLabelWidth)},
-				{Component: colorWheel},
-			},
-		})
-	}
-
-	// Effect (if supported)
-	if light.Effects != nil && len(light.Effects.EffectValues) > 0 {
-		var options []field.Option
-		currentEffect := -1
-		for i, effect := range light.Effects.EffectValues {
-			effectStr := string(effect)
-			displayName := hue.EffectDisplayName(effectStr)
-			options = append(options, field.Option{
-				Label: displayName,
-				Value: i,
-			})
-			if hueclient.SupportedSounds(light.Effects.Status) == effect {
-				currentEffect = i
-			}
-		}
-		if len(options) > 0 {
-			if currentEffect == -1 {
-				currentEffect = 0
-			}
-			selectComp := field.NewSelectComponent(
-				"effect", "Effect", currentEffect, options,
-				&m.styles, m.zones,
-			)
-			rows = append(rows, gridlayout.GridRow{
-				Type: gridlayout.RowTypeNormal,
-				Cells: []gridlayout.GridCell{
-					{Component: gridlayout.NewLabelWithWidth("Effect", infoLabelWidth)},
-					{Component: selectComp},
-				},
-			})
-		}
-	}
 
 	// EffectsV2 speed control (when effect is active)
 	if light.EffectsV2 != nil && light.EffectsV2.Status.Effect != "" && light.EffectsV2.Status.Effect != "no_effect" {
@@ -558,22 +449,95 @@ func (m *Model) buildControlsRows(light hueclient.LightGet) []gridlayout.GridRow
 		})
 	}
 
-	// Identify button (uses device ID from light owner)
-	if light.Owner.Rid != "" {
-		identifyBtn := field.NewButtonComponent(
-			FieldIDIdentify(light.Owner.Rid), "Identify", "Identify",
-			&m.styles, m.zones,
-		)
-		rows = append(rows, gridlayout.GridRow{
-			Type: gridlayout.RowTypeNormal,
-			Cells: []gridlayout.GridCell{
-				{Component: gridlayout.NewLabelWithWidth("Identify", infoLabelWidth)},
-				{Component: identifyBtn},
-			},
-		})
+	return rows
+}
+
+func buildLightControlStateFromLight(light hueclient.LightGet) field.LightControlState {
+	state := field.LightControlState{
+		On:           light.On.On,
+		Brightness:   100,
+		HasDimming:   light.Dimming != nil,
+		HasColor:     light.Color != nil,
+		HasColorTemp: light.ColorTemperature != nil,
+		HasEffects:   light.Effects != nil && len(light.Effects.EffectValues) > 0,
+		HasGradient:  light.Gradient != nil,
 	}
 
-	return rows
+	if light.Dimming != nil {
+		state.Brightness = int(light.Dimming.Brightness)
+	}
+
+	if light.ColorTemperature != nil {
+		mirek := light.ColorTemperature.Mirek
+		if mirek == 0 {
+			mirek = 250
+		}
+		minMirek := light.ColorTemperature.MirekSchema.MirekMinimum
+		maxMirek := light.ColorTemperature.MirekSchema.MirekMaximum
+		if minMirek == 0 {
+			minMirek = 153
+		}
+		if maxMirek == 0 {
+			maxMirek = 500
+		}
+		state.ColorTemp = mirek
+		state.MinMirek = minMirek
+		state.MaxMirek = maxMirek
+		state.MirekValid = light.ColorTemperature.MirekValid
+	}
+
+	if light.Color != nil {
+		x := float64(light.Color.Xy.X)
+		y := float64(light.Color.Xy.Y)
+		if x == 0 && y == 0 {
+			x, y = 0.3127, 0.329
+		}
+		state.ColorX = x
+		state.ColorY = y
+	}
+
+	if state.HasEffects {
+		currentEffect := 0
+		for i, effect := range light.Effects.EffectValues {
+			state.Effects = append(state.Effects, string(effect))
+			if hueclient.SupportedSounds(light.Effects.Status) == effect {
+				currentEffect = i
+			}
+		}
+		state.EffectIndex = currentEffect
+	}
+
+	if light.Gradient != nil {
+		points := convertGradientPoints(light.Gradient.Points)
+		if len(points) == 0 {
+			baseX, baseY := state.ColorX, state.ColorY
+			if baseX == 0 && baseY == 0 {
+				baseX, baseY = 0.3127, 0.329
+			}
+			points = []field.GradientPoint{
+				{X: baseX, Y: baseY},
+				{X: baseX, Y: baseY},
+			}
+		}
+		state.GradientPoints = points
+		state.MaxGradientPoints = light.Gradient.PointsCapable
+		if state.MaxGradientPoints == 0 && len(points) > 0 {
+			state.MaxGradientPoints = len(points)
+		}
+		if len(light.Gradient.ModeValues) > 0 {
+			currentMode := 0
+			state.GradientModes = make([]string, len(light.Gradient.ModeValues))
+			for i, mode := range light.Gradient.ModeValues {
+				state.GradientModes[i] = string(mode)
+				if mode == hueclient.SupportedSounds(light.Gradient.Mode) {
+					currentMode = i
+				}
+			}
+			state.GradientMode = currentMode
+		}
+	}
+
+	return state
 }
 
 // buildStateRows builds rows for technical state info not shown in controls.
@@ -887,26 +851,7 @@ func (m *Model) buildGradientRows(light hueclient.LightGet, lightID string) []gr
 		rows = append(rows, gridlayout.NewInfoRow("Max Points", fmt.Sprintf("%d", light.Gradient.PointsCapable), infoLabelWidth))
 	}
 
-	// Gradient editor
-	if len(light.Gradient.Points) > 0 {
-		maxPoints := light.Gradient.PointsCapable
-		if maxPoints == 0 {
-			maxPoints = 5 // default
-		}
-
-		points := convertGradientPoints(light.Gradient.Points)
-		editor := field.NewGradientEditorComponent(
-			FieldIDGradientPoints(lightID), "Colors", points, maxPoints,
-			&m.styles, m.zones,
-		)
-		rows = append(rows, gridlayout.GridRow{
-			Type: gridlayout.RowTypeNormal,
-			Cells: []gridlayout.GridCell{
-				{Component: gridlayout.NewLabelWithWidth("Colors", infoLabelWidth)},
-				{Component: editor},
-			},
-		})
-	}
+	// Gradient editor is now part of the unified light control component.
 
 	return rows
 }

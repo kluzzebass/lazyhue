@@ -304,6 +304,37 @@ func (g *Grid) RouteEvent(msg tea.Msg) (bool, tea.Cmd) {
 		return false, nil
 	}
 
+	// For mouse drag/release, route to focused row first, then fall back to all cells.
+	switch msg.(type) {
+	case tea.MouseMsg, tea.MouseMotionMsg, tea.MouseReleaseMsg:
+		if g.focusRow >= 0 && g.focusRow < len(g.rows) {
+			row := g.rows[g.focusRow]
+			if row.Type == RowTypeNormal {
+				for _, cell := range row.Cells {
+					if cell.Component != nil {
+						if handled, cmd := cell.Component.RouteEvent(msg); handled {
+							return true, cmd
+						}
+					}
+				}
+			}
+		}
+		for _, row := range g.rows {
+			if row.Type != RowTypeNormal {
+				continue
+			}
+			for _, cell := range row.Cells {
+				if cell.Component == nil {
+					continue
+				}
+				if handled, cmd := cell.Component.RouteEvent(msg); handled {
+					return true, cmd
+				}
+			}
+		}
+		return false, nil
+	}
+
 	// For mouse wheel, route to all cells in focused row (for dropdowns, sliders, etc.)
 	if _, isMouseWheel := msg.(tea.MouseWheelMsg); isMouseWheel {
 		if g.focusRow >= 0 && g.focusRow < len(g.rows) {

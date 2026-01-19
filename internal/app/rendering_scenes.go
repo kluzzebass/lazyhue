@@ -162,120 +162,22 @@ func (m *Model) buildSceneGridRows(scene hueclient.SceneGet, state *hue.BridgeSt
 				rows = append(rows, gridlayout.NewEmptyRow())
 			}
 
-			// Light name as a sub-header
-			lightNameStyle := lipgloss.NewStyle().Foreground(m.styles.Theme.EntityLight).Bold(true)
-			rows = append(rows, gridlayout.NewStyledInfoRow("Light", lightNameStyle.Render(targetName), infoLabelWidth, lipgloss.NewStyle()))
-
-			// All controls based on light capabilities for consistent ordering
-			// (matches light details panel: Power → Brightness → Color Temp → Color)
-
-			// On/Off toggle - all lights support this
-			onValue := true
-			if action.Action.On != nil {
-				onValue = action.Action.On.On
-			}
-			toggle := field.NewToggleComponent(
-				FieldIDSceneActionOn(sceneID, lightID), "Power", onValue,
-				&m.styles, m.zones,
+			control := field.NewLightControlComponentWithID(
+				FieldIDSceneLightControl(sceneID, lightID),
+				lightID,
+				"",
+				targetName,
+				&m.styles,
+				m.zones,
 			)
+			control.SetIdentifyVisible(false)
+			control.SetState(buildSceneLightControlState(action, light))
 			rows = append(rows, gridlayout.GridRow{
 				Type: gridlayout.RowTypeNormal,
 				Cells: []gridlayout.GridCell{
-					{Component: gridlayout.NewLabelWithWidth("Power", infoLabelWidth)},
-					{Component: toggle},
+					{Component: control, ColSpan: 2},
 				},
 			})
-
-			// Get brightness for this action (used for dimming color controls)
-			brightness := 100
-			if action.Action.Dimming != nil {
-				brightness = int(action.Action.Dimming.Brightness)
-			}
-
-			// Determine active color mode for this action
-			// Color temp is active if it's set in the action, color is active otherwise
-			colorTempActive := action.Action.ColorTemperature != nil && action.Action.ColorTemperature.Mirek != 0
-
-			// Get color values for brightness slider display
-			var colorX, colorY float64
-			var colorTempMirek int
-			if colorTempActive {
-				colorTempMirek = action.Action.ColorTemperature.Mirek
-			} else if action.Action.Color != nil {
-				colorX = float64(action.Action.Color.Xy.X)
-				colorY = float64(action.Action.Color.Xy.Y)
-			}
-
-			// Brightness slider - show if light supports dimming
-			if light != nil && light.Dimming != nil {
-				slider := field.NewBrightnessSliderComponent(
-					FieldIDSceneActionBrightness(sceneID, lightID), "Brightness", brightness,
-					&m.styles, m.zones,
-				)
-				// Set color for the brightness bar
-				slider.ColorX = colorX
-				slider.ColorY = colorY
-				slider.ColorTempMirek = colorTempMirek
-				rows = append(rows, gridlayout.GridRow{
-					Type: gridlayout.RowTypeNormal,
-					Cells: []gridlayout.GridCell{
-						{Component: gridlayout.NewLabelWithWidth("Brightness", infoLabelWidth)},
-						{Component: slider},
-					},
-				})
-			}
-
-			// Color temperature slider - show if light supports color temp
-			if light != nil && light.ColorTemperature != nil {
-				minMirek := light.ColorTemperature.MirekSchema.MirekMinimum
-				maxMirek := light.ColorTemperature.MirekSchema.MirekMaximum
-				// Use action color temp if set, otherwise default to middle of range
-				mirek := (minMirek + maxMirek) / 2
-				if action.Action.ColorTemperature != nil && action.Action.ColorTemperature.Mirek != 0 {
-					mirek = action.Action.ColorTemperature.Mirek
-				}
-				slider := field.NewColorTempSliderComponent(
-					FieldIDSceneActionColorTemp(sceneID, lightID), "Color Temp", mirek, minMirek, maxMirek,
-					&m.styles, m.zones,
-				)
-				// Inactive (grayscale) when color wheel mode is active
-				slider.Inactive = !colorTempActive
-				// Dim based on brightness
-				slider.Brightness = brightness
-				rows = append(rows, gridlayout.GridRow{
-					Type: gridlayout.RowTypeNormal,
-					Cells: []gridlayout.GridCell{
-						{Component: gridlayout.NewLabelWithWidth("Color Temp", infoLabelWidth)},
-						{Component: slider},
-					},
-				})
-			}
-
-			// Color (XY) - show if light supports color
-			if light != nil && light.Color != nil {
-				// Use action color if set, otherwise default to white-ish
-				x := 0.3127
-				y := 0.3290
-				if action.Action.Color != nil {
-					x = float64(action.Action.Color.Xy.X)
-					y = float64(action.Action.Color.Xy.Y)
-				}
-				colorWheel := field.NewColorWheelComponent(
-					FieldIDSceneActionColor(sceneID, lightID), "Color", x, y,
-					&m.styles, m.zones,
-				)
-				// Inactive (grayscale) when color temp mode is active
-				colorWheel.Inactive = colorTempActive
-				// Dim based on brightness
-				colorWheel.Brightness = brightness
-				rows = append(rows, gridlayout.GridRow{
-					Type: gridlayout.RowTypeNormal,
-					Cells: []gridlayout.GridCell{
-						{Component: gridlayout.NewLabelWithWidth("Color", infoLabelWidth)},
-						{Component: colorWheel},
-					},
-				})
-			}
 		}
 	}
 
@@ -295,6 +197,66 @@ func (m *Model) buildSceneGridRows(scene hueclient.SceneGet, state *hue.BridgeSt
 	}
 
 	return rows
+}
+
+func buildSceneLightControlState(action hueclient.ActionGet, light *hueclient.LightGet) field.LightControlState {
+	state := field.LightControlState{
+		On:         true,
+		Brightness: 100,
+	}
+
+	if action.Action.On != nil {
+		state.On = action.Action.On.On
+	}
+	if action.Action.Dimming != nil {
+		state.Brightness = int(action.Action.Dimming.Brightness)
+	}
+
+	if light != nil {
+		state.HasDimming = light.Dimming != nil
+		state.HasColor = light.Color != nil
+		state.HasColorTemp = light.ColorTemperature != nil
+	} else {
+		state.HasDimming = action.Action.Dimming != nil
+		state.HasColor = action.Action.Color != nil
+		state.HasColorTemp = action.Action.ColorTemperature != nil
+	}
+
+	minMirek := 153
+	maxMirek := 500
+	if light != nil && light.ColorTemperature != nil {
+		if light.ColorTemperature.MirekSchema.MirekMinimum != 0 {
+			minMirek = light.ColorTemperature.MirekSchema.MirekMinimum
+		}
+		if light.ColorTemperature.MirekSchema.MirekMaximum != 0 {
+			maxMirek = light.ColorTemperature.MirekSchema.MirekMaximum
+		}
+	}
+	state.MinMirek = minMirek
+	state.MaxMirek = maxMirek
+
+	if action.Action.ColorTemperature != nil && action.Action.ColorTemperature.Mirek != 0 {
+		state.ColorTemp = action.Action.ColorTemperature.Mirek
+		state.MirekValid = true
+	} else {
+		state.ColorTemp = (minMirek + maxMirek) / 2
+		state.MirekValid = false
+	}
+
+	if action.Action.Color != nil {
+		state.ColorX = float64(action.Action.Color.Xy.X)
+		state.ColorY = float64(action.Action.Color.Xy.Y)
+	} else if light != nil && light.Color != nil {
+		x := float64(light.Color.Xy.X)
+		y := float64(light.Color.Xy.Y)
+		if x == 0 && y == 0 {
+			x, y = 0.3127, 0.329
+		}
+		state.ColorX = x
+		state.ColorY = y
+	}
+
+	return state
 }
 
 // buildSmartSceneGridRows builds the detail grid rows for a smart scene.

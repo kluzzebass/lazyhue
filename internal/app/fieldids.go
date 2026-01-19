@@ -45,6 +45,7 @@ const (
 	FieldPrefixSceneActionBri   = "scene-action-bri:"   // scene action brightness (format: "scene-action-bri:<sceneID>:<lightID>")
 	FieldPrefixSceneActionColor = "scene-action-color:" // scene action color (format: "scene-action-color:<sceneID>:<lightID>")
 	FieldPrefixSceneActionCT    = "scene-action-ct:"    // scene action color temp (format: "scene-action-ct:<sceneID>:<lightID>")
+	FieldPrefixSceneLightControl = "scene-lc:"          // unified light control for scenes (format: "scene-lc:<sceneID>:<lightID>:<fieldType>")
 
 	// Timed effects fields
 	FieldPrefixTimedEffectStop     = "timed-effect-stop:"     // stop timed effect (format: "timed-effect-stop:<lightID>")
@@ -92,6 +93,11 @@ func FieldIDZoneName(zoneID string) string {
 
 func FieldIDSceneName(sceneID string) string {
 	return FieldPrefixSceneName + sceneID
+}
+
+// Scene light control field constructor
+func FieldIDSceneLightControl(sceneID, lightID string) string {
+	return FieldPrefixSceneLightControl + sceneID + ":" + lightID
 }
 
 func FieldIDBridgeName(deviceID string) string {

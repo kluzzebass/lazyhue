@@ -1138,6 +1138,67 @@ func (m *Model) handleNewFieldChange(msg field.FieldChangedMsg) {
 			}
 			return
 		}
+	} else if strings.HasPrefix(msg.FieldID, FieldPrefixSceneLightControl) {
+		// Unified light control for scenes - format: "scene-lc:<sceneID>:<lightID>:<fieldType>"
+		rest := strings.TrimPrefix(msg.FieldID, FieldPrefixSceneLightControl)
+		parts := strings.SplitN(rest, ":", 3)
+		if len(parts) == 3 {
+			sceneID := parts[0]
+			lightID := parts[1]
+			fieldType := parts[2]
+
+			switch fieldType {
+			case "on":
+				if v, ok := msg.Value.(field.ToggleValue); ok {
+					state := "off"
+					if v.On {
+						state = "on"
+					}
+					m.status = fmt.Sprintf("Setting scene light to %s...", state)
+					err = bridge.UpdateSceneActionOn(sceneID, lightID, v.On)
+					if err != nil {
+						m.status = fmt.Sprintf("Error: %v", err)
+					} else {
+						m.status = "Scene updated"
+					}
+					return
+				}
+			case "brightness":
+				if v, ok := msg.Value.(field.SliderValue); ok {
+					m.status = fmt.Sprintf("Setting scene brightness to %d%%...", v.Value)
+					err = bridge.UpdateSceneActionBrightness(sceneID, lightID, float32(v.Value))
+					if err != nil {
+						m.status = fmt.Sprintf("Error: %v", err)
+					} else {
+						m.status = "Scene updated"
+					}
+					return
+				}
+			case "colortemp":
+				if v, ok := msg.Value.(field.SliderValue); ok {
+					kelvin := 1000000 / v.Value
+					m.status = fmt.Sprintf("Setting scene color temp to %dK...", kelvin)
+					err, _ = bridge.UpdateSceneActionColorTemp(sceneID, lightID, v.Value)
+					if err != nil {
+						m.status = fmt.Sprintf("Error: %v", err)
+					} else {
+						m.status = "Scene updated"
+					}
+					return
+				}
+			case "color":
+				if v, ok := msg.Value.(field.ColorValue); ok {
+					m.status = "Setting scene color..."
+					err, _ = bridge.UpdateSceneActionColor(sceneID, lightID, float32(v.X), float32(v.Y))
+					if err != nil {
+						m.status = fmt.Sprintf("Error: %v", err)
+					} else {
+						m.status = "Scene updated"
+					}
+					return
+				}
+			}
+		}
 	} else if strings.HasPrefix(msg.FieldID, FieldPrefixSceneActionOn) {
 		// Scene action on/off toggle - format: "scene-action-on:<sceneID>:<lightID>"
 		rest := strings.TrimPrefix(msg.FieldID, FieldPrefixSceneActionOn)
@@ -1357,7 +1418,7 @@ func (m *Model) handleNewFieldChange(msg field.FieldChangedMsg) {
 						if light, ok := state.GetLight(lcLightID); ok {
 							if light.Owner.Rid != "" {
 								err = bridge.IdentifyDevice(light.Owner.Rid)
-								m.status = fmt.Sprintf("Identifying light...")
+								m.status = "Identifying light..."
 							}
 						}
 					}
@@ -1409,7 +1470,13 @@ func (m *Model) handleNewFieldChange(msg field.FieldChangedMsg) {
 							if light.Gradient != nil && len(light.Gradient.ModeValues) > 0 {
 								modes := light.Gradient.ModeValues
 								if v.Index >= 0 && v.Index < len(modes) {
-									err = bridge.SetLightGradientMode(lcLightID, hueclient.LightGetGradientMode(modes[v.Index]))
+									points := []hueclient.ActionGetActionColor{}
+									if lc := m.lightGrid.GetComponentByID(FieldPrefixLightControl + lcLightID); lc != nil {
+										if control, ok := lc.(*field.LightControlComponent); ok {
+											points = convertToAPIPoints(control.GetState().GradientPoints)
+										}
+									}
+									err = bridge.SetLightGradientModeWithPoints(lcLightID, hueclient.LightGetGradientMode(modes[v.Index]), points)
 								}
 							}
 						}
@@ -1418,7 +1485,20 @@ func (m *Model) handleNewFieldChange(msg field.FieldChangedMsg) {
 			case "gradient-points":
 				if v, ok := msg.Value.(field.GradientValue); ok {
 					points := convertToAPIPoints(v.Points)
-					err = bridge.SetLightGradientPoints(lcLightID, points)
+					mode := hueclient.LightGetGradientMode("")
+					if lc := m.lightGrid.GetComponentByID(FieldPrefixLightControl + lcLightID); lc != nil {
+						if control, ok := lc.(*field.LightControlComponent); ok {
+							state := control.GetState()
+							if state.GradientMode >= 0 && state.GradientMode < len(state.GradientModes) {
+								mode = hueclient.LightGetGradientMode(state.GradientModes[state.GradientMode])
+							}
+						}
+					}
+					if mode != "" {
+						err = bridge.SetLightGradientModeWithPoints(lcLightID, mode, points)
+					} else {
+						err = bridge.SetLightGradientPoints(lcLightID, points)
+					}
 					if err != nil {
 						m.status = fmt.Sprintf("Error: %v", err)
 					}

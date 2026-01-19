@@ -6,6 +6,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea/v2"
 	"github.com/charmbracelet/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/kluzzebass/lazyhue/internal/hue"
 	"github.com/kluzzebass/lazyhue/internal/ui"
 	"github.com/kluzzebass/lazyhue/internal/ui/component"
@@ -68,6 +69,7 @@ type LightControlComponent struct {
 	hslControl       *HSLComponent
 	hsvControl       *HSVComponent
 	effectSelect     *SelectComponent
+	gradientMode     *SelectComponent
 	gradientEditor   *GradientEditorComponent
 
 	// State
@@ -85,18 +87,26 @@ type LightControlComponent struct {
 
 	// colorsDirty is set when user is actively editing colors (prevents SSE overwrites)
 	colorsDirty bool
+
+	// showIdentify controls whether the Identify button is rendered/focusable.
+	showIdentify bool
 }
 
 // NewLightControlComponent creates a new unified light control component.
 func NewLightControlComponent(lightID, bridgeID, name string, styles *ui.Styles, zones *zone.Manager) *LightControlComponent {
 	baseID := fmt.Sprintf("lc:%s", lightID)
+	return NewLightControlComponentWithID(baseID, lightID, bridgeID, name, styles, zones)
+}
 
+// NewLightControlComponentWithID creates a new unified light control component with a custom base ID.
+func NewLightControlComponentWithID(baseID, lightID, bridgeID, name string, styles *ui.Styles, zones *zone.Manager) *LightControlComponent {
 	c := &LightControlComponent{
 		BaseField:    NewBaseField(baseID, "", styles, zones),
 		LightID:      lightID,
 		BridgeID:     bridgeID,
 		Name:         name,
 		captureField: -1,
+		showIdentify: true,
 	}
 
 	// Create child components with prefixed IDs
@@ -128,6 +138,9 @@ func NewLightControlComponent(lightID, bridgeID, name string, styles *ui.Styles,
 	c.effectSelect = NewSelectComponent(baseID+":effect", "Effect", 0, nil, styles, zones)
 	c.effectSelect.CycleOnly = true
 
+	c.gradientMode = NewSelectComponent(baseID+":gradient-mode", "Gradient", 0, nil, styles, zones)
+	c.gradientMode.CycleOnly = true
+
 	c.gradientEditor = NewGradientEditorComponent(baseID+":gradient", "Gradient", nil, 5, styles, zones)
 
 	// Set parent for all children
@@ -140,6 +153,7 @@ func NewLightControlComponent(lightID, bridgeID, name string, styles *ui.Styles,
 	c.hslControl.SetParent(c)
 	c.hsvControl.SetParent(c)
 	c.effectSelect.SetParent(c)
+	c.gradientMode.SetParent(c)
 	c.gradientEditor.SetParent(c)
 
 	// Initialize focusable fields (will be updated by SetState)
@@ -157,6 +171,7 @@ func (c *LightControlComponent) SetState(state LightControlState) {
 	prevHasColorTemp := c.state.HasColorTemp
 	prevHasEffects := c.state.HasEffects
 	prevHasGradient := c.state.HasGradient
+	prevGradientModesLen := len(c.state.GradientModes)
 
 	c.state.HasDimming = state.HasDimming
 	c.state.HasColor = state.HasColor
@@ -228,11 +243,21 @@ func (c *LightControlComponent) SetState(state LightControlState) {
 		c.effectSelect.SetValue(state.EffectIndex)
 	}
 
+	// Update gradient mode selector
+	c.state.GradientMode = state.GradientMode
+	c.state.GradientModes = state.GradientModes
+	if len(state.GradientModes) > 0 {
+		options := make([]Option, len(state.GradientModes))
+		for i, mode := range state.GradientModes {
+			options[i] = Option{Label: gradientModeDisplayName(mode), Value: i}
+		}
+		c.gradientMode.SetOptions(options)
+		c.gradientMode.SetValue(state.GradientMode)
+	}
+
 	// Update gradient editor (only if not editing gradient)
 	if !c.gradientEditor.Editing {
 		c.state.GradientPoints = state.GradientPoints
-		c.state.GradientMode = state.GradientMode
-		c.state.GradientModes = state.GradientModes
 		c.state.MaxGradientPoints = state.MaxGradientPoints
 
 		if state.HasGradient && len(state.GradientPoints) > 0 {
@@ -254,7 +279,7 @@ func (c *LightControlComponent) SetState(state LightControlState) {
 	// Update focusable fields if capabilities changed
 	if prevHasDimming != state.HasDimming || prevHasColor != state.HasColor ||
 		prevHasColorTemp != state.HasColorTemp || prevHasEffects != state.HasEffects ||
-		prevHasGradient != state.HasGradient {
+		prevHasGradient != state.HasGradient || prevGradientModesLen != len(state.GradientModes) {
 		c.updateFocusableFields()
 	}
 }
@@ -263,7 +288,7 @@ func (c *LightControlComponent) SetState(state LightControlState) {
 func (c *LightControlComponent) updateFocusableFields() {
 	c.focusableFields = []int{}
 
-	// Order: Power, Brightness, ColorTemp, RGB, HSL, HSV, Effect, ColorWheel, Gradient, Identify
+	// Order: Power, Brightness, ColorTemp, RGB, HSL, HSV, Effect, GradientMode, ColorWheel, Gradient, Identify
 	c.focusableFields = append(c.focusableFields, 0) // Power toggle
 
 	if c.state.HasDimming {
@@ -280,13 +305,18 @@ func (c *LightControlComponent) updateFocusableFields() {
 	if c.state.HasEffects {
 		c.focusableFields = append(c.focusableFields, 8) // Effect
 	}
+	if c.state.HasGradient && len(c.state.GradientModes) > 0 {
+		c.focusableFields = append(c.focusableFields, 10) // Gradient mode
+	}
 	if c.state.HasColor {
 		c.focusableFields = append(c.focusableFields, 4) // Color wheel
 	}
 	if c.state.HasGradient {
 		c.focusableFields = append(c.focusableFields, 9) // Gradient
 	}
-	c.focusableFields = append(c.focusableFields, 1) // Identify button
+	if c.showIdentify {
+		c.focusableFields = append(c.focusableFields, 1) // Identify button
+	}
 
 	// Focus first field if current focus is invalid
 	if len(c.focusableFields) > 0 && c.focusIndex >= len(c.focusableFields) {
@@ -349,6 +379,8 @@ func (c *LightControlComponent) getFieldByIndex(index int) component.Component {
 		return c.effectSelect
 	case 9:
 		return c.gradientEditor
+	case 10:
+		return c.gradientMode
 	}
 	return nil
 }
@@ -373,6 +405,7 @@ func (c *LightControlComponent) updateChildFocus() {
 	c.hslControl.Blur()
 	c.hsvControl.Blur()
 	c.effectSelect.Blur()
+	c.gradientMode.Blur()
 	c.gradientEditor.Blur()
 
 	// Focus the current field
@@ -446,6 +479,22 @@ func (c *LightControlComponent) Update(msg tea.Msg) (component.Component, tea.Cm
 
 // RouteEvent routes events to the appropriate child.
 func (c *LightControlComponent) RouteEvent(msg tea.Msg) (bool, tea.Cmd) {
+	// Handle capture field messages
+	if captureMsg, ok := msg.(StartCaptureMsg); ok {
+		if fieldIdx := c.logicalFieldIndexForID(captureMsg.FieldID); fieldIdx >= 0 {
+			c.captureField = c.indexForField(fieldIdx)
+			if fieldIdx >= 4 && fieldIdx <= 7 {
+				c.colorsDirty = true
+			}
+		}
+	}
+	if captureMsg, ok := msg.(EndCaptureMsg); ok {
+		if fieldIdx := c.logicalFieldIndexForID(captureMsg.FieldID); fieldIdx >= 0 {
+			c.captureField = -1
+			c.colorsDirty = false // Allow SSE updates again
+		}
+	}
+
 	// If capturing mouse, route all mouse events to capture field
 	if c.captureField >= 0 && c.captureField < len(c.focusableFields) {
 		switch msg.(type) {
@@ -520,42 +569,116 @@ func (c *LightControlComponent) wrapFieldCmd(cmd tea.Cmd, fieldIndex int) tea.Cm
 	// Execute the command and intercept the message to handle reactive updates
 	return func() tea.Msg {
 		msg := cmd()
-
-		// Check if it's a field changed message from a color control
-		if fcm, ok := msg.(FieldChangedMsg); ok {
-			// Handle reactive color updates
-			c.handleReactiveColorUpdate(fcm, fieldIndex)
-
-			// Rewrite the field ID so the app handler can route it correctly
-			if fieldIndex == 4 || fieldIndex == 5 || fieldIndex == 6 || fieldIndex == 7 {
-				// Color wheel, RGB, HSL, or HSV -> emit as color or gradient point change
-				if updated, points := c.updateSelectedGradientPoint(c.state.ColorX, c.state.ColorY); updated {
-					fcm.FieldID = c.ID + ":gradient-points"
-					fcm.Value = GradientValue{Points: points}
-				} else {
-					fcm.FieldID = c.ID + ":color"
-					fcm.Value = ColorValue{X: c.state.ColorX, Y: c.state.ColorY}
-				}
+		switch msg.(type) {
+		case StartCaptureMsg:
+			c.captureField = c.indexForField(fieldIndex)
+			if fieldIndex >= 4 && fieldIndex <= 7 {
+				c.colorsDirty = true
 			}
-
-			// Sync color controls when gradient point changes
-			if fieldIndex == 9 {
-				if gv, ok := fcm.Value.(GradientValue); ok {
-					// Update internal state
-					c.state.GradientPoints = gv.Points
-					// Sync color controls to show the selected gradient point's color
-					if c.gradientEditor.SelectedIndex >= 0 && c.gradientEditor.SelectedIndex < len(gv.Points) {
-						pt := gv.Points[c.gradientEditor.SelectedIndex]
-						c.syncColorControlsToPoint(pt.X, pt.Y)
-					}
-				}
-			}
-
-			return fcm
+			return msg
+		case EndCaptureMsg:
+			c.captureField = -1
+			c.colorsDirty = false
+			return msg
 		}
-
-		return msg
+		switch typed := msg.(type) {
+		case FieldChangedMsg:
+			return c.processFieldChanged(typed, fieldIndex)
+		case tea.BatchMsg:
+			if len(typed) == 0 {
+				return msg
+			}
+			updated := make(tea.BatchMsg, 0, len(typed))
+			for _, batchCmd := range typed {
+				if batchCmd == nil {
+					continue
+				}
+				updated = append(updated, c.wrapFieldCmd(batchCmd, fieldIndex))
+			}
+			return updated
+		default:
+			return msg
+		}
 	}
+}
+
+func (c *LightControlComponent) indexForField(fieldIndex int) int {
+	for i, field := range c.focusableFields {
+		if field == fieldIndex {
+			return i
+		}
+	}
+	return -1
+}
+
+func (c *LightControlComponent) logicalFieldIndexForID(fieldID string) int {
+	switch fieldID {
+	case c.powerToggle.ID:
+		return 0
+	case c.identifyButton.ID:
+		return 1
+	case c.brightnessSlider.ID:
+		return 2
+	case c.colorTempSlider.ID:
+		return 3
+	case c.colorWheel.ID:
+		return 4
+	case c.rgbControl.ID:
+		return 5
+	case c.hslControl.ID:
+		return 6
+	case c.hsvControl.ID:
+		return 7
+	case c.effectSelect.ID:
+		return 8
+	case c.gradientEditor.ID:
+		return 9
+	case c.gradientMode.ID:
+		return 10
+	default:
+		return -1
+	}
+}
+
+func (c *LightControlComponent) processFieldChanged(fcm FieldChangedMsg, fieldIndex int) tea.Msg {
+	// Handle reactive color updates
+	c.handleReactiveColorUpdate(fcm, fieldIndex)
+
+	// Rewrite the field ID so the app handler can route it correctly
+	if fieldIndex == 4 || fieldIndex == 5 || fieldIndex == 6 || fieldIndex == 7 {
+		// Color wheel, RGB, HSL, or HSV -> emit as color or gradient point change
+		if updated, points := c.updateSelectedGradientPoint(c.state.ColorX, c.state.ColorY); updated {
+			fcm.FieldID = c.ID + ":gradient-points"
+			fcm.Value = GradientValue{Points: points}
+		} else {
+			fcm.FieldID = c.ID + ":color"
+			fcm.Value = ColorValue{X: c.state.ColorX, Y: c.state.ColorY}
+		}
+	}
+	if fieldIndex == 10 {
+		fcm.FieldID = c.ID + ":gradient-mode"
+	}
+	if fieldIndex == 9 {
+		if gv, ok := fcm.Value.(GradientValue); ok {
+			fcm.FieldID = c.ID + ":gradient-points"
+			fcm.Value = gv
+		}
+	}
+
+	// Sync color controls when gradient point changes
+	if fieldIndex == 9 {
+		if gv, ok := fcm.Value.(GradientValue); ok {
+			// Update internal state
+			c.state.GradientPoints = gv.Points
+			// Sync color controls to show the selected gradient point's color
+			if c.gradientEditor.SelectedIndex >= 0 && c.gradientEditor.SelectedIndex < len(gv.Points) {
+				pt := gv.Points[c.gradientEditor.SelectedIndex]
+				c.syncColorControlsToPoint(pt.X, pt.Y)
+			}
+		}
+	}
+
+	return fcm
 }
 
 // handleReactiveColorUpdate syncs all color controls when one changes.
@@ -874,6 +997,8 @@ func (c *LightControlComponent) isFieldVisible(fieldIndex int) bool {
 		return c.state.HasEffects
 	case 9:
 		return c.state.HasGradient
+	case 10:
+		return c.state.HasGradient && len(c.state.GradientModes) > 0
 	default:
 		return true
 	}
@@ -1015,14 +1140,24 @@ func (c *LightControlComponent) ViewControl() string {
 	// On/Off toggle in top border (no label)
 	toggleStr := c.powerToggle.ViewControl()
 
-	// Bottom border content: effects selector (left), swatches (right), and ID button (rightmost)
-	idButton := c.identifyButton.ViewControl()
-	idWidth := lipgloss.Width(idButton)
+	// Top right content: swatches
+	idButton := ""
+	idWidth := 0
+	if c.showIdentify {
+		idButton = c.identifyButton.ViewControl()
+		idWidth = lipgloss.Width(idButton)
+	}
 	effectStr := ""
 	effectWidth := 0
 	if c.state.HasEffects {
 		effectStr = c.effectSelect.ViewControl()
 		effectWidth = lipgloss.Width(effectStr)
+	}
+	gradientModeStr := ""
+	gradientModeWidth := 0
+	if c.state.HasGradient && len(c.state.GradientModes) > 0 {
+		gradientModeStr = c.gradientMode.ViewControl()
+		gradientModeWidth = lipgloss.Width(gradientModeStr)
 	}
 	swatchStr := ""
 	swatchWidth := 0
@@ -1034,25 +1169,39 @@ func (c *LightControlComponent) ViewControl() string {
 	// Top border: ╭─ ○ Name ───────────────╮
 	topLeft := borderStyle.Render("╭")
 	topRight := borderStyle.Render("╮")
-	topContent := toggleStr + "─" + nameStr
-	topContentWidth := lipgloss.Width(topContent)
 	leftDashWidth := 1
+	rightTopWidth := 0
+	if swatchWidth > 0 {
+		rightTopWidth = swatchWidth + 1
+	}
 
-	// Bottom border: ╰─[Effect]───────────────[ID]─╯
+	availableNameWidth := contentWidth - leftDashWidth - lipgloss.Width(toggleStr) - 1 - rightTopWidth
+	if availableNameWidth < 0 {
+		availableNameWidth = 0
+	}
+	if lipgloss.Width(nameStr) > availableNameWidth {
+		nameStr = ansi.Truncate(nameStr, availableNameWidth, "…")
+	}
+
+	topContent := toggleStr + "─" + nameStr
+	topContentWidth := lipgloss.Width(topContent) + rightTopWidth
+
+	// Bottom border: ╰─[Effect][Gradient]──────────[ID]─╯
 	bottomLeft := borderStyle.Render("╰")
 	bottomRight := borderStyle.Render("╯")
 	bottomSideDash := 1
-	gapWidth := 0
-	effectGap := ""
-	if effectWidth > 0 && (swatchWidth > 0 || idWidth > 0) {
-		effectGap = borderStyle.Render("─")
-		gapWidth = 1
+	leftGroup := ""
+	if effectWidth > 0 {
+		leftGroup = effectStr
 	}
-	swatchGap := ""
-	if swatchWidth > 0 && idWidth > 0 {
-		swatchGap = c.Styles.Dimmed.Render("─")
+	if gradientModeWidth > 0 {
+		if leftGroup != "" {
+			leftGroup += borderStyle.Render("─")
+		}
+		leftGroup += gradientModeStr
 	}
-	bottomContentWidth := effectWidth + gapWidth + swatchWidth + lipgloss.Width(swatchGap) + idWidth + (bottomSideDash * 2)
+	leftGroupWidth := lipgloss.Width(leftGroup)
+	bottomContentWidth := leftGroupWidth + idWidth + (bottomSideDash * 2)
 	neededTopWidth := leftDashWidth + topContentWidth
 	if neededTopWidth > contentWidth {
 		contentWidth = neededTopWidth
@@ -1066,7 +1215,11 @@ func (c *LightControlComponent) ViewControl() string {
 	}
 	topFillLeft := borderStyle.Render(strings.Repeat("─", leftDashWidth))
 	topFillRight := borderStyle.Render(strings.Repeat("─", topFillWidth))
-	topBorder := topLeft + topFillLeft + topContent + topFillRight + topRight
+	topBorder := topLeft + topFillLeft + topContent + topFillRight
+	if swatchWidth > 0 {
+		topBorder += borderStyle.Render("─") + swatchStr
+	}
+	topBorder += topRight
 	bottomFillLeft := contentWidth - bottomContentWidth
 	if bottomFillLeft < 0 {
 		bottomFillLeft = 0
@@ -1074,16 +1227,10 @@ func (c *LightControlComponent) ViewControl() string {
 	bottomFill := borderStyle.Render(strings.Repeat("─", bottomFillLeft))
 	bottomSideDashStr := borderStyle.Render(strings.Repeat("─", bottomSideDash))
 	var bottomBorder string
-	if effectWidth > 0 {
-		bottomBorder = bottomLeft + bottomSideDashStr + effectStr + effectGap + bottomFill
+	if leftGroupWidth > 0 {
+		bottomBorder = bottomLeft + bottomSideDashStr + leftGroup + bottomFill
 	} else {
 		bottomBorder = bottomLeft + bottomSideDashStr + bottomFill
-	}
-	if swatchWidth > 0 {
-		bottomBorder += swatchStr
-		if swatchGap != "" {
-			bottomBorder += swatchGap
-		}
 	}
 	bottomBorder += idButton + bottomSideDashStr + bottomRight
 
@@ -1209,7 +1356,9 @@ func (c *LightControlComponent) Children() []component.Component {
 		c.colorWheel,
 		c.rgbControl,
 		c.hslControl,
+		c.hsvControl,
 		c.effectSelect,
+		c.gradientMode,
 		c.gradientEditor,
 	}
 }
@@ -1260,6 +1409,27 @@ func (c *LightControlComponent) SwitchToColorTempMode() {
 // WheelRenderer returns the color wheel for external access if needed.
 func (c *LightControlComponent) WheelRenderer() *ColorWheel {
 	return c.colorWheel.Wheel
+}
+
+func gradientModeDisplayName(mode string) string {
+	switch mode {
+	case "interpolated_palette":
+		return "Interpolated"
+	case "interpolated_palette_mirrored":
+		return "Mirrored"
+	case "random_pixelated":
+		return "Pixelated"
+	case "segmented_palette":
+		return "Segmented"
+	default:
+		return strings.ReplaceAll(mode, "_", " ")
+	}
+}
+
+// SetIdentifyVisible controls whether the identify button is shown/focusable.
+func (c *LightControlComponent) SetIdentifyVisible(visible bool) {
+	c.showIdentify = visible
+	c.updateFocusableFields()
 }
 
 // FocusFirst focuses the first focusable field.
