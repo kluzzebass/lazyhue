@@ -817,25 +817,7 @@ func (m *Model) buildGradientRows(light hueclient.LightGet, lightID string) []gr
 
 	// Mode selector (if ModeValues available)
 	if len(light.Gradient.ModeValues) > 0 {
-		options := make([]field.Option, len(light.Gradient.ModeValues))
-		currentIndex := 0
-		for i, mode := range light.Gradient.ModeValues {
-			options[i] = field.Option{Label: formatGradientMode(hueclient.LightGetGradientMode(mode)), Value: i}
-			if hueclient.SupportedSounds(light.Gradient.Mode) == mode {
-				currentIndex = i
-			}
-		}
-		modeSelect := field.NewSelectComponent(
-			FieldIDGradientMode(lightID), "Mode", currentIndex, options,
-			&m.styles, m.zones,
-		)
-		rows = append(rows, gridlayout.GridRow{
-			Type: gridlayout.RowTypeNormal,
-			Cells: []gridlayout.GridCell{
-				{Component: gridlayout.NewLabelWithWidth("Mode", infoLabelWidth)},
-				{Component: modeSelect},
-			},
-		})
+		// Mode selector now lives in the unified light control component.
 	} else if light.Gradient.Mode != "" {
 		// Read-only mode display if no mode values available
 		rows = append(rows, gridlayout.NewInfoRow("Mode", formatGradientMode(light.Gradient.Mode), infoLabelWidth))

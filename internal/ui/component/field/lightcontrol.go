@@ -171,7 +171,6 @@ func (c *LightControlComponent) SetState(state LightControlState) {
 	prevHasColorTemp := c.state.HasColorTemp
 	prevHasEffects := c.state.HasEffects
 	prevHasGradient := c.state.HasGradient
-	prevGradientModesLen := len(c.state.GradientModes)
 
 	c.state.HasDimming = state.HasDimming
 	c.state.HasColor = state.HasColor
@@ -187,7 +186,12 @@ func (c *LightControlComponent) SetState(state LightControlState) {
 	c.state.Brightness = state.Brightness
 	c.brightnessSlider.SetValue(state.Brightness)
 	c.colorTempSlider.Brightness = state.Brightness
-	c.colorWheel.Brightness = state.Brightness
+	// Keep the wheel readable, but still reflect brightness changes.
+	if state.Brightness < 35 {
+		c.colorWheel.Brightness = 35
+	} else {
+		c.colorWheel.Brightness = state.Brightness
+	}
 
 	// Skip color-related updates if user is actively editing
 	if !c.colorsDirty {
@@ -258,6 +262,8 @@ func (c *LightControlComponent) SetState(state LightControlState) {
 	// Update gradient editor (only if not editing gradient)
 	if !c.gradientEditor.Editing {
 		c.state.GradientPoints = state.GradientPoints
+		c.state.GradientMode = state.GradientMode
+		c.state.GradientModes = state.GradientModes
 		c.state.MaxGradientPoints = state.MaxGradientPoints
 
 		if state.HasGradient && len(state.GradientPoints) > 0 {
@@ -279,7 +285,7 @@ func (c *LightControlComponent) SetState(state LightControlState) {
 	// Update focusable fields if capabilities changed
 	if prevHasDimming != state.HasDimming || prevHasColor != state.HasColor ||
 		prevHasColorTemp != state.HasColorTemp || prevHasEffects != state.HasEffects ||
-		prevHasGradient != state.HasGradient || prevGradientModesLen != len(state.GradientModes) {
+		prevHasGradient != state.HasGradient {
 		c.updateFocusableFields()
 	}
 }
@@ -655,9 +661,6 @@ func (c *LightControlComponent) processFieldChanged(fcm FieldChangedMsg, fieldIn
 			fcm.Value = ColorValue{X: c.state.ColorX, Y: c.state.ColorY}
 		}
 	}
-	if fieldIndex == 10 {
-		fcm.FieldID = c.ID + ":gradient-mode"
-	}
 	if fieldIndex == 9 {
 		if gv, ok := fcm.Value.(GradientValue); ok {
 			fcm.FieldID = c.ID + ":gradient-points"
@@ -690,6 +693,17 @@ func (c *LightControlComponent) handleReactiveColorUpdate(msg FieldChangedMsg, f
 	defer func() { c.updatingColors = false }()
 
 	switch fieldIndex {
+	case 2: // Brightness slider
+		if sv, ok := msg.Value.(SliderValue); ok {
+			c.state.Brightness = sv.Value
+			c.colorTempSlider.Brightness = sv.Value
+			if sv.Value < 35 {
+				c.colorWheel.Brightness = 35
+			} else {
+				c.colorWheel.Brightness = sv.Value
+			}
+		}
+
 	case 3: // Color temp slider
 		if sv, ok := msg.Value.(SliderValue); ok {
 			c.SwitchToColorTempMode()
@@ -1426,6 +1440,7 @@ func gradientModeDisplayName(mode string) string {
 	}
 }
 
+
 // SetIdentifyVisible controls whether the identify button is shown/focusable.
 func (c *LightControlComponent) SetIdentifyVisible(visible bool) {
 	c.showIdentify = visible
@@ -1451,6 +1466,6 @@ func (c *LightControlComponent) FocusLast() {
 // LightControlValue is the value type for light control change messages.
 // It provides context about which sub-control triggered the change.
 type LightControlValue struct {
-	ControlType string // "on", "identify", "brightness", "colortemp", "color", "effect", "gradient-mode", "gradient-points"
+	ControlType string // "on", "identify", "brightness", "colortemp", "color", "effect", "gradient-points"
 	Value       any    // The actual value (same as the sub-component's value type)
 }

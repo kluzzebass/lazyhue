@@ -383,12 +383,22 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				bridgeName = bridge.Info.Name
 			}
 		}
-		m.activities = append(m.activities, &RequestActivity{
+		reqActivity := &RequestActivity{
 			timestamp:  time.Now(),
 			bridgeID:   msg.bridgeID,
 			bridgeName: bridgeName,
 			message:    msg.message,
-		})
+		}
+		if msg.bridgeID != "" {
+			if bridge := m.manager.GetBridge(msg.bridgeID); bridge != nil {
+				if entityType, entityName, details, ok := inferRequestEntity(bridge.GetState(), msg.message); ok {
+					reqActivity.entityType = entityType
+					reqActivity.entityName = entityName
+					reqActivity.details = details
+				}
+			}
+		}
+		m.activities = append(m.activities, reqActivity)
 		m.updateLogContent()
 		// Keep listening for more requests
 		cmds = append(cmds, m.listenForRequests())

@@ -525,32 +525,54 @@ func (b *Bridge) SetLightGradientModeWithPoints(lightID string, mode hueclient.L
 		b.state.SetLightGradientPoints(lightID, gradientPoints)
 	}
 
-	b.logRequest(fmt.Sprintf("%s: gradient mode %s", lightName, mode))
-
-	reqBody := gradientModePutBody{
-		Gradient: &gradientModePut{
-			Mode:   &mode,
-			Points: wrappedPoints,
-		},
-	}
-	bodyBytes, err := json.Marshal(reqBody)
-	if err != nil {
-		b.logError(fmt.Sprintf("%s: gradient mode failed: %v", lightName, err))
-		return err
+	// Debounce the actual API call (same mechanism as gradient points)
+	b.debounceMu.Lock()
+	debounceKey := "gradient:" + lightID
+	if timer, ok := b.colorDebounce[debounceKey]; ok {
+		timer.Stop()
 	}
 
-	resp, err := client.UpdateLightWithBody(context.Background(), toResourceId(lightID), "application/json", bytes.NewReader(bodyBytes))
-	if err != nil {
-		b.logError(fmt.Sprintf("%s: gradient mode failed: %v", lightName, err))
-		return err
-	}
-	defer resp.Body.Close()
+	modeCopy := mode
+	wrappedCopy := make([]gradientPointPut, len(wrappedPoints))
+	copy(wrappedCopy, wrappedPoints)
 
-	if resp.StatusCode >= 400 {
-		errMsg := fmt.Sprintf("%s: gradient mode failed: HTTP %d", lightName, resp.StatusCode)
-		b.logError(errMsg)
-		return errors.New(errMsg)
-	}
+	b.colorDebounce[debounceKey] = time.AfterFunc(lightGradientDebounceDelay, func() {
+		b.mu.RLock()
+		client := b.client
+		b.mu.RUnlock()
+
+		if client != nil {
+			b.logRequest(fmt.Sprintf("%s: gradient mode %s", lightName, modeCopy))
+
+			reqBody := gradientModePutBody{
+				Gradient: &gradientModePut{
+					Mode:   &modeCopy,
+					Points: wrappedCopy,
+				},
+			}
+			bodyBytes, err := json.Marshal(reqBody)
+			if err != nil {
+				b.logError(fmt.Sprintf("%s: gradient mode failed: %v", lightName, err))
+			} else {
+				resp, err := client.UpdateLightWithBody(context.Background(), toResourceId(lightID), "application/json", bytes.NewReader(bodyBytes))
+				if err != nil {
+					b.logError(fmt.Sprintf("%s: gradient mode failed: %v", lightName, err))
+				} else if resp != nil && resp.StatusCode >= 400 {
+					errMsg := fmt.Sprintf("%s: gradient mode failed: HTTP %d", lightName, resp.StatusCode)
+					b.logError(errMsg)
+				}
+				if resp != nil && resp.Body != nil {
+					_ = resp.Body.Close()
+				}
+			}
+		}
+
+		b.debounceMu.Lock()
+		delete(b.colorDebounce, debounceKey)
+		b.debounceMu.Unlock()
+	})
+	b.debounceMu.Unlock()
+
 	return nil
 }
 

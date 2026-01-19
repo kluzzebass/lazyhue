@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"image/color"
+	"strings"
 	"time"
 
 	"github.com/charmbracelet/lipgloss/v2"
@@ -222,6 +223,9 @@ type RequestActivity struct {
 	bridgeID   string
 	bridgeName string
 	message    string
+	entityType string
+	entityName string
+	details    string
 }
 
 func (a *RequestActivity) Time() time.Time {
@@ -237,13 +241,79 @@ func (a *RequestActivity) Render(styles *ui.Styles, width int) string {
 		bridgeStyle := lipgloss.NewStyle().Foreground(styles.Theme.EntityBridge)
 		bridgeStr = styles.Dimmed.Render("[") + bridgeStyle.Render(a.bridgeName) + styles.Dimmed.Render("]") + " "
 	}
-	line := fmt.Sprintf("%s %s %s%s", styles.Dimmed.Render(timeStr), typeIndicator, bridgeStr, a.message)
+	message := a.message
+	if a.entityName != "" {
+		entityColor := getResourceTypeColor(styles, a.entityType)
+		entityStyle := lipgloss.NewStyle().Foreground(entityColor)
+		message = fmt.Sprintf("%s: %s", entityStyle.Render(a.entityName), a.details)
+	}
+	line := fmt.Sprintf("%s %s %s%s", styles.Dimmed.Render(timeStr), typeIndicator, bridgeStr, message)
 
 	// Truncate if width is provided and line exceeds it
 	if width > 0 && lipgloss.Width(line) > width {
 		line = ansi.Truncate(line, width, "…")
 	}
 	return line
+}
+
+func inferRequestEntity(state *hue.BridgeState, message string) (string, string, string, bool) {
+	if state == nil || message == "" {
+		return "", "", "", false
+	}
+
+	if strings.HasPrefix(message, "Scene \"") {
+		if parts := strings.SplitN(message, "\": ", 2); len(parts) == 2 {
+			name := strings.TrimPrefix(parts[0], "Scene \"")
+			return "scene", name, parts[1], true
+		}
+	}
+	if strings.HasPrefix(message, "Deleting scene: ") {
+		name := strings.TrimPrefix(message, "Deleting scene: ")
+		return "scene", name, "deleted", true
+	}
+	if strings.HasPrefix(message, "Activating smart scene: ") {
+		name := strings.TrimPrefix(message, "Activating smart scene: ")
+		return "smart_scene", name, "activating", true
+	}
+	if strings.HasPrefix(message, "Deactivating smart scene: ") {
+		name := strings.TrimPrefix(message, "Deactivating smart scene: ")
+		return "smart_scene", name, "deactivating", true
+	}
+
+	parts := strings.SplitN(message, ": ", 2)
+	if len(parts) != 2 {
+		return "", "", "", false
+	}
+	name := strings.TrimSpace(parts[0])
+	details := parts[1]
+
+	for _, light := range state.AllLights() {
+		if state.GetLightName(light) == name {
+			return "light", name, details, true
+		}
+	}
+	for _, room := range state.AllRooms() {
+		if state.GetRoomName(room) == name {
+			return "room", name, details, true
+		}
+	}
+	for _, zone := range state.AllZones() {
+		if zone.Metadata.Name == name {
+			return "zone", name, details, true
+		}
+	}
+	for _, scene := range state.AllScenes() {
+		if state.GetSceneName(scene) == name {
+			return "scene", name, details, true
+		}
+	}
+	for _, device := range state.AllDevices() {
+		if state.GetDeviceName(device) == name {
+			return "device", name, details, true
+		}
+	}
+
+	return "", "", "", false
 }
 
 // ErrorActivity represents an error activity.
