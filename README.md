@@ -6,7 +6,7 @@ lazygit/lazydocker philosophy of keyboard-driven navigation with mouse support.
 
 ![LazyHue Screenshot](docs/lazyhue.png)
 
-![AI SLOP 10](https://raw.githubusercontent.com/kluzz/ai-slop/main/ai-slop-10-max.svg)
+![AI SLOP 10](https://raw.githubusercontent.com/kluzzebass/ai-slop/main/ai-slop-10-max.svg)
 
 ## Features
 
