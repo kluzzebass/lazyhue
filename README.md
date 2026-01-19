@@ -1,12 +1,12 @@
 # LazyHue
 
+![AI SLOP 10](https://raw.githubusercontent.com/kluzzebass/ai-slop/main/ai-slop-10-max.svg)
+
 A terminal user interface (TUI) for managing Philips Hue bridges and lights.
 Built with Go and the [Charm](https://charm.sh) ecosystem, LazyHue follows the
 lazygit/lazydocker philosophy of keyboard-driven navigation with mouse support.
 
 ![LazyHue Screenshot](docs/lazyhue.png)
-
-![AI SLOP 10](https://raw.githubusercontent.com/kluzzebass/ai-slop/main/ai-slop-10-max.svg)
 
 ## Features
 
