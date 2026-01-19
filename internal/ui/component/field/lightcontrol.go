@@ -538,6 +538,8 @@ func (c *LightControlComponent) RouteEvent(msg tea.Msg) (bool, tea.Cmd) {
 					case "left", "right", "h", "l":
 						c.colorsDirty = true
 						c.syncColorFromField(fieldIdx)
+					case "enter", " ", "esc":
+						c.colorsDirty = false
 					}
 				}
 			}
