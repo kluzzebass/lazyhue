@@ -36,6 +36,18 @@ No routing through side channels in `app.Update` except global hotkeys.
   - Detail panel component (viewport + overlay stack)
   - Log panel component
 
+### Reactivity and Observability (Generic)
+
+- Add a lightweight pub/sub layer so components can react to any data changes
+  without forcing full rebuilds.
+- The data store publishes typed updates with IDs and minimal payloads; no
+  light- or scene-specific coupling.
+- Components subscribe by ID or by update type and update themselves in-place.
+- Subscriptions are bound to component lifecycle (auto-unsubscribe on unmount).
+- Avoid feedback loops: updates from user actions should be tagged to prevent
+  immediate echo from triggering redundant re-renders.
+- Provide coalescing/batching for rapid update bursts from any source.
+
 #### Capture Manager
 
 - Central capture manager for drag and modal capture.

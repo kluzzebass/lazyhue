@@ -13,6 +13,7 @@ import (
 
 	"github.com/kluzzebass/lazyhue/internal/config"
 	"github.com/kluzzebass/lazyhue/internal/hue"
+	"github.com/kluzzebass/lazyhue/internal/hueclient"
 	"github.com/kluzzebass/lazyhue/internal/ui/component"
 	"github.com/kluzzebass/lazyhue/internal/ui/component/field"
 	"github.com/kluzzebass/lazyhue/internal/ui/panels"
@@ -347,6 +348,19 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		if bridge := m.manager.GetBridge(msg.bridgeID); bridge != nil {
 			m.rebuildTreeForActiveTab()
+			// Update light detail view when the selected light changes.
+			if msg.update.Type == "light" {
+				if node := m.tree.SelectedNode(); node != nil && node.Item != nil && node.Item.Type == panels.EntityLight {
+					if state := bridge.GetState(); state != nil {
+						if light, ok := state.GetLight(node.Item.ID); ok {
+							if m.refreshSelectedLightDetail(light) {
+								m.detailViewport.SetContent(m.lightGrid.View())
+							}
+						}
+					}
+				}
+			}
+
 			// Update detail panel if the event is for the currently selected entity
 			// Skip if grid has a focused component to preserve focus and edit state
 			if m.lightGrid.FocusRow() < 0 {
@@ -585,6 +599,81 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.updateDetailContent()
 			return m, nil
 
+		case key.Matches(msg, m.keys.BrightUp), key.Matches(msg, m.keys.BrightDn):
+			item := m.tree.SelectedItem()
+			if item == nil {
+				return m, nil
+			}
+			bridge := m.manager.GetBridge(item.BridgeID)
+			if bridge == nil {
+				m.status = "Bridge not found"
+				return m, nil
+			}
+			state := bridge.GetState()
+			brightness := 0
+			delta := 10
+			if key.Matches(msg, m.keys.BrightDn) {
+				delta = -delta
+			}
+			switch item.Type {
+			case panels.EntityLight:
+				if state != nil {
+					if light, ok := state.GetLight(item.ID); ok {
+						if light.Dimming != nil {
+							brightness = int(light.Dimming.Brightness)
+						} else if light.On.On {
+							brightness = 100
+						}
+					}
+				}
+				newBrightness := clampInt(brightness+delta, 0, 100)
+				if err := bridge.SetLightBrightness(item.ID, float64(newBrightness)); err != nil {
+					m.status = fmt.Sprintf("Brightness failed: %v", err)
+					return m, nil
+				}
+				return m, nil
+			case panels.EntityRoom:
+				if state == nil {
+					return m, nil
+				}
+				if room, ok := state.GetRoom(item.ID); ok {
+					if gl, ok := state.RoomGroupedLight(room); ok {
+						if gl.Dimming != nil {
+							brightness = int(gl.Dimming.Brightness)
+						} else if gl.On != nil && gl.On.On {
+							brightness = 100
+						}
+						newBrightness := clampInt(brightness+delta, 0, 100)
+						if err := bridge.SetGroupedLightBrightness(gl.Id, float64(newBrightness)); err != nil {
+							m.status = fmt.Sprintf("Brightness failed: %v", err)
+							return m, nil
+						}
+					}
+				}
+				return m, nil
+			case panels.EntityZone:
+				if state == nil {
+					return m, nil
+				}
+				if zone, ok := state.GetZone(item.ID); ok {
+					if gl, ok := state.ZoneGroupedLight(zone); ok {
+						if gl.Dimming != nil {
+							brightness = int(gl.Dimming.Brightness)
+						} else if gl.On != nil && gl.On.On {
+							brightness = 100
+						}
+						newBrightness := clampInt(brightness+delta, 0, 100)
+						if err := bridge.SetGroupedLightBrightness(gl.Id, float64(newBrightness)); err != nil {
+							m.status = fmt.Sprintf("Brightness failed: %v", err)
+							return m, nil
+						}
+					}
+				}
+				return m, nil
+			default:
+				return m, nil
+			}
+
 		case key.Matches(msg, m.keys.NextBridge):
 			m.tree.NextTab()
 			m.rebuildTreeForActiveTab()
@@ -790,6 +879,27 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					}
 				}
 				// If no item or room, let tree handle it (toggle expand)
+
+			case " ":
+				item := m.tree.SelectedItem()
+				if item != nil && item.Type == panels.EntityLight {
+					bridge := m.manager.GetBridge(item.BridgeID)
+					if bridge == nil {
+						m.status = "Bridge not found"
+						return m, nil
+					}
+					isOn := item.IsOn
+					if state := bridge.GetState(); state != nil {
+						if light, ok := state.GetLight(item.ID); ok {
+							isOn = light.On.On
+						}
+					}
+					if err := bridge.SetLightOn(item.ID, !isOn); err != nil {
+						m.status = fmt.Sprintf("Toggle failed: %v", err)
+						return m, nil
+					}
+					return m, nil
+				}
 
 			case "x":
 				// Delete selected item - show confirmation
@@ -1000,6 +1110,54 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, tea.Batch(cmds...)
 }
 
+func (m *Model) refreshSelectedLightDetail(light hueclient.LightGet) bool {
+	if m.lightGrid.IsEditing() {
+		return m.updateSelectedLightControlsInPlace(light)
+	}
+
+	focusedID := m.focusedLightGridFieldID()
+	m.buildLightGridRows(light)
+	if focusedID != "" {
+		m.lightGrid.FocusByFieldID(focusedID)
+	}
+	return true
+}
+
+func (m *Model) updateSelectedLightControlsInPlace(light hueclient.LightGet) bool {
+	updated := false
+	for _, child := range m.lightGrid.Children() {
+		switch control := child.(type) {
+		case *field.LightControlComponent:
+			if control.LightID == light.Id {
+				control.SetState(buildLightControlStateFromLight(light))
+				updated = true
+			}
+		case *field.SliderComponent:
+			if control.ID == FieldIDEffectSpeed(light.Id) {
+				speed := 50
+				if light.EffectsV2 != nil && light.EffectsV2.Status.Parameters != nil {
+					speed = int(light.EffectsV2.Status.Parameters.Speed * 100)
+				}
+				control.SetValue(speed)
+				updated = true
+			}
+		}
+	}
+	return updated
+}
+
+func (m *Model) focusedLightGridFieldID() string {
+	for _, child := range m.lightGrid.Children() {
+		if child == nil || !child.IsFocused() {
+			continue
+		}
+		if ident, ok := child.(interface{ GetID() string }); ok {
+			return ident.GetID()
+		}
+	}
+	return ""
+}
+
 func (m *Model) routeTestLightControls(msg tea.Msg) (bool, tea.Cmd) {
 	controls := m.testLightControls()
 	if !m.showTestPage || len(controls) == 0 {
@@ -1130,4 +1288,14 @@ func (m Model) View() string {
 	output.WriteString(result)
 
 	return m.zones.Scan(output.String())
+}
+
+func clampInt(value, minValue, maxValue int) int {
+	if value < minValue {
+		return minValue
+	}
+	if value > maxValue {
+		return maxValue
+	}
+	return value
 }

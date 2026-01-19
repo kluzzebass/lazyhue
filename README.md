@@ -4,6 +4,8 @@ A terminal user interface (TUI) for managing Philips Hue bridges and lights.
 Built with Go and the [Charm](https://charm.sh) ecosystem, LazyHue follows the
 lazygit/lazydocker philosophy of keyboard-driven navigation with mouse support.
 
+![LazyHue Screenshot](docs/lazyhue.png)
+
 ![AI SLOP 10](https://raw.githubusercontent.com/kluzz/ai-slop/main/ai-slop-10-max.svg)
 
 ## Features
@@ -92,15 +94,14 @@ go build -o lazyhue ./cmd/lazyhue
 | ------------------- | -------------------------------- |
 | `j/k` or `↑/↓`      | Navigate up/down                 |
 | `h/l` or `←/→`      | Collapse/expand or prev/next tab |
-| `Enter`             | Select / activate scene          |
+| `Enter`             | Open details / expand group      |
 | `Space`             | Toggle light on/off              |
-| `o/O`               | Turn on / turn off               |
 | `+/-`               | Brightness up/down               |
 | `r`                 | Rename selected item             |
 | `n/N`               | New room / new zone              |
 | `x`                 | Delete selected item             |
 | `Tab` / `Shift+Tab` | Next / previous panel            |
-| `[` / `]`           | Previous / next tab              |
+| `[` / `]`           | Previous / next bridge           |
 | `1/2/3`             | Jump to panel                    |
 | `a`                 | Toggle activity log              |
 | `p`                 | Pair new bridge                  |
