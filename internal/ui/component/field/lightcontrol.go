@@ -3,6 +3,7 @@ package field
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea/v2"
 	"github.com/charmbracelet/lipgloss/v2"
@@ -81,12 +82,20 @@ type LightControlComponent struct {
 
 	// Mouse capture state
 	captureField int // Index of field capturing mouse (-1 if none)
+	colorCaptureActive bool
 
 	// Internal state for reactive color updates
 	updatingColors bool // Prevents infinite loops when syncing colors
 
 	// colorsDirty is set when user is actively editing colors (prevents SSE overwrites)
 	colorsDirty bool
+
+	// colorsDirtyUntil keeps color updates locked briefly after release.
+	colorsDirtyUntil time.Time
+
+	// pendingGradientPoints stores the last gradient update while editing.
+	pendingGradientPoints []GradientPoint
+	pendingGradient       bool
 
 	// showIdentify controls whether the Identify button is rendered/focusable.
 	showIdentify bool
@@ -193,8 +202,8 @@ func (c *LightControlComponent) SetState(state LightControlState) {
 		c.colorWheel.Brightness = state.Brightness
 	}
 
-	// Skip color-related updates if user is actively editing
-	if !c.colorsDirty {
+	// Skip color-related updates if user is actively editing or just released.
+	if !c.colorUpdatesLocked() {
 		// Update color temp
 		c.state.ColorTemp = state.ColorTemp
 		c.state.MinMirek = state.MinMirek
@@ -472,12 +481,20 @@ func (c *LightControlComponent) Update(msg tea.Msg) (component.Component, tea.Cm
 			fieldIdx := c.focusableFields[c.focusIndex]
 			if fieldIdx >= 4 && fieldIdx <= 7 {
 				c.colorsDirty = true
+				c.colorCaptureActive = true
 			}
 		}
 	}
 	if _, ok := msg.(EndCaptureMsg); ok {
 		c.captureField = -1
 		c.colorsDirty = false // Allow SSE updates again
+		c.colorCaptureActive = false
+		if c.focusIndex >= 0 && c.focusIndex < len(c.focusableFields) {
+			fieldIdx := c.focusableFields[c.focusIndex]
+			if fieldIdx >= 4 && fieldIdx <= 7 {
+				c.colorsDirtyUntil = time.Now().Add(500 * time.Millisecond)
+			}
+		}
 	}
 
 	return c, tea.Batch(cmds...)
@@ -491,6 +508,7 @@ func (c *LightControlComponent) RouteEvent(msg tea.Msg) (bool, tea.Cmd) {
 			c.captureField = c.indexForField(fieldIdx)
 			if fieldIdx >= 4 && fieldIdx <= 7 {
 				c.colorsDirty = true
+				c.colorCaptureActive = true
 			}
 		}
 	}
@@ -498,6 +516,10 @@ func (c *LightControlComponent) RouteEvent(msg tea.Msg) (bool, tea.Cmd) {
 		if fieldIdx := c.logicalFieldIndexForID(captureMsg.FieldID); fieldIdx >= 0 {
 			c.captureField = -1
 			c.colorsDirty = false // Allow SSE updates again
+			c.colorCaptureActive = false
+			if fieldIdx >= 4 && fieldIdx <= 7 {
+				c.colorsDirtyUntil = time.Now().Add(500 * time.Millisecond)
+			}
 		}
 	}
 
@@ -540,6 +562,9 @@ func (c *LightControlComponent) RouteEvent(msg tea.Msg) (bool, tea.Cmd) {
 						c.syncColorFromField(fieldIdx)
 					case "enter", " ", "esc":
 						c.colorsDirty = false
+						if cmd := c.flushPendingGradientCmd(); cmd != nil {
+							return true, tea.Batch(cmd)
+						}
 					}
 				}
 			}
@@ -577,7 +602,7 @@ func (c *LightControlComponent) wrapFieldCmd(cmd tea.Cmd, fieldIndex int) tea.Cm
 	// Execute the command and intercept the message to handle reactive updates
 	return func() tea.Msg {
 		msg := cmd()
-		switch msg.(type) {
+		switch typed := msg.(type) {
 		case StartCaptureMsg:
 			c.captureField = c.indexForField(fieldIndex)
 			if fieldIndex >= 4 && fieldIndex <= 7 {
@@ -587,6 +612,18 @@ func (c *LightControlComponent) wrapFieldCmd(cmd tea.Cmd, fieldIndex int) tea.Cm
 		case EndCaptureMsg:
 			c.captureField = -1
 			c.colorsDirty = false
+			c.colorCaptureActive = false
+			if fieldIndex >= 4 && fieldIndex <= 7 {
+				c.colorsDirtyUntil = time.Now().Add(500 * time.Millisecond)
+			}
+			if fieldIndex >= 4 && fieldIndex <= 7 {
+				if cmd := c.flushPendingGradientCmd(); cmd != nil {
+					return tea.BatchMsg{
+						func() tea.Msg { return typed },
+						cmd,
+					}
+				}
+			}
 			return msg
 		}
 		switch typed := msg.(type) {
@@ -649,6 +686,9 @@ func (c *LightControlComponent) logicalFieldIndexForID(fieldID string) int {
 }
 
 func (c *LightControlComponent) processFieldChanged(fcm FieldChangedMsg, fieldIndex int) tea.Msg {
+	if fieldIndex >= 4 && fieldIndex <= 7 {
+		c.colorsDirtyUntil = time.Now().Add(500 * time.Millisecond)
+	}
 	// Handle reactive color updates
 	c.handleReactiveColorUpdate(fcm, fieldIndex)
 
@@ -656,6 +696,12 @@ func (c *LightControlComponent) processFieldChanged(fcm FieldChangedMsg, fieldIn
 	if fieldIndex == 4 || fieldIndex == 5 || fieldIndex == 6 || fieldIndex == 7 {
 		// Color wheel, RGB, HSL, or HSV -> emit as color or gradient point change
 		if updated, points := c.updateSelectedGradientPoint(c.state.ColorX, c.state.ColorY); updated {
+			if c.state.HasGradient && (c.colorCaptureActive || c.colorsDirty) {
+				c.pendingGradientPoints = make([]GradientPoint, len(points))
+				copy(c.pendingGradientPoints, points)
+				c.pendingGradient = true
+				return nil
+			}
 			fcm.FieldID = c.ID + ":gradient-points"
 			fcm.Value = GradientValue{Points: points}
 		} else {
@@ -684,6 +730,29 @@ func (c *LightControlComponent) processFieldChanged(fcm FieldChangedMsg, fieldIn
 	}
 
 	return fcm
+}
+
+func (c *LightControlComponent) colorUpdatesLocked() bool {
+	if c.colorsDirty {
+		return true
+	}
+	return time.Now().Before(c.colorsDirtyUntil)
+}
+
+func (c *LightControlComponent) flushPendingGradientCmd() tea.Cmd {
+	if !c.pendingGradient || len(c.pendingGradientPoints) == 0 {
+		return nil
+	}
+	points := make([]GradientPoint, len(c.pendingGradientPoints))
+	copy(points, c.pendingGradientPoints)
+	c.pendingGradient = false
+	c.pendingGradientPoints = nil
+	return func() tea.Msg {
+		return FieldChangedMsg{
+			FieldID: c.ID + ":gradient-points",
+			Value:   GradientValue{Points: points},
+		}
+	}
 }
 
 // handleReactiveColorUpdate syncs all color controls when one changes.
@@ -1397,6 +1466,63 @@ func (c *LightControlComponent) GetBridgeID() string {
 // GetState returns the current state.
 func (c *LightControlComponent) GetState() LightControlState {
 	return c.state
+}
+
+// SelectedGradientIndex returns the currently selected gradient point index.
+func (c *LightControlComponent) SelectedGradientIndex() int {
+	return c.gradientEditor.SelectedIndex
+}
+
+// SelectedGradientPoint returns the currently selected gradient point.
+func (c *LightControlComponent) SelectedGradientPoint() (GradientPoint, bool) {
+	idx := c.gradientEditor.SelectedIndex
+	if idx < 0 || idx >= len(c.gradientEditor.Points) {
+		return GradientPoint{}, false
+	}
+	return c.gradientEditor.Points[idx], true
+}
+
+// SetSelectedGradientIndex selects a gradient point and syncs controls.
+func (c *LightControlComponent) SetSelectedGradientIndex(idx int) {
+	if idx < 0 || idx >= len(c.gradientEditor.Points) {
+		return
+	}
+	c.gradientEditor.SelectedIndex = idx
+	pt := c.gradientEditor.Points[idx]
+	c.syncColorControlsToPoint(pt.X, pt.Y)
+}
+
+// SelectNearestGradientPoint picks the closest gradient point to the given color.
+func (c *LightControlComponent) SelectNearestGradientPoint(x, y float64) bool {
+	if len(c.gradientEditor.Points) == 0 {
+		return false
+	}
+	bestIdx := 0
+	bestDist := distSq(c.gradientEditor.Points[0], x, y)
+	for i := 1; i < len(c.gradientEditor.Points); i++ {
+		if d := distSq(c.gradientEditor.Points[i], x, y); d < bestDist {
+			bestDist = d
+			bestIdx = i
+		}
+	}
+	c.SetSelectedGradientIndex(bestIdx)
+	return true
+}
+
+func distSq(p GradientPoint, x, y float64) float64 {
+	dx := p.X - x
+	dy := p.Y - y
+	return dx*dx + dy*dy
+}
+
+// IsCapturing returns true when a child field has mouse capture.
+func (c *LightControlComponent) IsCapturing() bool {
+	return c.captureField >= 0
+}
+
+// ColorUpdatesLocked returns true when recent color edits should not be overwritten.
+func (c *LightControlComponent) ColorUpdatesLocked() bool {
+	return c.colorUpdatesLocked()
 }
 
 // SetColorMode sets whether the light is in color temp mode (mirek valid) or XY color mode.

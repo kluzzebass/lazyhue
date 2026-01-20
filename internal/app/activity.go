@@ -233,7 +233,7 @@ func (a *RequestActivity) Time() time.Time {
 }
 
 func (a *RequestActivity) Render(styles *ui.Styles, width int) string {
-	timeStr := a.timestamp.Format("15:04:05")
+	timeStr := a.timestamp.Format("15:04:05.00")
 	typeStyle := lipgloss.NewStyle().Foreground(styles.Theme.Secondary)
 	typeIndicator := typeStyle.Render("→")
 	bridgeStr := ""
@@ -329,7 +329,7 @@ func (a *ErrorActivity) Time() time.Time {
 }
 
 func (a *ErrorActivity) Render(styles *ui.Styles, width int) string {
-	timeStr := a.timestamp.Format("15:04:05")
+	timeStr := a.timestamp.Format("15:04:05.00")
 	typeStyle := lipgloss.NewStyle().Foreground(styles.Theme.Error)
 	typeIndicator := typeStyle.Render("!")
 	bridgeStr := ""
@@ -380,7 +380,7 @@ func getResourceTypeColor(styles *ui.Styles, resourceType string) color.Color {
 
 // renderEvent is a helper function to render events with consistent formatting.
 func renderEvent(styles *ui.Styles, width int, base baseEvent, name, details, indicatorColor string, brightness float64, isOn bool) string {
-	timeStr := base.timestamp.Format("15:04:05.000000") // Microsecond precision to debug duplicates
+	timeStr := base.timestamp.Format("15:04:05.00")
 	typeStyle := lipgloss.NewStyle().Foreground(styles.Theme.Success)
 	typeIndicator := typeStyle.Render("e")
 

@@ -23,9 +23,9 @@ import (
 func (m Model) Init() tea.Cmd {
 	return tea.Batch(
 		m.loadBridgesFromCredentials(),
-		discoverBridges(),        // Initial discovery
-		m.startStateSaveTicker(),      // Periodic state saves
-		startDiscoveryTicker(),        // Periodic bridge discovery
+		discoverBridges(),              // Initial discovery
+		m.startStateSaveTicker(),       // Periodic state saves
+		startDiscoveryTicker(),         // Periodic bridge discovery
 		startButtonTimeRefreshTicker(), // Periodic button time display refresh
 	)
 }
@@ -1111,12 +1111,24 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m *Model) refreshSelectedLightDetail(light hueclient.LightGet) bool {
-	if m.lightGrid.IsEditing() {
+	if m.isLightControlCapturing(light.Id) || m.isLightControlColorLocked(light.Id) || m.lightGrid.IsEditing() {
 		return m.updateSelectedLightControlsInPlace(light)
 	}
 
+	if m.updateSelectedLightControlsInPlace(light) {
+		m.detailViewport.SetContent(m.lightGrid.View())
+		return true
+	}
+
+	selectedPoint, hasSelectedPoint := m.selectedLightGradientPoint(light.Id)
+	selectedGradientIdx := m.selectedLightGradientIndex(light.Id)
 	focusedID := m.focusedLightGridFieldID()
 	m.buildLightGridRows(light)
+	if hasSelectedPoint {
+		m.restoreLightGradientSelectionByPoint(light.Id, selectedPoint)
+	} else if selectedGradientIdx >= 0 {
+		m.restoreLightGradientSelection(light.Id, selectedGradientIdx)
+	}
 	if focusedID != "" {
 		m.lightGrid.FocusByFieldID(focusedID)
 	}
@@ -1144,6 +1156,72 @@ func (m *Model) updateSelectedLightControlsInPlace(light hueclient.LightGet) boo
 		}
 	}
 	return updated
+}
+
+func (m *Model) isLightControlCapturing(lightID string) bool {
+	for _, child := range m.lightGrid.Children() {
+		if control, ok := child.(*field.LightControlComponent); ok {
+			if control.LightID == lightID && control.IsCapturing() {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func (m *Model) isLightControlColorLocked(lightID string) bool {
+	for _, child := range m.lightGrid.Children() {
+		if control, ok := child.(*field.LightControlComponent); ok {
+			if control.LightID == lightID && control.ColorUpdatesLocked() {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func (m *Model) selectedLightGradientIndex(lightID string) int {
+	for _, child := range m.lightGrid.Children() {
+		if control, ok := child.(*field.LightControlComponent); ok {
+			if control.LightID == lightID {
+				return control.SelectedGradientIndex()
+			}
+		}
+	}
+	return -1
+}
+
+func (m *Model) selectedLightGradientPoint(lightID string) (field.GradientPoint, bool) {
+	for _, child := range m.lightGrid.Children() {
+		if control, ok := child.(*field.LightControlComponent); ok {
+			if control.LightID == lightID {
+				return control.SelectedGradientPoint()
+			}
+		}
+	}
+	return field.GradientPoint{}, false
+}
+
+func (m *Model) restoreLightGradientSelection(lightID string, idx int) {
+	for _, child := range m.lightGrid.Children() {
+		if control, ok := child.(*field.LightControlComponent); ok {
+			if control.LightID == lightID {
+				control.SetSelectedGradientIndex(idx)
+				return
+			}
+		}
+	}
+}
+
+func (m *Model) restoreLightGradientSelectionByPoint(lightID string, point field.GradientPoint) {
+	for _, child := range m.lightGrid.Children() {
+		if control, ok := child.(*field.LightControlComponent); ok {
+			if control.LightID == lightID {
+				control.SelectNearestGradientPoint(point.X, point.Y)
+				return
+			}
+		}
+	}
 }
 
 func (m *Model) focusedLightGridFieldID() string {

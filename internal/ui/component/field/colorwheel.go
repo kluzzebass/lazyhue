@@ -35,6 +35,12 @@ type ColorWheelComponent struct {
 	Dragging     bool
 	DragZoneInfo map[int]*zone.ZoneInfo // Cached zone info for each row during drag
 
+	// Last emitted color value (to avoid duplicate release events)
+	lastSentX     float64
+	lastSentY     float64
+	lastSentValid bool
+	lastSentAt    time.Time
+
 	// Inactive renders the wheel in grayscale (not the active color mode)
 	Inactive bool
 
@@ -134,16 +140,17 @@ func (c *ColorWheelComponent) Update(msg tea.Msg) (component.Component, tea.Cmd)
 		if c.Dragging {
 			c.Dragging = false
 			c.DragZoneInfo = nil
-			// Send both end capture and field changed
-			return c, tea.Batch(
-				func() tea.Msg { return EndCaptureMsg{FieldID: c.ID} },
-				func() tea.Msg {
+			cmds := []tea.Cmd{func() tea.Msg { return EndCaptureMsg{FieldID: c.ID} }}
+			if c.needsFinalChange() {
+				c.markSent()
+				cmds = append(cmds, func() tea.Msg {
 					return FieldChangedMsg{
 						FieldID: c.ID,
 						Value:   ColorValue{X: c.ColorX, Y: c.ColorY},
 					}
-				},
-			)
+				})
+			}
+			return c, tea.Batch(cmds...)
 		}
 	}
 
@@ -198,16 +205,17 @@ func (c *ColorWheelComponent) RouteEvent(msg tea.Msg) (bool, tea.Cmd) {
 		if c.Dragging {
 			c.Dragging = false
 			c.DragZoneInfo = nil
-			// Send both end capture and field changed
-			return true, tea.Batch(
-				func() tea.Msg { return EndCaptureMsg{FieldID: c.ID} },
-				func() tea.Msg {
+			cmds := []tea.Cmd{func() tea.Msg { return EndCaptureMsg{FieldID: c.ID} }}
+			if c.needsFinalChange() {
+				c.markSent()
+				cmds = append(cmds, func() tea.Msg {
 					return FieldChangedMsg{
 						FieldID: c.ID,
 						Value:   ColorValue{X: c.ColorX, Y: c.ColorY},
 					}
-				},
-			)
+				})
+			}
+			return true, tea.Batch(cmds...)
 		}
 	}
 
@@ -318,6 +326,7 @@ func (c *ColorWheelComponent) handleWheelClick(msg tea.MouseClickMsg, row int, z
 	}
 
 	// Start capture, blink timer, and send initial change
+	c.markSent()
 	return c, tea.Batch(
 		func() tea.Msg { return StartCaptureMsg{FieldID: c.ID} },
 		func() tea.Msg {
@@ -343,11 +352,14 @@ func (c *ColorWheelComponent) handleMouseDrag(msg tea.MouseMotionMsg) (component
 			if c.Wheel.HandleClick(row, col) {
 				c.ColorX = c.Wheel.ColorX
 				c.ColorY = c.Wheel.ColorY
-				// Send change on every drag movement
-				return c, func() tea.Msg {
-					return FieldChangedMsg{
-						FieldID: c.ID,
-						Value:   ColorValue{X: c.ColorX, Y: c.ColorY},
+				// Throttle drag updates to avoid flooding the bridge.
+				if c.readyToSend() {
+					c.markSent()
+					return c, func() tea.Msg {
+						return FieldChangedMsg{
+							FieldID: c.ID,
+							Value:   ColorValue{X: c.ColorX, Y: c.ColorY},
+						}
 					}
 				}
 			}
@@ -391,6 +403,28 @@ func (c *ColorWheelComponent) FieldHeight() int {
 // ViewControl renders only the control portion (no label).
 func (c *ColorWheelComponent) ViewControl() string {
 	return c.renderWheelControl() // Always show the wheel
+}
+
+func (c *ColorWheelComponent) markSent() {
+	c.lastSentX = c.ColorX
+	c.lastSentY = c.ColorY
+	c.lastSentValid = true
+	c.lastSentAt = time.Now()
+}
+
+func (c *ColorWheelComponent) needsFinalChange() bool {
+	if !c.lastSentValid {
+		return true
+	}
+	const epsilon = 0.00001
+	return math.Abs(c.ColorX-c.lastSentX) > epsilon || math.Abs(c.ColorY-c.lastSentY) > epsilon
+}
+
+func (c *ColorWheelComponent) readyToSend() bool {
+	if c.lastSentAt.IsZero() {
+		return true
+	}
+	return time.Since(c.lastSentAt) >= 50*time.Millisecond
 }
 
 func (c *ColorWheelComponent) renderWheelControl() string {

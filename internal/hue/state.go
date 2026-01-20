@@ -1334,6 +1334,9 @@ func (s *BridgeState) SetLightColor(id string, x, y float64) {
 		if light.Color != nil {
 			light.Color.Xy.X = float32(x)
 			light.Color.Xy.Y = float32(y)
+			if light.ColorTemperature != nil {
+				light.ColorTemperature.MirekValid = false
+			}
 			s.Lights[id] = light
 		}
 	}
@@ -1347,6 +1350,7 @@ func (s *BridgeState) SetLightColorTemperature(id string, mirek int) {
 	if light, ok := s.Lights[id]; ok {
 		if light.ColorTemperature != nil {
 			light.ColorTemperature.Mirek = mirek
+			light.ColorTemperature.MirekValid = true
 			s.Lights[id] = light
 		}
 	}
@@ -1373,6 +1377,9 @@ func (s *BridgeState) SetLightGradientMode(id string, mode hueclient.LightGetGra
 	if light, ok := s.Lights[id]; ok {
 		if light.Gradient != nil {
 			light.Gradient.Mode = mode
+			if light.ColorTemperature != nil {
+				light.ColorTemperature.MirekValid = false
+			}
 			s.Lights[id] = light
 		}
 	}
@@ -1386,6 +1393,9 @@ func (s *BridgeState) SetLightGradientPoints(id string, points []hueclient.Gradi
 	if light, ok := s.Lights[id]; ok {
 		if light.Gradient != nil {
 			light.Gradient.Points = points
+			if light.ColorTemperature != nil {
+				light.ColorTemperature.MirekValid = false
+			}
 			s.Lights[id] = light
 		}
 	}
