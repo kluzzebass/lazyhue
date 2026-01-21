@@ -60,12 +60,18 @@ Pre-built binaries are available for Linux, macOS, and Windows on the
 | -------- | -------------------- | ------------------------------------- |
 | Linux    | x86_64 (glibc)       | `lazyhue-x86_64-unknown-linux-gnu`    |
 | Linux    | x86_64 (musl/static) | `lazyhue-x86_64-unknown-linux-musl`   |
+| Linux    | i686 (glibc)         | `lazyhue-i686-unknown-linux-gnu`      |
+| Linux    | i686 (musl/static)   | `lazyhue-i686-unknown-linux-musl`     |
 | Linux    | arm64 (glibc)        | `lazyhue-aarch64-unknown-linux-gnu`   |
 | Linux    | arm64 (musl/static)  | `lazyhue-aarch64-unknown-linux-musl`  |
+| Linux    | armv7                | `lazyhue-armv7-unknown-linux-gnueabihf` |
 | Linux    | armv6                | `lazyhue-arm-unknown-linux-gnueabihf` |
 | macOS    | Intel                | `lazyhue-x86_64-apple-darwin`         |
 | macOS    | Apple Silicon        | `lazyhue-aarch64-apple-darwin`        |
 | Windows  | x86_64               | `lazyhue-x86_64-pc-windows-gnu.exe`   |
+| Windows  | arm64                | `lazyhue-aarch64-pc-windows-gnu.exe`  |
+| FreeBSD  | x86_64               | `lazyhue-x86_64-unknown-freebsd`      |
+| FreeBSD  | arm64                | `lazyhue-aarch64-unknown-freebsd`     |
 
 ### From Source
 

@@ -38,11 +38,14 @@ jobs:
           # Linux glibc builds
           GOOS=linux GOARCH=amd64 go build -ldflags "$LDFLAGS" -o dist/lazyhue-x86_64-unknown-linux-gnu ./cmd/lazyhue
           GOOS=linux GOARCH=arm64 go build -ldflags "$LDFLAGS" -o dist/lazyhue-aarch64-unknown-linux-gnu ./cmd/lazyhue
+          GOOS=linux GOARCH=386 go build -ldflags "$LDFLAGS" -o dist/lazyhue-i686-unknown-linux-gnu ./cmd/lazyhue
+          GOOS=linux GOARCH=arm GOARM=7 go build -ldflags "$LDFLAGS" -o dist/lazyhue-armv7-unknown-linux-gnueabihf ./cmd/lazyhue
           GOOS=linux GOARCH=arm GOARM=6 go build -ldflags "$LDFLAGS" -o dist/lazyhue-arm-unknown-linux-gnueabihf ./cmd/lazyhue
 
           # Linux musl builds (static)
           CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags "$LDFLAGS" -o dist/lazyhue-x86_64-unknown-linux-musl ./cmd/lazyhue
           CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -ldflags "$LDFLAGS" -o dist/lazyhue-aarch64-unknown-linux-musl ./cmd/lazyhue
+          CGO_ENABLED=0 GOOS=linux GOARCH=386 go build -ldflags "$LDFLAGS" -o dist/lazyhue-i686-unknown-linux-musl ./cmd/lazyhue
 
           # macOS
           GOOS=darwin GOARCH=amd64 go build -ldflags "$LDFLAGS" -o dist/lazyhue-x86_64-apple-darwin ./cmd/lazyhue
@@ -50,6 +53,11 @@ jobs:
 
           # Windows
           GOOS=windows GOARCH=amd64 go build -ldflags "$LDFLAGS" -o dist/lazyhue-x86_64-pc-windows-gnu.exe ./cmd/lazyhue
+          GOOS=windows GOARCH=arm64 go build -ldflags "$LDFLAGS" -o dist/lazyhue-aarch64-pc-windows-gnu.exe ./cmd/lazyhue
+
+          # FreeBSD
+          GOOS=freebsd GOARCH=amd64 go build -ldflags "$LDFLAGS" -o dist/lazyhue-x86_64-unknown-freebsd ./cmd/lazyhue
+          GOOS=freebsd GOARCH=arm64 go build -ldflags "$LDFLAGS" -o dist/lazyhue-aarch64-unknown-freebsd ./cmd/lazyhue
 
           # Create checksums
           cd dist && sha256sum * > checksums.txt
@@ -60,12 +68,18 @@ jobs:
           files: |
             dist/lazyhue-x86_64-unknown-linux-gnu
             dist/lazyhue-aarch64-unknown-linux-gnu
+            dist/lazyhue-i686-unknown-linux-gnu
+            dist/lazyhue-armv7-unknown-linux-gnueabihf
             dist/lazyhue-arm-unknown-linux-gnueabihf
             dist/lazyhue-x86_64-unknown-linux-musl
             dist/lazyhue-aarch64-unknown-linux-musl
+            dist/lazyhue-i686-unknown-linux-musl
             dist/lazyhue-x86_64-apple-darwin
             dist/lazyhue-aarch64-apple-darwin
             dist/lazyhue-x86_64-pc-windows-gnu.exe
+            dist/lazyhue-aarch64-pc-windows-gnu.exe
+            dist/lazyhue-x86_64-unknown-freebsd
+            dist/lazyhue-aarch64-unknown-freebsd
             dist/checksums.txt
           generate_release_notes: true
 
