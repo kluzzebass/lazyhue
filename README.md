@@ -44,7 +44,7 @@ lazygit/lazydocker philosophy of keyboard-driven navigation with mouse support.
 
 ## Installation
 
-### Homebrew (macOS)
+### Homebrew (macOS / Linux)
 
 ```bash
 brew tap kluzzebass/tap
