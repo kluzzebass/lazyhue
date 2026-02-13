@@ -49,3 +49,12 @@ deps:
 
 # Check for issues (fmt, vet, test)
 check: fmt vet test
+
+# Bump version, tag, and push (triggers GitHub Actions release). Usage: just release major|minor|patch
+release bump:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    next=$(svu {{ bump }})
+    echo "Releasing ${next}"
+    git tag -a "${next}" -m "Release ${next}"
+    git push origin "${next}"
